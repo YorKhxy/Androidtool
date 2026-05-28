@@ -322,7 +322,17 @@ describe('project smoke checks', () => {
     const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
     const typeSource = fs.readFileSync(path.join(root, 'src/shared/types/index.ts'), 'utf-8');
 
-    expect(managerSource).toContain("'exec-out', 'screencap', '-p'");
+    expect(managerSource).toContain('AdbScreenshotCapture');
+    expect(managerSource).toContain('this.screenshotCapture.capture(deviceId)');
+    expect(managerSource).not.toContain("'exec-out', 'screencap', '-p'");
+    expect(fs.existsSync(path.join(root, 'src/main/adb/screenshotCapture.ts'))).toBe(true);
+    const screenshotSource = fs.readFileSync(path.join(root, 'src/main/adb/screenshotCapture.ts'), 'utf-8');
+    expect(screenshotSource).toContain("'adb-raw-framebuffer'");
+    expect(screenshotSource).toContain("'adb-png-screencap'");
+    expect(screenshotSource).toContain("['-s', deviceId, 'exec-out', 'screencap']");
+    expect(screenshotSource).toContain("['-s', deviceId, 'exec-out', 'screencap', '-p']");
+    expect(screenshotSource).toContain('decodeRawScreencap');
+    expect(screenshotSource).toContain('convertRawPixelsToElectronBitmap');
     expect(managerSource).toContain('capturePerformanceSnapshot');
     expect(managerSource).toContain('currentMetrics?: PerformanceMetrics');
     expect(managerSource.indexOf('const screenState = await this.getScreenPowerState(deviceId)')).toBeLessThan(
@@ -343,6 +353,7 @@ describe('project smoke checks', () => {
     expect(snapshotStoreSource).toContain('resolveRuntimeAppRoot');
     expect(snapshotStoreSource).toContain('path.dirname(process.execPath)');
     expect(snapshotStoreSource).toContain('buildAnnotatedSnapshotImage');
+    expect(snapshotStoreSource).toContain('nativeImage.createFromBitmap');
     expect(snapshotStoreSource).toContain('nativeImage.createFromBuffer');
     expect(snapshotStoreSource).not.toContain('SCREEN OFF - SCREENSHOT SKIPPED');
     expect(snapshotStoreSource).not.toContain('NO WAKEUP CAPTURE');

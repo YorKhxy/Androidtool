@@ -258,6 +258,7 @@ interface PerformanceSnapshot {
 ```
 
 - 快照回看：用户可在性能面板单击快照缩略图打开大图预览，并可通过点击遮罩、关闭按钮或 Esc 退出预览。
+- 快照采集源：性能快照优先使用 raw framebuffer 快路径以避开设备端 PNG 压缩耗时；当设备不支持 raw 输出或解析失败时，自动回退到 PNG screencap，后续实时流 / SDK 截图通道通过同一 provider 接口接入。
 
 ### 5.5 日志条目
 
