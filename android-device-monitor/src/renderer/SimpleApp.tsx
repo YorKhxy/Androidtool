@@ -1020,7 +1020,7 @@ function SimpleApp() {
       : 0;
 
     return (
-      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', minHeight: '420px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', minHeight: '420px', flex: 1, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
           <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: 0 }}>
             {selectedDevice ? `目标设备：${getDeviceDisplayName(selectedDevice)}` : '未选择设备'}
@@ -1647,10 +1647,10 @@ function SimpleApp() {
 
               <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
                 {activeTab === 'devices' && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(420px, 600px) minmax(420px, 1fr)', gap: '20px', alignItems: 'start' }}>
-                    <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(420px, 600px) minmax(420px, 1fr)', gap: '20px', alignItems: 'stretch' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <h2 style={{ fontSize: '20px', fontWeight: '600', margin: '0 0 16px 0' }}>{'\u8bbe\u5907\u8be6\u60c5'}</h2>
-                    <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px' }}>
+                    <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', flex: 1, boxSizing: 'border-box' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
                         <div>
                           <h3 style={{ fontSize: '16px', fontWeight: '600', margin: '0 0 4px 0' }}>{getDeviceDisplayName(selectedDevice)}</h3>
@@ -1734,7 +1734,7 @@ function SimpleApp() {
                       </div>
                     </div>
                     </div>
-                    <div style={{ marginTop: '40px' }}>
+                    <div style={{ marginTop: '40px', display: 'flex' }}>
                       {renderApkInstallPanel()}
                     </div>
                   </div>
