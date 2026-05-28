@@ -191,7 +191,8 @@ Phase 1 基础框架
 - [x] Pico 性能页同时补充 Android 通用 CPU 占用率与内存占用，避免把 `FrmCpu` 误当 CPU 使用率
 - [x] Android 性能页隐藏无可靠来源的 GPU 占位卡片
 - [x] 手动性能快照：保存截图、时间、前台应用、Activity 与当时性能指标
-- [x] Pico 快照截图改为 `exec-out screencap -p`，不再触发系统双目截图按键
+- [x] Pico 快照截图不再触发系统双目截图按键，改为快照 provider 直接读取当前画面
+- [x] 性能快照采集拆为 provider 链路，优先 raw framebuffer 快路径，失败时回退 PNG screencap；后续实时流 / SDK 截图通道可接入同一接口
 - [x] Pico 快照缩略图裁切为单眼显示
 - [x] 本地 PNG 快照文件写入性能指标条；Pico 本地快照同步裁切为单眼并写入指标
 - [x] 快照落盘目录跟随运行目录，发布包可在应用目录下保存 `performance-snapshots`
@@ -210,7 +211,8 @@ Phase 1 基础框架
 | 文件路径 | 说明 |
 |----------|------|
 | `android-device-monitor/src/main/adb/ADBManager.ts` | 性能指标、FPS、截图、进程、Activity 栈采集 |
-| `android-device-monitor/src/main/adb/runtimeInspector.ts` | Android / Pico 性能 Provider 分流、CPU / 内存 / FPS / 截图采集 |
+| `android-device-monitor/src/main/adb/runtimeInspector.ts` | Android / Pico 性能 Provider 分流、CPU / 内存 / FPS / 快照触发 |
+| `android-device-monitor/src/main/adb/screenshotCapture.ts` | 性能快照截图 provider、raw framebuffer 解析与 PNG screencap 回退 |
 | `android-device-monitor/src/main/adb/picoMetrics.ts` | Pico 官方 `PxrMetric` 读取、解析与应用支持检测 |
 | `android-device-monitor/src/main/performanceSnapshots.ts` | 性能快照落盘、本地 PNG 指标烙印、Pico 单眼裁切 |
 | `android-device-monitor/src/main/index.ts` | 性能、截图、进程、Activity IPC |
@@ -425,7 +427,7 @@ android-device-monitor/
 |------|----------|
 | 性能指标 | `adb shell dumpsys meminfo` / `adb shell top -n 1` / `adb shell dumpsys gfxinfo` |
 | Pico 官方指标 | `adb shell logcat -d -v time -s PxrMetric` |
-| 快照截图 | `adb exec-out screencap -p` |
+| 快照截图 | 快照 provider 链路：raw framebuffer 优先，PNG screencap 回退 |
 | 进程列表 | `adb shell ps` / `adb shell ps -A` |
 | Activity 栈 | `adb shell dumpsys activity activities` |
 
@@ -458,7 +460,7 @@ android-device-monitor/
 | 渲染层单文件过大 | `SimpleApp.tsx` 承担过多职责 | 按设备、日志、性能、网络分拆组件与 hooks |
 | 采集指标语义不稳定 | 不同 Android 机型命令输出差异大 | 为 CPU / 内存 / 进程字段补设备实测样本 |
 | Pico 官方指标依赖系统日志 | 当前通过 `PxrMetric` logcat 读取，受固件和前台应用影响 | 保留 Android 通用回退采样，继续评估 XR Profiling Toolkit 官方兼容层 |
-| Pico 截图源为双目画面 | `screencap -p` 在 Pico 上可能返回左右眼并排图 | UI 与本地 PNG 对 Pico 快照裁切为单眼展示 |
+| Pico 截图源为双目画面 | Pico 当前画面源可能返回左右眼并排图 | UI 与本地 PNG 对 Pico 快照裁切为单眼展示 |
 | 网络抓包门槛高 | 依赖 `tcpdump`、设备权限和命令可用性 | 补抓包前检查与降级提示 |
 | 测试深度不足 | 当前主要是 smoke test | 补业务级单测和关键链路回归测试 |
 

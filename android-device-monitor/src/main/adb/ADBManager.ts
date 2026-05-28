@@ -33,6 +33,8 @@ type ParsedHttpMessage = {
   raw: string;
 };
 
+type DeviceSummary = Pick<DeviceInfo, 'id' | 'connectionType' | 'status'>;
+
 type ParsedHttpRequestMessage = ParsedHttpMessage & {
   method: string;
   path: string;
@@ -84,69 +86,49 @@ export class ADBManager extends EventEmitter {
       const { stdout } = await this.execAdb(['devices', '-l']);
       logger.log('ADBManager: adb devices output:', stdout);
       
-      const lines = stdout.trim().split('\n');
-      const devices: DeviceInfo[] = [];
+      const summaries = this.parseDeviceSummaries(stdout);
       const nextCache = new Map<string, DeviceInfo>();
       
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        
-        const parts = line.split(/\s+/);
-        const id = parts[0];
-        
-        if (!id || id === 'List') continue;
-        
-        const status = parts[1] || '';
-        if (status !== 'device' && status !== 'offline' && status !== 'unauthorized') {
-          logger.log('ADBManager: skipping unknown status:', id, status);
-          continue;
-        }
-        
-        if (id === 'adb' || id.startsWith('emulator-') || id === 'host') {
-          logger.log('ADBManager: skipping special device:', id);
-          continue;
-        }
-        
+      const devices = await Promise.all(summaries.map(async (summary) => {
         let device: DeviceInfo = {
-          id,
+          id: summary.id,
           name: 'Unknown',
           model: 'Unknown',
           manufacturer: 'Unknown',
           androidVersion: 'Unknown',
           apiLevel: 0,
-          connectionType: id.includes(':') ? 'wifi' : 'usb',
-          status: status === 'device' ? 'connected' : status
+          connectionType: summary.connectionType,
+          status: summary.status,
         };
         
         try {
-          const props = await this.getDeviceProperties(id);
+          const props = await this.getDeviceProperties(summary.id);
           device.name = props['ro.product.name'] || device.name;
           device.model = props['ro.product.model'] || device.model;
           device.manufacturer = props['ro.product.manufacturer'] || device.manufacturer;
           device.androidVersion = props['ro.build.version.release'] || device.androidVersion;
           device.apiLevel = parseInt(props['ro.build.version.sdk'] || '0');
         } catch (e) {
-          logger.warn('Failed to get props for', id, e);
+          logger.warn('Failed to get props for', summary.id, e);
         }
 
         if (device.status === 'connected') {
           try {
-            device.batteryLevel = await this.getBatteryLevel(id);
+            device.batteryLevel = await this.getBatteryLevel(summary.id);
           } catch (e) {
-            logger.warn('Failed to get battery level for', id, e);
+            logger.warn('Failed to get battery level for', summary.id, e);
           }
         }
 
         if (device.connectionType === 'wifi' && device.status === 'connected') {
-          const latency = await this.measureWifiLatency(id);
+          const latency = await this.measureWifiLatency(summary.id);
           device.latencyMs = latency.latencyMs;
           device.latencyStatus = latency.status;
         }
         
-        nextCache.set(id, device);
-        devices.push(device);
-      }
+        nextCache.set(summary.id, device);
+        return device;
+      }));
 
       this.deviceInfoCache = nextCache;
       
@@ -156,6 +138,53 @@ export class ADBManager extends EventEmitter {
       logger.error('ADBManager: Failed to get devices:', error);
       throw this.wrapOperationError('Failed to get device list', error);
     }
+  }
+
+  private parseDeviceSummaries(stdout: string): DeviceSummary[] {
+    const lines = stdout.trim().split('\n');
+    const summaries: DeviceSummary[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const parts = line.split(/\s+/);
+      const id = parts[0];
+
+      if (!id || id === 'List') continue;
+
+      const rawStatus = parts[1] || '';
+      if (rawStatus !== 'device' && rawStatus !== 'offline' && rawStatus !== 'unauthorized') {
+        logger.log('ADBManager: skipping unknown status:', id, rawStatus);
+        continue;
+      }
+
+      if (id === 'adb' || id.startsWith('emulator-') || id === 'host') {
+        logger.log('ADBManager: skipping special device:', id);
+        continue;
+      }
+
+      summaries.push({
+        id,
+        connectionType: id.includes(':') ? 'wifi' : 'usb',
+        status: rawStatus === 'device' ? 'connected' : rawStatus,
+      });
+    }
+
+    return summaries;
+  }
+
+  private createDeviceSummarySnapshot(device: DeviceSummary): string {
+    return [
+      device.id,
+      device.status,
+      device.connectionType,
+    ].join('|');
+  }
+
+  private async getDeviceSummaries(): Promise<DeviceSummary[]> {
+    const { stdout } = await this.execAdb(['devices', '-l']);
+    return this.parseDeviceSummaries(stdout);
   }
 
   async connectUSB(): Promise<DeviceInfo[]> {
@@ -1351,8 +1380,8 @@ export class ADBManager extends EventEmitter {
     this.isDeviceMonitorPolling = true;
     try {
       await this.getAdbStatus(true);
-      const devices = await this.getDevices();
-      const nextSnapshot = new Map(devices.map((device) => [device.id, this.createDeviceSnapshot(device)]));
+      const deviceSummaries = await this.getDeviceSummaries();
+      const nextSnapshot = new Map(deviceSummaries.map((device) => [device.id, this.createDeviceSummarySnapshot(device)]));
       const hasChanged =
         nextSnapshot.size !== this.lastDeviceSnapshot.size ||
         Array.from(nextSnapshot.entries()).some(([deviceId, snapshot]) => this.lastDeviceSnapshot.get(deviceId) !== snapshot);
@@ -1360,9 +1389,15 @@ export class ADBManager extends EventEmitter {
       if (hasChanged) {
         const previousIds = new Set(this.lastDeviceSnapshot.keys());
         const nextIds = new Set(nextSnapshot.keys());
+        const devices = await this.getDevices();
+        const devicesById = new Map(devices.map((device) => [device.id, device]));
 
-        for (const device of devices) {
-          if (!previousIds.has(device.id)) {
+        for (const summary of deviceSummaries) {
+          if (!previousIds.has(summary.id)) {
+            const device = devicesById.get(summary.id);
+            if (!device) {
+              continue;
+            }
             this.emitDeviceConnected(device);
           }
         }

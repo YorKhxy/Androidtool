@@ -2,6 +2,7 @@ import type { ExecFileOptions } from 'child_process';
 import type { ActivityStackEntry, PerformanceMetrics, ProcessInfo } from '../../shared/types';
 import { logger } from '../logger';
 import { PicoAppSupportResult, PicoMetricsReader } from './picoMetrics';
+import { AdbScreenshotCapture, CapturedScreenshot } from './screenshotCapture';
 
 type ExecAdbText = (args: string[], options?: ExecFileOptions) => Promise<{ stdout: string; stderr: string }>;
 type ExecAdbBuffer = (args: string[], options?: ExecFileOptions) => Promise<{ stdout: Buffer; stderr: Buffer }>;
@@ -21,7 +22,7 @@ type DeviceFingerprint = {
 export type CapturedPerformanceSnapshot = {
   capturedAt: Date;
   metrics: PerformanceMetrics;
-  screenshot: Buffer;
+  screenshot: CapturedScreenshot;
 };
 
 type PerformanceOptions = {
@@ -31,12 +32,14 @@ type PerformanceOptions = {
 
 export class AdbRuntimeInspector {
   private readonly picoMetricsReader: PicoMetricsReader;
+  private readonly screenshotCapture: AdbScreenshotCapture;
 
   constructor(
     private readonly execAdb: ExecAdbText,
     private readonly execAdbBuffer: ExecAdbBuffer
   ) {
     this.picoMetricsReader = new PicoMetricsReader(this.execAdb);
+    this.screenshotCapture = new AdbScreenshotCapture(this.execAdbBuffer);
   }
 
   async getPerformanceMetrics(deviceId: string, options: PerformanceOptions = {}): Promise<PerformanceMetrics> {
@@ -85,7 +88,6 @@ export class AdbRuntimeInspector {
         cpuUsage: 0,
         memoryUsage: 0,
         fps: 0,
-        networkSpeed: 0,
       };
     }
   }
@@ -113,7 +115,6 @@ export class AdbRuntimeInspector {
         cpuUsage,
         memoryUsage,
         fps: this.parseGfxInfo(gfxInfo.stdout),
-        networkSpeed: 0,
         packageName: foregroundApp.packageName,
         activityName: foregroundApp.activityName,
         androidMetrics: {
@@ -132,7 +133,6 @@ export class AdbRuntimeInspector {
         cpuUsage: 0,
         memoryUsage: 0,
         fps: 0,
-        networkSpeed: 0,
       };
     }
   }
@@ -218,7 +218,7 @@ export class AdbRuntimeInspector {
     }
 
     const metrics = options.currentMetrics || await this.getPerformanceMetrics(deviceId, options);
-    const screenshot = await this.captureScreenshot(deviceId, options);
+    const screenshot = await this.screenshotCapture.capture(deviceId);
 
     return {
       capturedAt: new Date(),
@@ -263,10 +263,6 @@ export class AdbRuntimeInspector {
     return this.parseActivityStack(stdout, packageName);
   }
 
-  private async captureScreenshot(deviceId: string, options: PerformanceOptions = {}): Promise<Buffer> {
-    return this.captureRawScreenshot(deviceId);
-  }
-
   private async getScreenPowerState(deviceId: string): Promise<{ isOn: boolean; raw?: string }> {
     try {
       const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'power'], {
@@ -308,23 +304,6 @@ export class AdbRuntimeInspector {
     }
   }
 
-  private async captureRawScreenshot(deviceId: string): Promise<Buffer> {
-    const { stdout } = await this.execAdbBuffer(['-s', deviceId, 'exec-out', 'screencap', '-p'], {
-      maxBuffer: 1024 * 1024 * 16,
-    });
-
-    if (this.isPngBuffer(stdout)) {
-      return stdout;
-    }
-
-    const normalized = Buffer.from(stdout.toString('binary').replace(/\r\n/g, '\n'), 'binary');
-    if (this.isPngBuffer(normalized)) {
-      return normalized;
-    }
-
-    throw new Error('设备截图失败，未返回有效 PNG 数据。');
-  }
-
   private async getDeviceFingerprint(deviceId: string): Promise<DeviceFingerprint> {
     try {
       const [manufacturer, brand, model, device] = await Promise.all([
@@ -356,16 +335,6 @@ export class AdbRuntimeInspector {
       .toLowerCase();
 
     return identity.includes('pico');
-  }
-
-  private isPngBuffer(buffer: Buffer): boolean {
-    return (
-      buffer.length > 8 &&
-      buffer[0] === 0x89 &&
-      buffer[1] === 0x50 &&
-      buffer[2] === 0x4e &&
-      buffer[3] === 0x47
-    );
   }
 
   private parseGfxInfo(output: string): number {

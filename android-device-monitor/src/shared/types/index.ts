@@ -101,7 +101,6 @@ export interface PerformanceMetrics {
   cpuUsage: number;
   memoryUsage: number;
   fps: number;
-  networkSpeed: number;
   packageName?: string;
   activityName?: string;
   androidMetrics?: AndroidPerformancePayload;
@@ -122,6 +121,21 @@ export interface PerformanceSnapshot {
   activityName?: string;
   trigger: 'manual' | 'fps_drop' | 'threshold';
   note?: string;
+}
+
+export interface PerformanceSample {
+  id: string;
+  deviceId: string;
+  capturedAt: Date;
+  metrics: PerformanceMetrics;
+}
+
+export interface PerformanceSessionExportPayload {
+  device: DeviceInfo;
+  startedAt: Date;
+  endedAt?: Date;
+  samples: PerformanceSample[];
+  snapshots: PerformanceSnapshot[];
 }
 
 export interface AdbStatus {
@@ -152,6 +166,7 @@ export type IpcChannel =
   | 'adb:stop-logcat'
   | 'adb:get-performance'
   | 'adb:capture-performance-snapshot'
+  | 'performance:export-session'
   | 'adb:get-processes'
   | 'adb:get-activity-stack'
   | 'adb:get-network-requests'

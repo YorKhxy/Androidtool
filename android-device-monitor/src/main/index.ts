@@ -2,9 +2,10 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
-import { LogEntry, PerformanceMetrics } from '../shared/types';
+import { LogEntry, PerformanceMetrics, PerformanceSessionExportPayload } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
+import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 
 let mainWindow: BrowserWindow | null = null;
 let adbManager: ADBManager;
@@ -75,6 +76,20 @@ const toIpcErrorResponse = (error: unknown, fallbackMessage: string) => {
     success: false,
     error: error instanceof Error ? error.message : fallbackMessage,
   };
+};
+
+const readSnapshotImageAsDataUrl = async (screenshotPath: string) => {
+  const appRoot = resolveRuntimeAppRoot(app);
+  const snapshotRoot = path.resolve(appRoot, 'performance-snapshots');
+  const resolvedPath = path.resolve(screenshotPath);
+  const relativePath = path.relative(snapshotRoot, resolvedPath);
+
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error('快照图片路径不在允许目录内');
+  }
+
+  const image = await fs.readFile(resolvedPath);
+  return `data:image/png;base64,${image.toString('base64')}`;
 };
 
 const createWindow = () => {
@@ -200,6 +215,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.READ_SNAPSHOT_IMAGE, async (_event, screenshotPath: string) => {
+    try {
+      const dataUrl = await readSnapshotImageAsDataUrl(screenshotPath);
+      return { success: true, data: dataUrl };
+    } catch (error) {
+      return toIpcErrorResponse(error, '读取快照图片失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.GET_PROCESSES, async (_event, deviceId: string) => {
     try {
       const processes = await adbManager.getProcesses(deviceId);
@@ -291,6 +315,25 @@ const setupIpcHandlers = () => {
       return { success: true, data: result.filePath };
     } catch (error) {
       return toIpcErrorResponse(error, '导出日志失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EXPORT_PERFORMANCE_SESSION, async (_event, payload: PerformanceSessionExportPayload) => {
+    try {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: '导出性能采集报告',
+        defaultPath: `performance-session-${Date.now()}.xls`,
+        filters: [{ name: 'Excel 文件', extensions: ['xls'] }]
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: '取消导出' };
+      }
+
+      await fs.writeFile(result.filePath, buildPerformanceSessionWorkbook(payload), 'utf-8');
+      return { success: true, data: result.filePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '导出性能采集报告失败');
     }
   });
 

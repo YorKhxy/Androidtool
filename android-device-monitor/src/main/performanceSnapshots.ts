@@ -3,6 +3,7 @@ import * as path from 'path';
 import { nativeImage } from 'electron';
 import type { PerformanceSnapshot } from '../shared/types';
 import type { CapturedPerformanceSnapshot } from './adb/runtimeInspector';
+import type { CapturedScreenshot } from './adb/screenshotCapture';
 
 type AppPathResolver = {
   getAppPath(): string;
@@ -123,6 +124,14 @@ const formatMetricValue = (value?: number, unit = '') => {
 
 const formatMemoryMb = (memoryKb: number) => `${(memoryKb / 1024).toFixed(1)}MB`;
 
+const createNativeImageFromScreenshot = (screenshot: CapturedScreenshot) => {
+  if (screenshot.kind === 'bitmap') {
+    return nativeImage.createFromBitmap(screenshot.bitmap, { width: screenshot.width, height: screenshot.height });
+  }
+
+  return nativeImage.createFromBuffer(screenshot.buffer);
+};
+
 const buildSnapshotMetricLines = (input: PersistPerformanceSnapshotInput): string[] => {
   const metrics = input.snapshot.metrics;
   const pico = metrics.picoMetrics;
@@ -141,13 +150,13 @@ const buildSnapshotMetricLines = (input: PersistPerformanceSnapshotInput): strin
   return [
     `ANDROID ${capturedAt}`,
     `FPS ${formatMetricValue(metrics.fps)}  CPU ${formatMetricValue(metrics.cpuUsage, '%')}`,
-    `MEM ${formatMemoryMb(metrics.memoryUsage)}  NET ${formatMetricValue(metrics.networkSpeed)}`,
+    `MEM ${formatMemoryMb(metrics.memoryUsage)}`,
     `APP ${metrics.packageName || '--'}`,
   ];
 };
 
 function buildAnnotatedSnapshotImage(input: PersistPerformanceSnapshotInput): Buffer {
-  const baseImage = nativeImage.createFromBuffer(input.snapshot.screenshot);
+  const baseImage = createNativeImageFromScreenshot(input.snapshot.screenshot);
   const croppedImage = input.snapshot.metrics.provider === 'pico'
     ? baseImage.crop({ x: 0, y: 0, width: Math.max(1, Math.floor(baseImage.getSize().width / 2)), height: baseImage.getSize().height })
     : baseImage;

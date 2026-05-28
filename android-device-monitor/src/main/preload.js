@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopLogcat: (deviceId) => ipcRenderer.invoke('adb:stop-logcat', deviceId),
   getPerformance: (deviceId) => ipcRenderer.invoke('adb:get-performance', deviceId),
   capturePerformanceSnapshot: (deviceId, currentMetrics) => ipcRenderer.invoke('adb:capture-performance-snapshot', deviceId, currentMetrics),
+  readSnapshotImage: (screenshotPath) => ipcRenderer.invoke('performance:read-snapshot-image', screenshotPath),
   getProcesses: (deviceId) => ipcRenderer.invoke('adb:get-processes', deviceId),
   connectUSB: () => ipcRenderer.invoke('adb:connect-usb'),
   getActivityStack: (deviceId, packageName) => ipcRenderer.invoke('adb:get-activity-stack', deviceId, packageName),
@@ -18,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sleepDevice: (deviceId) => ipcRenderer.invoke('adb:sleep-device', deviceId),
   rebootDevice: (deviceId) => ipcRenderer.invoke('adb:reboot-device', deviceId),
   exportLogs: (logs) => ipcRenderer.invoke('log:export', logs),
+  exportPerformanceSession: (payload) => ipcRenderer.invoke('performance:export-session', payload),
   onLogEntry: (callback) => {
     const listener = (_, entry) => callback(entry);
     ipcRenderer.on('log:entry', listener);

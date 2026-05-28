@@ -6,6 +6,7 @@ import type {
   LogEntry,
   NetworkRequest,
   PerformanceMetrics,
+  PerformanceSessionExportPayload,
   PerformanceSnapshot,
   ProcessInfo,
 } from '../../shared/types';
@@ -33,6 +34,7 @@ export interface ElectronAPI {
   stopLogcat: (deviceId: string) => Promise<ElectronResult<undefined>>;
   getPerformance: (deviceId: string) => Promise<ElectronResult<PerformanceMetrics>>;
   capturePerformanceSnapshot: (deviceId: string, currentMetrics?: PerformanceMetrics) => Promise<ElectronResult<PerformanceSnapshot>>;
+  readSnapshotImage: (screenshotPath: string) => Promise<ElectronResult<string>>;
   getProcesses: (deviceId: string) => Promise<ElectronResult<ProcessInfo[]>>;
   connectUSB: () => Promise<ElectronResult<DeviceInfo[]>>;
   getActivityStack: (deviceId: string, packageName?: string) => Promise<ElectronResult<ActivityStackEntry[]>>;
@@ -42,6 +44,7 @@ export interface ElectronAPI {
   sleepDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
   rebootDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
   exportLogs: (logs: LogEntry[]) => Promise<ElectronResult<string>>;
+  exportPerformanceSession: (payload: PerformanceSessionExportPayload) => Promise<ElectronResult<string>>;
   onLogEntry: (callback: (entry: LogEntry) => void) => () => void;
   onLogBatch: (callback: (entries: LogEntry[]) => void) => () => void;
   onAdbStatusChanged: (callback: (status: AdbStatus) => void) => () => void;
