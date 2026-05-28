@@ -9,6 +9,7 @@ export interface DeviceInfo {
   status: 'connected' | 'disconnected' | 'offline' | 'unauthorized';
   latencyMs?: number;
   latencyStatus?: 'ok' | 'timeout' | 'unknown';
+  batteryLevel?: number;
 }
 
 export interface ProcessInfo {
@@ -50,6 +51,11 @@ export interface NetworkRequest {
   rawRequest?: string;
   rawResponse?: string;
   duration: number;
+}
+
+export interface ApkInstallResult {
+  apkPath: string;
+  output: string;
 }
 
 export interface ActivityStackEntry {
@@ -149,6 +155,10 @@ export type IpcChannel =
   | 'adb:get-processes'
   | 'adb:get-activity-stack'
   | 'adb:get-network-requests'
+  | 'adb:select-apk-files'
+  | 'adb:install-apk'
+  | 'adb:sleep-device'
+  | 'adb:reboot-device'
   | 'adb:status-changed'
   | 'device:connected'
   | 'device:disconnected'
