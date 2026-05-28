@@ -21,8 +21,7 @@ type DeviceFingerprint = {
 export type CapturedPerformanceSnapshot = {
   capturedAt: Date;
   metrics: PerformanceMetrics;
-  screenshot?: Buffer;
-  screenshotSkippedReason?: string;
+  screenshot: Buffer;
 };
 
 type PerformanceOptions = {
@@ -213,15 +212,18 @@ export class AdbRuntimeInspector {
   }
 
   async capturePerformanceSnapshot(deviceId: string, options: PerformanceOptions = {}): Promise<CapturedPerformanceSnapshot> {
-    const metrics = options.currentMetrics || await this.getPerformanceMetrics(deviceId, options);
     const screenState = await this.getScreenPowerState(deviceId);
-    const screenshot = screenState.isOn ? await this.captureScreenshot(deviceId, options) : undefined;
+    if (!screenState.isOn) {
+      throw new Error('设备当前息屏，请先唤醒设备后再抓取性能快照。');
+    }
+
+    const metrics = options.currentMetrics || await this.getPerformanceMetrics(deviceId, options);
+    const screenshot = await this.captureScreenshot(deviceId, options);
 
     return {
       capturedAt: new Date(),
       metrics,
       screenshot,
-      screenshotSkippedReason: screenState.isOn ? undefined : '设备息屏，已跳过截图以避免唤醒设备。',
     };
   }
 

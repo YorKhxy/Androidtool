@@ -112,7 +112,6 @@ export interface PerformanceSnapshot {
   capturedAt: Date;
   metrics: PerformanceMetrics;
   screenshotPath?: string;
-  screenshotSkippedReason?: string;
   packageName?: string;
   activityName?: string;
   trigger: 'manual' | 'fps_drop' | 'threshold';

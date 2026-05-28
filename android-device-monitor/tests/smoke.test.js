@@ -50,7 +50,9 @@ describe('project smoke checks', () => {
     const source = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
     expect(source).toContain('MAX_PENDING_LOG_BUFFER');
     expect(source).toContain('performanceRequestInFlightRef');
-    expect(source).toContain('if (performanceRequestInFlightRef.current) return');
+    expect(source).toContain('performanceRequestInFlightRef.current.has(deviceId)');
+    expect(source).toContain('performanceEnabledDeviceIds.has(selectedDevice.id)');
+    expect(source).toContain('togglePerformanceMonitoring');
   });
 
   test('renderer keeps logcat data in chronological bounded storage', () => {
@@ -269,6 +271,10 @@ describe('project smoke checks', () => {
     expect(rendererSource).not.toContain('前台应用已检测到 XR Profiling Toolkit');
     expect(rendererSource).not.toContain('前台应用未检测到 XR Profiling Toolkit');
     expect(rendererSource).not.toContain('picoSupportMessage');
+    expect(rendererSource).toContain('isLikelyPicoDevice');
+    expect(rendererSource).toContain("identity.includes('a9210')");
+    expect(rendererSource).toContain("identity.includes('sparrow')");
+    expect(rendererSource).toContain("performance?.provider === 'pico' || (!performance && isLikelyPicoDevice(device))");
     expect(rendererSource).toContain('当前 Pico 指标关联前台应用');
     expect(rendererSource).toContain('renderPicoFallbackMetrics');
     expect(rendererSource).toContain('通用 CPU 采样回退');
@@ -317,10 +323,12 @@ describe('project smoke checks', () => {
     expect(managerSource).toContain("'exec-out', 'screencap', '-p'");
     expect(managerSource).toContain('capturePerformanceSnapshot');
     expect(managerSource).toContain('currentMetrics?: PerformanceMetrics');
-    expect(managerSource).toContain('options.currentMetrics || await this.getPerformanceMetrics');
+    expect(managerSource.indexOf('const screenState = await this.getScreenPowerState(deviceId)')).toBeLessThan(
+      managerSource.indexOf('options.currentMetrics || await this.getPerformanceMetrics')
+    );
     expect(managerSource).toContain("'dumpsys', 'power'");
-    expect(managerSource).toContain('screenshotSkippedReason');
-    expect(managerSource).toContain('设备息屏，已跳过截图以避免唤醒设备。');
+    expect(managerSource).toContain('设备当前息屏，请先唤醒设备后再抓取性能快照。');
+    expect(managerSource).not.toContain('screenshotSkippedReason');
     expect(managerSource).not.toContain('capturePicoSystemScreenshot');
     expect(managerSource).not.toContain("'shell', 'input', 'keyevent', '120'");
     expect(managerSource).not.toContain('listScreenshotCandidates');
@@ -334,8 +342,8 @@ describe('project smoke checks', () => {
     expect(snapshotStoreSource).toContain('path.dirname(process.execPath)');
     expect(snapshotStoreSource).toContain('buildAnnotatedSnapshotImage');
     expect(snapshotStoreSource).toContain('nativeImage.createFromBuffer');
-    expect(snapshotStoreSource).toContain('SCREEN OFF - SCREENSHOT SKIPPED');
-    expect(snapshotStoreSource).toContain('NO WAKEUP CAPTURE');
+    expect(snapshotStoreSource).not.toContain('SCREEN OFF - SCREENSHOT SKIPPED');
+    expect(snapshotStoreSource).not.toContain('NO WAKEUP CAPTURE');
     expect(snapshotStoreSource).toContain('baseImage.crop');
     expect(snapshotStoreSource).toContain('buildSnapshotMetricLines');
     expect(snapshotStoreSource).toContain('CPU USAGE');
@@ -348,11 +356,16 @@ describe('project smoke checks', () => {
     expect(preloadSource).toContain('currentMetrics');
     expect(typeSource).toContain("trigger: 'manual' | 'fps_drop' | 'threshold'");
     expect(typeSource).toContain('screenshotPath?: string');
-    expect(typeSource).toContain('screenshotSkippedReason?: string');
+    expect(typeSource).not.toContain('screenshotSkippedReason?: string');
     expect(rendererSource).toContain('抓取性能快照');
     expect(rendererSource).toContain('性能快照');
-    expect(simpleAppSource).toContain('capturePerformanceSnapshot(selectedDevice.id, performance || undefined)');
-    expect(rendererSource).toContain('screenshotSkippedReason');
+    expect(simpleAppSource).toContain('performanceByDeviceId[selectedDevice.id]');
+    expect(simpleAppSource).toContain('请先开启当前设备的性能采集，再抓取性能快照。');
+    expect(simpleAppSource).toContain('capturePerformanceSnapshot(selectedDevice.id, currentPerformance)');
+    expect(rendererSource).toContain('开启采集');
+    expect(rendererSource).toContain('关闭采集');
+    expect(rendererSource).toContain('性能采集已关闭。点击开启后才会获取当前设备的性能参数。');
+    expect(rendererSource).not.toContain('screenshotSkippedReason');
     expect(rendererSource).toContain('CPU 占用率');
     expect(rendererSource).toContain('内存占用');
     expect(rendererSource).not.toContain("'GPU',\n        'GPU 使用率'");

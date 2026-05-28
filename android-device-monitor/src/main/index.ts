@@ -196,7 +196,7 @@ const setupIpcHandlers = () => {
       });
       return { success: true, data: snapshot };
     } catch (error) {
-      return toIpcErrorResponse(error, '鎶撳彇鎬ц兘蹇収澶辫触');
+      return toIpcErrorResponse(error, '抓取性能快照失败');
     }
   });
 

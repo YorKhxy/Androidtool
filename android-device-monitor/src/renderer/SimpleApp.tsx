@@ -74,7 +74,8 @@ function SimpleApp() {
   const [activeTab, setActiveTab] = useState<TabType>('devices');
   const [logVersion, setLogVersion] = useState(0);
   const [logViewport, setLogViewport] = useState({ scrollTop: 0, height: 320 });
-  const [performance, setPerformance] = useState<PerformanceMetrics | null>(null);
+  const [performanceByDeviceId, setPerformanceByDeviceId] = useState<Record<string, PerformanceMetrics>>({});
+  const [performanceEnabledDeviceIds, setPerformanceEnabledDeviceIds] = useState<Set<string>>(() => new Set());
   const [performanceSnapshots, setPerformanceSnapshots] = useState<PerformanceSnapshot[]>([]);
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [activities, setActivities] = useState<ActivityStackEntry[]>([]);
@@ -103,7 +104,7 @@ function SimpleApp() {
   const selectedDeviceRef = useRef<DeviceInfo | null>(null);
   const maxLogEntriesRef = useRef(MAX_LOG_ENTRIES);
   const batchUpdateSizeRef = useRef(BATCH_UPDATE_SIZE);
-  const performanceRequestInFlightRef = useRef(false);
+  const performanceRequestInFlightRef = useRef(new Set<string>());
 
   const resetDeviceRuntimeState = useCallback(() => {
     setSelectedDevice(null);
@@ -354,14 +355,14 @@ function SimpleApp() {
   
 
   useEffect(() => {
-    if (selectedDevice && activeTab === 'performance') {
-      void loadPerformance();
+    if (selectedDevice && activeTab === 'performance' && performanceEnabledDeviceIds.has(selectedDevice.id)) {
+      void loadPerformance(selectedDevice.id);
       const interval = setInterval(() => {
-        loadPerformance();
+        loadPerformance(selectedDevice.id);
       }, 1000);
       return () => clearInterval(interval);
     }
-  }, [selectedDevice, activeTab]);
+  }, [selectedDevice, activeTab, performanceEnabledDeviceIds]);
 
   useEffect(() => {
     if (selectedDevice && activeTab === 'processes') {
@@ -580,29 +581,49 @@ function SimpleApp() {
     setLogVersion(version => version + 1);
   };
 
-  const loadPerformance = async () => {
-    if (!selectedDevice || !hasElectronAPI()) return;
-    if (performanceRequestInFlightRef.current) return;
-    performanceRequestInFlightRef.current = true;
+  const loadPerformance = async (deviceId = selectedDevice?.id) => {
+    if (!deviceId || !hasElectronAPI()) return;
+    if (performanceRequestInFlightRef.current.has(deviceId)) return;
+    performanceRequestInFlightRef.current.add(deviceId);
     try {
-      const result = await window.electronAPI!.getPerformance(selectedDevice.id);
+      const result = await window.electronAPI!.getPerformance(deviceId);
       if (result.success && result.data) {
-        setPerformance(result.data);
+        setPerformanceByDeviceId((previous) => ({ ...previous, [deviceId]: result.data! }));
       }
     } catch (err) {
       console.error('Load performance error:', err);
     } finally {
-      performanceRequestInFlightRef.current = false;
+      performanceRequestInFlightRef.current.delete(deviceId);
     }
+  };
+
+  const togglePerformanceMonitoring = () => {
+    if (!selectedDevice) return;
+    const deviceId = selectedDevice.id;
+    setPerformanceEnabledDeviceIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(deviceId)) {
+        next.delete(deviceId);
+      } else {
+        next.add(deviceId);
+        void loadPerformance(deviceId);
+      }
+      return next;
+    });
   };
 
   const capturePerformanceSnapshot = async () => {
     if (!selectedDevice || !hasElectronAPI()) return;
+    const currentPerformance = performanceByDeviceId[selectedDevice.id];
+    if (!currentPerformance) {
+      setError('请先开启当前设备的性能采集，再抓取性能快照。');
+      return;
+    }
     setIsCapturingSnapshot(true);
     try {
-      const result = await window.electronAPI!.capturePerformanceSnapshot(selectedDevice.id, performance || undefined);
+      const result = await window.electronAPI!.capturePerformanceSnapshot(selectedDevice.id, currentPerformance);
       if (result.success && result.data) {
-        setPerformance(result.data.metrics);
+        setPerformanceByDeviceId((previous) => ({ ...previous, [selectedDevice.id]: result.data!.metrics }));
         setPerformanceSnapshots((previousSnapshots) => [result.data!, ...previousSnapshots].slice(0, 20));
         setError('');
       } else {
@@ -691,6 +712,8 @@ function SimpleApp() {
   const currentLogState = selectedDeviceId ? getLogState(selectedDeviceId) : null;
   const isSelectedLogcatRunning = Boolean(selectedDeviceId && runningLogDeviceIds.has(selectedDeviceId));
   const isSelectedLogPaused = Boolean(selectedDeviceId && pausedLogDeviceIds.has(selectedDeviceId));
+  const selectedPerformance = selectedDeviceId ? performanceByDeviceId[selectedDeviceId] || null : null;
+  const isSelectedPerformanceEnabled = Boolean(selectedDeviceId && performanceEnabledDeviceIds.has(selectedDeviceId));
   const visiblePerformanceSnapshots = useMemo(
     () => performanceSnapshots.filter((snapshot) => snapshot.deviceId === selectedDeviceId),
     [performanceSnapshots, selectedDeviceId]
@@ -1296,9 +1319,12 @@ function SimpleApp() {
                 {activeTab === 'logs' && renderLogcatPanel()}
                 {activeTab === 'performance' && (
                   <PerformancePanel
-                    performance={performance}
+                    device={selectedDevice}
+                    performance={selectedPerformance}
                     snapshots={visiblePerformanceSnapshots}
+                    isMonitoringPerformance={isSelectedPerformanceEnabled}
                     isCapturingSnapshot={isCapturingSnapshot}
+                    onToggleMonitoring={togglePerformanceMonitoring}
                     onCaptureSnapshot={capturePerformanceSnapshot}
                   />
                 )}
