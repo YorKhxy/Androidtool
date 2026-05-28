@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import * as path from 'path';
+import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
 import { LogEntry, PerformanceMetrics, PerformanceSessionExportPayload } from '../shared/types';
@@ -110,6 +111,22 @@ const readSnapshotImageAsDataUrl = async (screenshotPath: string) => {
   return `data:image/png;base64,${image.toString('base64')}`;
 };
 
+const resolveRendererIndexPath = (): string => {
+  const candidates = [
+    path.join(__dirname, '..', 'renderer', 'index.html'),
+    path.join(__dirname, '..', '..', 'renderer', 'index.html'),
+    path.join(app.getAppPath(), 'renderer', 'index.html'),
+    path.join(app.getAppPath(), 'dist', 'renderer', 'index.html'),
+  ];
+
+  const rendererPath = candidates.find(candidate => nodeFs.existsSync(candidate));
+  if (!rendererPath) {
+    throw new Error(`Renderer entry not found. Tried: ${candidates.join(', ')}`);
+  }
+
+  return rendererPath;
+};
+
 const createWindow = () => {
   const preloadPath = path.join(__dirname, 'preload.js');
   console.log('Preload path:', preloadPath);
@@ -133,7 +150,7 @@ const createWindow = () => {
     mainWindow.loadURL('http://localhost:3000');
     mainWindow.webContents.openDevTools();
   } else {
-    const rendererPath = path.join(__dirname, '..', 'renderer', 'index.html');
+    const rendererPath = resolveRendererIndexPath();
     console.log('Loading renderer from:', rendererPath);
     mainWindow.loadFile(rendererPath);
   }
