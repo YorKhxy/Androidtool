@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import type { DeviceInfo, MetricReading, PerformanceMetrics, PerformanceSample, PerformanceSnapshot, PicoMetricsState } from '../../shared/types';
 
 type PerformancePanelProps = {
@@ -14,9 +14,68 @@ type PerformancePanelProps = {
   onExportSession: () => void;
 };
 
-const createScreenshotUrl = (screenshotPath?: string) => {
-  if (!screenshotPath) return undefined;
-  return encodeURI(`file:///${screenshotPath.replace(/\\/g, '/')}`);
+const useSnapshotImageUrl = (screenshotPath?: string) => {
+  const [imageUrl, setImageUrl] = useState<string | undefined>();
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setImageUrl(undefined);
+    setLoadFailed(false);
+
+    if (!screenshotPath) return;
+
+    const readSnapshotImage = window.electronAPI?.readSnapshotImage;
+    if (!readSnapshotImage) {
+      setLoadFailed(true);
+      return;
+    }
+
+    readSnapshotImage(screenshotPath).then((result) => {
+      if (cancelled) return;
+      if (result.success && result.data) {
+        setImageUrl(result.data);
+      } else {
+        setLoadFailed(true);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setLoadFailed(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [screenshotPath]);
+
+  return { imageUrl, loadFailed };
+};
+
+const SnapshotImage = ({
+  screenshotPath,
+  alt,
+  style,
+}: {
+  screenshotPath?: string;
+  alt: string;
+  style: CSSProperties;
+}) => {
+  const { imageUrl, loadFailed } = useSnapshotImageUrl(screenshotPath);
+
+  if (!screenshotPath) {
+    return <div style={{ color: '#6b7280', fontSize: '12px' }}>截图不可用</div>;
+  }
+
+  if (loadFailed) {
+    return <div style={{ color: '#fca5a5', fontSize: '12px' }}>截图加载失败</div>;
+  }
+
+  if (!imageUrl) {
+    return <div style={{ color: '#6b7280', fontSize: '12px' }}>截图加载中...</div>;
+  }
+
+  return <img src={imageUrl} alt={alt} style={style} />;
 };
 
 const renderMetricCard = (
@@ -299,7 +358,6 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
   const width = 720;
   const height = 220;
   const hoveredSnapshot = snapshots.find((snapshot) => snapshot.id === hoveredSnapshotId);
-  const hoveredUrl = createScreenshotUrl(hoveredSnapshot?.screenshotPath);
   const memoryValues = samples.map((sample) => Number(formatMemoryMb(sample.metrics.memoryUsage))).filter(Number.isFinite);
   const memoryMax = Math.max(1, ...memoryValues);
   const memoryAxisMax = Math.ceil(memoryMax / 512) * 512;
@@ -394,9 +452,9 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
           </g>
         ))}
       </svg>
-      {hoveredSnapshot && hoveredUrl && (
+      {hoveredSnapshot && (
         <div style={{ position: 'absolute', left: `${hoverPoint?.x || 16}px`, top: `${hoverPoint?.y || 16}px`, width: '220px', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '8px', padding: '8px', boxShadow: '0 12px 30px rgba(0,0,0,0.35)', pointerEvents: 'none', zIndex: 2 }}>
-          <img src={hoveredUrl} alt={hoveredSnapshot.id} style={{ width: '100%', maxHeight: '120px', objectFit: 'cover', borderRadius: '6px' }} />
+          <SnapshotImage screenshotPath={hoveredSnapshot.screenshotPath} alt={hoveredSnapshot.id} style={{ width: '100%', maxHeight: '120px', objectFit: 'cover', borderRadius: '6px' }} />
           <div style={{ color: '#fff', fontSize: '12px', marginTop: '6px' }}>{new Date(hoveredSnapshot.capturedAt).toLocaleString('zh-CN', { hour12: false })}</div>
           <div style={{ color: '#94a3b8', fontSize: '12px' }}>{`FPS ${hoveredSnapshot.metrics.fps} / CPU ${hoveredSnapshot.metrics.cpuUsage.toFixed(1)}% / MEM ${formatMemoryMb(hoveredSnapshot.metrics.memoryUsage)}MB`}</div>
         </div>
@@ -427,7 +485,6 @@ export function PerformancePanel({
   const picoMetricsState: PicoMetricsState = performance?.picoMetricsState || 'native';
   const showPicoFallback = isPicoView && picoMetricsState !== 'native';
   const [previewSnapshot, setPreviewSnapshot] = useState<PerformanceSnapshot | null>(null);
-  const previewUrl = createScreenshotUrl(previewSnapshot?.screenshotPath);
 
   useEffect(() => {
     if (!previewSnapshot) return;
@@ -525,7 +582,6 @@ export function PerformancePanel({
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
             {snapshots.map((snapshot) => {
-              const screenshotUrl = createScreenshotUrl(snapshot.screenshotPath);
               const isPicoSnapshot = snapshot.metrics.provider === 'pico';
               return (
                 <div
@@ -553,9 +609,9 @@ export function PerformancePanel({
                       overflow: 'hidden',
                     }}
                   >
-                    {screenshotUrl ? (
-                      <img
-                        src={screenshotUrl}
+                    {snapshot.screenshotPath ? (
+                      <SnapshotImage
+                        screenshotPath={snapshot.screenshotPath}
                         alt={`snapshot-${snapshot.id}`}
                         style={
                           isPicoSnapshot
@@ -590,7 +646,7 @@ export function PerformancePanel({
           </div>
         )}
       </div>
-      {previewSnapshot && previewUrl && (
+      {previewSnapshot && (
         <div
           role="dialog"
           aria-modal="true"
@@ -657,8 +713,8 @@ export function PerformancePanel({
               justifyContent: 'center',
             }}
           >
-            <img
-              src={previewUrl}
+            <SnapshotImage
+              screenshotPath={previewSnapshot.screenshotPath}
               alt={`snapshot-preview-${previewSnapshot.id}`}
               style={{
                 maxWidth: '100%',

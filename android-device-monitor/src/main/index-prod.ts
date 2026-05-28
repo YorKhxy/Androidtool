@@ -78,6 +78,20 @@ const toIpcErrorResponse = (error: unknown, fallbackMessage: string) => {
   };
 };
 
+const readSnapshotImageAsDataUrl = async (screenshotPath: string) => {
+  const appRoot = resolveRuntimeAppRoot(app);
+  const snapshotRoot = path.resolve(appRoot, 'performance-snapshots');
+  const resolvedPath = path.resolve(screenshotPath);
+  const relativePath = path.relative(snapshotRoot, resolvedPath);
+
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new Error('快照图片路径不在允许目录内');
+  }
+
+  const image = await fs.readFile(resolvedPath);
+  return `data:image/png;base64,${image.toString('base64')}`;
+};
+
 const createWindow = () => {
   const preloadPath = path.join(__dirname, 'preload.js');
   console.log('Preload path:', preloadPath);
@@ -191,6 +205,15 @@ const setupIpcHandlers = () => {
       return { success: true, data: snapshot };
     } catch (error) {
       return toIpcErrorResponse(error, '抓取性能快照失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.READ_SNAPSHOT_IMAGE, async (_event, screenshotPath: string) => {
+    try {
+      const dataUrl = await readSnapshotImageAsDataUrl(screenshotPath);
+      return { success: true, data: dataUrl };
+    } catch (error) {
+      return toIpcErrorResponse(error, '读取快照图片失败');
     }
   });
 
