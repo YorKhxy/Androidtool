@@ -600,7 +600,7 @@ function SimpleApp() {
     if (!selectedDevice || !hasElectronAPI()) return;
     setIsCapturingSnapshot(true);
     try {
-      const result = await window.electronAPI!.capturePerformanceSnapshot(selectedDevice.id);
+      const result = await window.electronAPI!.capturePerformanceSnapshot(selectedDevice.id, performance || undefined);
       if (result.success && result.data) {
         setPerformance(result.data.metrics);
         setPerformanceSnapshots((previousSnapshots) => [result.data!, ...previousSnapshots].slice(0, 20));

@@ -591,9 +591,10 @@ export class ADBManager extends EventEmitter {
     });
   }
 
-  async capturePerformanceSnapshot(deviceId: string): Promise<CapturedPerformanceSnapshot> {
+  async capturePerformanceSnapshot(deviceId: string, currentMetrics?: PerformanceMetrics): Promise<CapturedPerformanceSnapshot> {
     return this.runtimeInspector.capturePerformanceSnapshot(deviceId, {
       preferPico: this.isLikelyPicoDevice(deviceId),
+      currentMetrics,
     });
   }
 

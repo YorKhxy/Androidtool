@@ -31,7 +31,7 @@ export interface ElectronAPI {
   ) => Promise<ElectronResult<undefined>>;
   stopLogcat: (deviceId: string) => Promise<ElectronResult<undefined>>;
   getPerformance: (deviceId: string) => Promise<ElectronResult<PerformanceMetrics>>;
-  capturePerformanceSnapshot: (deviceId: string) => Promise<ElectronResult<PerformanceSnapshot>>;
+  capturePerformanceSnapshot: (deviceId: string, currentMetrics?: PerformanceMetrics) => Promise<ElectronResult<PerformanceSnapshot>>;
   getProcesses: (deviceId: string) => Promise<ElectronResult<ProcessInfo[]>>;
   connectUSB: () => Promise<ElectronResult<DeviceInfo[]>>;
   getActivityStack: (deviceId: string, packageName?: string) => Promise<ElectronResult<ActivityStackEntry[]>>;

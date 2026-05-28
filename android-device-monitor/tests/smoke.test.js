@@ -316,7 +316,8 @@ describe('project smoke checks', () => {
 
     expect(managerSource).toContain("'exec-out', 'screencap', '-p'");
     expect(managerSource).toContain('capturePerformanceSnapshot');
-    expect(managerSource).toContain('const [metrics, screenState] = await Promise.all');
+    expect(managerSource).toContain('currentMetrics?: PerformanceMetrics');
+    expect(managerSource).toContain('options.currentMetrics || await this.getPerformanceMetrics');
     expect(managerSource).toContain("'dumpsys', 'power'");
     expect(managerSource).toContain('screenshotSkippedReason');
     expect(managerSource).toContain('设备息屏，已跳过截图以避免唤醒设备。');
@@ -344,11 +345,13 @@ describe('project smoke checks', () => {
     expect(indexSource).toContain('resolveRuntimeAppRoot(app)');
     expect(indexSource).not.toContain("app.getPath('userData')");
     expect(preloadSource).toContain('capturePerformanceSnapshot');
+    expect(preloadSource).toContain('currentMetrics');
     expect(typeSource).toContain("trigger: 'manual' | 'fps_drop' | 'threshold'");
     expect(typeSource).toContain('screenshotPath?: string');
     expect(typeSource).toContain('screenshotSkippedReason?: string');
     expect(rendererSource).toContain('抓取性能快照');
     expect(rendererSource).toContain('性能快照');
+    expect(simpleAppSource).toContain('capturePerformanceSnapshot(selectedDevice.id, performance || undefined)');
     expect(rendererSource).toContain('screenshotSkippedReason');
     expect(rendererSource).toContain('CPU 占用率');
     expect(rendererSource).toContain('内存占用');

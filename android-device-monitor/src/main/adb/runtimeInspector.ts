@@ -27,6 +27,7 @@ export type CapturedPerformanceSnapshot = {
 
 type PerformanceOptions = {
   preferPico?: boolean;
+  currentMetrics?: PerformanceMetrics;
 };
 
 export class AdbRuntimeInspector {
@@ -212,10 +213,8 @@ export class AdbRuntimeInspector {
   }
 
   async capturePerformanceSnapshot(deviceId: string, options: PerformanceOptions = {}): Promise<CapturedPerformanceSnapshot> {
-    const [metrics, screenState] = await Promise.all([
-      this.getPerformanceMetrics(deviceId, options),
-      this.getScreenPowerState(deviceId),
-    ]);
+    const metrics = options.currentMetrics || await this.getPerformanceMetrics(deviceId, options);
+    const screenState = await this.getScreenPowerState(deviceId);
     const screenshot = screenState.isOn ? await this.captureScreenshot(deviceId, options) : undefined;
 
     return {

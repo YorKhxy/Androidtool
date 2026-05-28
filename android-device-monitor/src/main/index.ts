@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
-import { LogEntry } from '../shared/types';
+import { LogEntry, PerformanceMetrics } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
 
@@ -186,9 +186,9 @@ const setupIpcHandlers = () => {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.CAPTURE_PERFORMANCE_SNAPSHOT, async (_event, deviceId: string) => {
+  ipcMain.handle(IPC_CHANNELS.CAPTURE_PERFORMANCE_SNAPSHOT, async (_event, deviceId: string, currentMetrics?: PerformanceMetrics) => {
     try {
-      const snapshotPayload = await adbManager.capturePerformanceSnapshot(deviceId);
+      const snapshotPayload = await adbManager.capturePerformanceSnapshot(deviceId, currentMetrics);
       const snapshot = await persistPerformanceSnapshot(resolveRuntimeAppRoot(app), {
         deviceId,
         snapshot: snapshotPayload,
