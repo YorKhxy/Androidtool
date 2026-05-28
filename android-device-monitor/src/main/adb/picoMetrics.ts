@@ -204,7 +204,7 @@ echo ADM_PICO_SUPPORT_UNSUPPORTED
   }
 
   private parseEntryMap(line: string): Map<string, string> {
-    const metricMatch = line.match(/PxrMetric(?:\(\d+\))?:\s*(.*)$/);
+    const metricMatch = line.match(/PxrMetric(?:\(\s*\d+\s*\))?:\s*(.*)$/);
     const dataStart = metricMatch ? metricMatch[1] : line;
     const entries = dataStart
       .split(',')
