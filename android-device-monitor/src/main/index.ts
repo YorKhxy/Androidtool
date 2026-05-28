@@ -227,6 +227,51 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.SELECT_APK_FILES, async () => {
+    try {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: '选择安装包',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Android 安装包', extensions: ['apk'] }],
+      });
+
+      if (result.canceled) {
+        return { success: true, data: [] };
+      }
+
+      return { success: true, data: result.filePaths };
+    } catch (error) {
+      return toIpcErrorResponse(error, '选择安装包失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.INSTALL_APK, async (_event, deviceId: string, apkPath: string) => {
+    try {
+      const output = await adbManager.installApk(deviceId, apkPath);
+      return { success: true, data: { apkPath, output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '安装 APK 失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SLEEP_DEVICE, async (_event, deviceId: string) => {
+    try {
+      await adbManager.sleepDevice(deviceId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '设备息屏失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.REBOOT_DEVICE, async (_event, deviceId: string) => {
+    try {
+      await adbManager.rebootDevice(deviceId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '设备重启失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.EXPORT_LOGS, async (_event, logs: LogEntry[]) => {
     try {
       const result = await dialog.showSaveDialog(mainWindow!, {

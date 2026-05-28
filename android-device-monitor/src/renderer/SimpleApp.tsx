@@ -17,6 +17,22 @@ import {
 
 type TabType = 'devices' | 'logs' | 'performance' | 'processes' | 'activity' | 'network';
 type LogLevelFilter = LogEntry['level'] | 'all';
+type ApkInstallStatus = 'queued' | 'installing' | 'success' | 'failed';
+
+type ApkInstallQueueItem = {
+  id: string;
+  path: string;
+  fileName: string;
+  status: ApkInstallStatus;
+  progress: number;
+  output?: string;
+  error?: string;
+};
+
+type DeviceApkInstallState = {
+  queue: ApkInstallQueueItem[];
+  isInstalling: boolean;
+};
 
 const DEVICE_NAME_STORAGE_KEY = 'android-device-monitor.custom-device-names';
 
@@ -66,6 +82,29 @@ const getWifiLatencyLabel = (device: DeviceInfo) => {
   return '延迟 --';
 };
 
+const getBatteryColor = (batteryLevel?: number) => {
+  if (batteryLevel === undefined) return '#9ca3af';
+  if (batteryLevel <= 20) return '#ef4444';
+  if (batteryLevel <= 40) return '#f59e0b';
+  return '#22c55e';
+};
+
+const renderBatteryBadge = (device: DeviceInfo) => {
+  const batteryLevel = device.batteryLevel;
+  const batteryColor = getBatteryColor(batteryLevel);
+  const batteryFill = batteryLevel === undefined ? 0 : batteryLevel;
+
+  return (
+    <div title={batteryLevel === undefined ? '电量未知' : `电量 ${batteryLevel}%`} style={{ display: 'flex', alignItems: 'center', gap: '5px', color: batteryColor, fontSize: '12px', lineHeight: 1 }}>
+      <div style={{ width: '22px', height: '11px', border: `1px solid ${batteryColor}`, borderRadius: '3px', padding: '1px', position: 'relative', boxSizing: 'border-box' }}>
+        <div style={{ width: `${batteryFill}%`, height: '100%', backgroundColor: batteryColor, borderRadius: '1px' }} />
+        <div style={{ position: 'absolute', right: '-4px', top: '3px', width: '2px', height: '5px', backgroundColor: batteryColor, borderRadius: '0 2px 2px 0' }} />
+      </div>
+      <span>{batteryLevel === undefined ? '--%' : `${batteryLevel}%`}</span>
+    </div>
+  );
+};
+
 function SimpleApp() {
   const [adbStatus, setAdbStatus] = useState<AdbStatus | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -98,6 +137,8 @@ function SimpleApp() {
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
+  const [apkInstallStates, setApkInstallStates] = useState<Record<string, DeviceApkInstallState>>({});
+  const [isDeviceMoreMenuOpen, setIsDeviceMoreMenuOpen] = useState(false);
   
   const logStatesRef = useRef(new Map<string, DeviceLogState>());
   const logsContainerRef = useRef<HTMLDivElement>(null);
@@ -105,6 +146,8 @@ function SimpleApp() {
   const maxLogEntriesRef = useRef(MAX_LOG_ENTRIES);
   const batchUpdateSizeRef = useRef(BATCH_UPDATE_SIZE);
   const performanceRequestInFlightRef = useRef(new Set<string>());
+  const installingApkDeviceIdsRef = useRef(new Set<string>());
+  const apkInstallProgressTimersRef = useRef(new Map<string, number>());
 
   const resetDeviceRuntimeState = useCallback(() => {
     setSelectedDevice(null);
@@ -134,6 +177,46 @@ function SimpleApp() {
       return next;
     });
   }, []);
+
+  const getDeviceApkInstallState = useCallback((deviceId: string): DeviceApkInstallState => {
+    return apkInstallStates[deviceId] || { queue: [], isInstalling: false };
+  }, [apkInstallStates]);
+
+  const updateDeviceApkInstallState = useCallback((deviceId: string, updater: (state: DeviceApkInstallState) => DeviceApkInstallState) => {
+    setApkInstallStates(previousStates => ({
+      ...previousStates,
+      [deviceId]: updater(previousStates[deviceId] || { queue: [], isInstalling: false }),
+    }));
+  }, []);
+
+  const stopApkInstallProgressTimer = useCallback((itemId: string) => {
+    const timerId = apkInstallProgressTimersRef.current.get(itemId);
+    if (timerId !== undefined) {
+      window.clearInterval(timerId);
+      apkInstallProgressTimersRef.current.delete(itemId);
+    }
+  }, []);
+
+  const startApkInstallProgressTimer = useCallback((deviceId: string, itemId: string) => {
+    stopApkInstallProgressTimer(itemId);
+    const timerId = window.setInterval(() => {
+      updateDeviceApkInstallState(deviceId, previousState => ({
+        ...previousState,
+        queue: previousState.queue.map(item => {
+          if (item.id !== itemId || item.status !== 'installing') return item;
+          const nextProgress = item.progress < 70
+            ? item.progress + 6
+            : item.progress < 90
+              ? item.progress + 2
+              : item.progress < 96
+                ? item.progress + 0.5
+                : item.progress;
+          return { ...item, progress: Math.min(nextProgress, 96) };
+        }),
+      }));
+    }, 800);
+    apkInstallProgressTimersRef.current.set(itemId, timerId);
+  }, [stopApkInstallProgressTimer, updateDeviceApkInstallState]);
 
   const getLogState = useCallback((deviceId: string) => {
     let state = logStatesRef.current.get(deviceId);
@@ -225,6 +308,7 @@ function SimpleApp() {
 
   useEffect(() => {
     selectedDeviceRef.current = selectedDevice;
+    setIsDeviceMoreMenuOpen(false);
   }, [selectedDevice]);
 
   useEffect(() => {
@@ -340,6 +424,8 @@ function SimpleApp() {
               window.clearTimeout(state.flushTimer);
             }
           });
+          apkInstallProgressTimersRef.current.forEach(timerId => window.clearInterval(timerId));
+          apkInstallProgressTimersRef.current.clear();
         };
       }
     };
@@ -636,6 +722,122 @@ function SimpleApp() {
     }
   };
 
+  const selectApkFiles = async () => {
+    if (!selectedDevice || !hasElectronAPI()) {
+      setError('Electron 接口不可用');
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI!.selectApkFiles();
+      if (!result.success || !result.data) {
+        setError(formatOperationError(result, '选择安装包失败'));
+        return;
+      }
+
+      if (result.data.length === 0) {
+        return;
+      }
+
+      const deviceId = selectedDevice.id;
+      const existingPaths = new Set(getDeviceApkInstallState(deviceId).queue.map(item => item.path));
+      const nextItems = result.data
+        .filter(filePath => filePath.toLowerCase().endsWith('.apk'))
+        .filter(filePath => !existingPaths.has(filePath))
+        .map(filePath => ({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          path: filePath,
+          fileName: filePath.split(/[\\/]/).pop() || filePath,
+          status: 'queued' as ApkInstallStatus,
+          progress: 0,
+        }));
+
+      if (nextItems.length > 0) {
+        updateDeviceApkInstallState(deviceId, previousState => ({
+          ...previousState,
+          queue: [...previousState.queue, ...nextItems],
+        }));
+        setError('');
+      }
+    } catch (err) {
+      setError('选择安装包失败：' + (err as Error).message);
+    }
+  };
+
+  const installQueuedApks = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    const deviceId = selectedDevice.id;
+    if (installingApkDeviceIdsRef.current.has(deviceId)) return;
+    const queuedItems = getDeviceApkInstallState(deviceId).queue.filter(item => item.status === 'queued' || item.status === 'failed');
+    if (queuedItems.length === 0) return;
+
+    installingApkDeviceIdsRef.current.add(deviceId);
+    updateDeviceApkInstallState(deviceId, previousState => ({ ...previousState, isInstalling: true }));
+    setError('');
+
+    try {
+      for (const item of queuedItems) {
+        updateDeviceApkInstallState(deviceId, previousState => ({
+          ...previousState,
+          queue: previousState.queue.map(queueItem =>
+            queueItem.id === item.id
+              ? { ...queueItem, status: 'installing', progress: Math.max(queueItem.progress, 8), error: undefined, output: undefined }
+              : queueItem
+          ),
+        }));
+        startApkInstallProgressTimer(deviceId, item.id);
+
+        try {
+          const result = await window.electronAPI!.installApk(deviceId, item.path);
+          stopApkInstallProgressTimer(item.id);
+          updateDeviceApkInstallState(deviceId, previousState => ({
+            ...previousState,
+            queue: previousState.queue.map(queueItem =>
+              queueItem.id === item.id
+                ? {
+                    ...queueItem,
+                    status: result.success ? 'success' : 'failed',
+                    progress: 100,
+                    output: result.data?.output,
+                    error: result.success ? undefined : formatOperationError(result, '安装失败'),
+                  }
+                : queueItem
+            ),
+          }));
+        } catch (err) {
+          stopApkInstallProgressTimer(item.id);
+          updateDeviceApkInstallState(deviceId, previousState => ({
+            ...previousState,
+            queue: previousState.queue.map(queueItem =>
+              queueItem.id === item.id
+                ? { ...queueItem, status: 'failed', progress: 100, error: (err as Error).message }
+                : queueItem
+            ),
+          }));
+        }
+      }
+    } finally {
+      installingApkDeviceIdsRef.current.delete(deviceId);
+      updateDeviceApkInstallState(deviceId, previousState => ({ ...previousState, isInstalling: false }));
+    }
+  };
+
+  const clearCompletedApkInstalls = () => {
+    if (!selectedDevice) return;
+    updateDeviceApkInstallState(selectedDevice.id, previousState => ({
+      ...previousState,
+      queue: previousState.queue.filter(item => item.status !== 'success'),
+    }));
+  };
+
+  const removeApkInstallItem = (itemId: string) => {
+    if (!selectedDevice) return;
+    updateDeviceApkInstallState(selectedDevice.id, previousState => ({
+      ...previousState,
+      queue: previousState.queue.filter(item => item.id !== itemId || item.status === 'installing'),
+    }));
+  };
+
   const loadProcesses = async () => {
     if (!selectedDevice || !hasElectronAPI()) return;
     try {
@@ -645,6 +847,36 @@ function SimpleApp() {
       }
     } catch (err) {
       console.error('Load processes error:', err);
+    }
+  };
+
+  const sleepSelectedDevice = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    setIsDeviceMoreMenuOpen(false);
+    try {
+      const result = await window.electronAPI!.sleepDevice(selectedDevice.id);
+      if (!result.success) {
+        setError(formatOperationError(result, '设备息屏失败'));
+        return;
+      }
+      setError('');
+    } catch (err) {
+      setError('设备息屏失败: ' + (err as Error).message);
+    }
+  };
+
+  const rebootSelectedDevice = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    setIsDeviceMoreMenuOpen(false);
+    try {
+      const result = await window.electronAPI!.rebootDevice(selectedDevice.id);
+      if (!result.success) {
+        setError(formatOperationError(result, '设备重启失败'));
+        return;
+      }
+      setError('');
+    } catch (err) {
+      setError('设备重启失败: ' + (err as Error).message);
     }
   };
 
@@ -718,6 +950,134 @@ function SimpleApp() {
     () => performanceSnapshots.filter((snapshot) => snapshot.deviceId === selectedDeviceId),
     [performanceSnapshots, selectedDeviceId]
   );
+  const currentApkInstallState = selectedDeviceId ? getDeviceApkInstallState(selectedDeviceId) : { queue: [], isInstalling: false };
+  const currentApkInstallQueue = currentApkInstallState.queue;
+  const isInstallingApks = currentApkInstallState.isInstalling;
+
+  const getApkInstallStatusMeta = (status: ApkInstallStatus) => {
+    switch (status) {
+      case 'installing':
+        return { label: '安装中', color: '#60a5fa', background: '#1d4ed822' };
+      case 'success':
+        return { label: '成功', color: '#22c55e', background: '#22c55e22' };
+      case 'failed':
+        return { label: '失败', color: '#ef4444', background: '#ef444422' };
+      default:
+        return { label: '等待中', color: '#9ca3af', background: '#4b556322' };
+    }
+  };
+
+  const renderApkInstallPanel = () => {
+    const hasInstallableItems = currentApkInstallQueue.some(item => item.status === 'queued' || item.status === 'failed');
+    const successCount = currentApkInstallQueue.filter(item => item.status === 'success').length;
+    const finishedCount = currentApkInstallQueue.filter(item => item.status === 'success' || item.status === 'failed').length;
+    const overallProgress = currentApkInstallQueue.length > 0
+      ? Math.round((finishedCount / currentApkInstallQueue.length) * 100)
+      : 0;
+
+    return (
+      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', minHeight: '420px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: 0 }}>
+            {selectedDevice ? `目标设备：${getDeviceDisplayName(selectedDevice)}` : '未选择设备'}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, justifyContent: 'flex-end' }}>
+            <button
+              onClick={selectApkFiles}
+              disabled={isInstallingApks}
+              style={{ padding: '8px 12px', backgroundColor: isInstallingApks ? '#4b5563' : '#4a90d9', border: 'none', borderRadius: '6px', color: '#fff', cursor: isInstallingApks ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600 }}
+            >
+              选择 APK
+            </button>
+            <button
+              onClick={installQueuedApks}
+              disabled={!hasInstallableItems || isInstallingApks || !selectedDevice}
+              style={{ padding: '8px 14px', backgroundColor: hasInstallableItems && !isInstallingApks ? '#4a90d9' : '#4b5563', border: 'none', borderRadius: '6px', color: '#fff', cursor: hasInstallableItems && !isInstallingApks ? 'pointer' : 'not-allowed', fontSize: '13px', fontWeight: 600 }}
+            >
+              {isInstallingApks ? '安装中...' : '开始安装'}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', color: '#9ca3af', fontSize: '12px' }}>
+          <span>{`队列 ${currentApkInstallQueue.length}`}</span>
+          <span>{`成功 ${successCount}`}</span>
+          {currentApkInstallQueue.length > 0 && <span>{`进度 ${finishedCount}/${currentApkInstallQueue.length}`}</span>}
+          {successCount > 0 && (
+            <button onClick={clearCompletedApkInstalls} disabled={isInstallingApks} style={{ background: 'transparent', border: 'none', color: '#60a5fa', cursor: isInstallingApks ? 'not-allowed' : 'pointer', padding: 0, fontSize: '12px' }}>
+              清空成功项
+            </button>
+          )}
+        </div>
+
+        {currentApkInstallQueue.length > 0 && (
+          <div style={{ height: '6px', backgroundColor: '#353550', borderRadius: '999px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${overallProgress}%`, backgroundColor: '#4a90d9', transition: 'width 220ms ease' }} />
+          </div>
+        )}
+
+        {currentApkInstallQueue.length === 0 ? (
+          <div style={{ flex: 1, minHeight: '260px', border: '1px dashed #454560', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', textAlign: 'center', padding: '24px' }}>
+            <div>
+              <div style={{ color: '#cbd5e1', fontSize: '15px', marginBottom: '6px' }}>还没有待安装文件</div>
+              <div style={{ fontSize: '13px' }}>选择一个或多个 APK 后，按队列顺序推送安装到当前设备。</div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', overflow: 'auto', paddingRight: '4px' }}>
+            {currentApkInstallQueue.map(item => {
+              const statusMeta = getApkInstallStatusMeta(item.status);
+              const canRemove = item.status !== 'installing';
+              return (
+                <div key={item.id} style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color: '#fff', fontSize: '14px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.fileName}>{item.fileName}</div>
+                      <div style={{ color: '#7b8197', fontSize: '11px', marginTop: '5px', wordBreak: 'break-all' }}>{item.path}</div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <span style={{ color: statusMeta.color, backgroundColor: statusMeta.background, borderRadius: '999px', padding: '3px 8px', fontSize: '12px' }}>
+                        {statusMeta.label}
+                      </span>
+                      <button
+                        onClick={() => removeApkInstallItem(item.id)}
+                        disabled={!canRemove}
+                        style={{ padding: '3px 8px', backgroundColor: 'transparent', border: '1px solid #454560', borderRadius: '6px', color: canRemove ? '#d1d5db' : '#6b7280', cursor: canRemove ? 'pointer' : 'not-allowed', fontSize: '12px' }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#9ca3af', fontSize: '11px', marginBottom: '5px' }}>
+                      <span>{item.status === 'installing' ? '正在推送并安装' : statusMeta.label}</span>
+                      <span>{`${Math.round(item.progress)}%`}</span>
+                    </div>
+                    <div style={{ height: '5px', backgroundColor: '#353550', borderRadius: '999px', overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          height: '100%',
+                          width: `${item.progress}%`,
+                          backgroundColor: item.status === 'failed' ? '#ef4444' : item.status === 'success' ? '#22c55e' : '#60a5fa',
+                          transition: 'width 260ms ease',
+                        }}
+                      />
+                    </div>
+                  </div>
+                  {(item.error || item.output) && (
+                    <div style={{ marginTop: '8px', color: item.error ? '#fca5a5' : '#86efac', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {item.error || item.output}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    );
+  };
+
   const hasActiveLogFilter = Boolean(
     searchTerm.trim() ||
     filterLevel !== 'all' ||
@@ -1092,11 +1452,14 @@ function SimpleApp() {
                     </div>
                   )}
                   <div style={{ fontSize: '12px', color: '#aaa' }}>{device.id}</div>
-                  {wifiLatencyLabel && (
-                    <div style={{ marginTop: '4px', fontSize: '12px', color: device.latencyStatus === 'timeout' ? '#fbbf24' : '#93c5fd' }}>
-                      {wifiLatencyLabel}
-                    </div>
-                  )}
+                  <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                    {renderBatteryBadge(device)}
+                    {wifiLatencyLabel && (
+                      <span style={{ fontSize: '12px', color: device.latencyStatus === 'timeout' ? '#fbbf24' : '#93c5fd' }}>
+                        {wifiLatencyLabel}
+                      </span>
+                    )}
+                  </div>
                   {runningLogDeviceIds.has(device.id) && (
                     <div style={{ marginTop: '6px', fontSize: '12px', color: '#86efac' }}>
                       {pausedLogDeviceIds.has(device.id) ? '\u65e5\u5fd7\u5df2\u6682\u505c' : '\u65e5\u5fd7\u91c7\u96c6\u4e2d'}
@@ -1240,7 +1603,8 @@ function SimpleApp() {
 
               <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
                 {activeTab === 'devices' && (
-                  <div style={{ maxWidth: '600px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(420px, 600px) minmax(420px, 1fr)', gap: '20px', alignItems: 'start' }}>
+                    <div>
                     <h2 style={{ fontSize: '20px', fontWeight: '600', margin: '0 0 16px 0' }}>{'\u8bbe\u5907\u8be6\u60c5'}</h2>
                     <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
@@ -1282,7 +1646,7 @@ function SimpleApp() {
                           <div style={{ fontSize: '14px' }}>{selectedDevice.apiLevel}</div>
                         </div>
                       </div>
-                      <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
+                      <div style={{ marginTop: '16px', display: 'flex', gap: '8px', position: 'relative' }}>
                         <button
                           onClick={toggleLogcat}
                           style={{
@@ -1300,7 +1664,7 @@ function SimpleApp() {
                           {isSelectedLogcatRunning ? '\u505c\u6b62\u65e5\u5fd7' : '\u5f00\u59cb\u65e5\u5fd7'}
                         </button>
                         <button
-                          onClick={loadProcesses}
+                          onClick={() => setIsDeviceMoreMenuOpen(open => !open)}
                           style={{
                             padding: '10px 20px',
                             backgroundColor: '#353550',
@@ -1310,8 +1674,24 @@ function SimpleApp() {
                             fontSize: '14px',
                             cursor: 'pointer'
                           }}
-                        >{'\u5237\u65b0\u8fdb\u7a0b'}</button>
+                        >更多</button>
+                        {isDeviceMoreMenuOpen && (
+                          <div style={{ position: 'absolute', right: 0, top: '44px', minWidth: '120px', backgroundColor: '#202038', border: '1px solid #454560', borderRadius: '8px', padding: '6px', zIndex: 5, boxShadow: '0 10px 24px rgba(0,0,0,0.28)' }}>
+                            <button
+                              onClick={sleepSelectedDevice}
+                              style={{ width: '100%', padding: '8px 10px', backgroundColor: 'transparent', border: 'none', borderRadius: '6px', color: '#d1d5db', textAlign: 'left', cursor: 'pointer', fontSize: '13px' }}
+                            >息屏</button>
+                            <button
+                              onClick={rebootSelectedDevice}
+                              style={{ width: '100%', padding: '8px 10px', backgroundColor: 'transparent', border: 'none', borderRadius: '6px', color: '#fca5a5', textAlign: 'left', cursor: 'pointer', fontSize: '13px' }}
+                            >重启</button>
+                          </div>
+                        )}
                       </div>
+                    </div>
+                    </div>
+                    <div style={{ marginTop: '40px' }}>
+                      {renderApkInstallPanel()}
                     </div>
                   </div>
                 )}
