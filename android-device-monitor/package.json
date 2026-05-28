@@ -11,7 +11,7 @@
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json && node ./scripts/copy-preload.js",
     "build:renderer": "webpack --mode production",
-    "start": "set NODE_ENV=development && electron .",
+    "start": "set NODE_ENV=development&& electron .",
     "pack": "npm run adb:prepare && electron-builder --dir",
     "dist": "npm run adb:prepare && electron-builder",
     "release": "powershell -ExecutionPolicy Bypass -File ./scripts/build-and-package.ps1",
