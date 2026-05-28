@@ -166,6 +166,27 @@ describe('project smoke checks', () => {
     expect(errorSource).toContain('WIFI_CONNECTION_REFUSED');
   });
 
+  test('background device monitoring avoids heavy per-device adb probes', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const pollSource = managerSource.slice(managerSource.indexOf('private async pollDeviceChanges()'));
+
+    expect(managerSource).toContain('private async getDeviceSummaries()');
+    expect(pollSource).toContain('this.createDeviceSummarySnapshot(device)');
+    expect(pollSource).toContain('const devices = await this.getDevices();');
+    expect(pollSource.indexOf('const deviceSummaries = await this.getDeviceSummaries();')).toBeLessThan(
+      pollSource.indexOf('const devices = await this.getDevices();')
+    );
+  });
+
+  test('reboot treats expected adb transport disconnect as command sent', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+
+    expect(managerSource).toContain("this.execAdbWithExitCode(['-s', deviceId, 'reboot']");
+    expect(managerSource).toContain('isExpectedRebootDisconnect');
+    expect(managerSource).toContain("output.includes('device not found')");
+    expect(managerSource).toContain("output.includes('transport')");
+  });
+
   test('renderer supports persisted custom device display names', () => {
     const source = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
 

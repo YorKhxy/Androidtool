@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   connectUSB: () => ipcRenderer.invoke('adb:connect-usb'),
   getActivityStack: (deviceId, packageName) => ipcRenderer.invoke('adb:get-activity-stack', deviceId, packageName),
   getNetworkRequests: (deviceId, packageName) => ipcRenderer.invoke('adb:get-network-requests', deviceId, packageName),
+  selectApkFiles: () => ipcRenderer.invoke('adb:select-apk-files'),
+  installApk: (deviceId, apkPath) => ipcRenderer.invoke('adb:install-apk', deviceId, apkPath),
+  sleepDevice: (deviceId) => ipcRenderer.invoke('adb:sleep-device', deviceId),
+  rebootDevice: (deviceId) => ipcRenderer.invoke('adb:reboot-device', deviceId),
   exportLogs: (logs) => ipcRenderer.invoke('log:export', logs),
   exportPerformanceSession: (payload) => ipcRenderer.invoke('performance:export-session', payload),
   onLogEntry: (callback) => {

@@ -1,6 +1,7 @@
 import type {
   ActivityStackEntry,
   AdbStatus,
+  ApkInstallResult,
   DeviceInfo,
   LogEntry,
   NetworkRequest,
@@ -37,6 +38,10 @@ export interface ElectronAPI {
   connectUSB: () => Promise<ElectronResult<DeviceInfo[]>>;
   getActivityStack: (deviceId: string, packageName?: string) => Promise<ElectronResult<ActivityStackEntry[]>>;
   getNetworkRequests: (deviceId: string, packageName?: string) => Promise<ElectronResult<NetworkRequest[]>>;
+  selectApkFiles: () => Promise<ElectronResult<string[]>>;
+  installApk: (deviceId: string, apkPath: string) => Promise<ElectronResult<ApkInstallResult>>;
+  sleepDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
+  rebootDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
   exportLogs: (logs: LogEntry[]) => Promise<ElectronResult<string>>;
   exportPerformanceSession: (payload: PerformanceSessionExportPayload) => Promise<ElectronResult<string>>;
   onLogEntry: (callback: (entry: LogEntry) => void) => () => void;
