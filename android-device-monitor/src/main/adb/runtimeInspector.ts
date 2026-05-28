@@ -212,8 +212,10 @@ export class AdbRuntimeInspector {
   }
 
   async capturePerformanceSnapshot(deviceId: string, options: PerformanceOptions = {}): Promise<CapturedPerformanceSnapshot> {
-    const metrics = await this.getPerformanceMetrics(deviceId, options);
-    const screenState = await this.getScreenPowerState(deviceId);
+    const [metrics, screenState] = await Promise.all([
+      this.getPerformanceMetrics(deviceId, options),
+      this.getScreenPowerState(deviceId),
+    ]);
     const screenshot = screenState.isOn ? await this.captureScreenshot(deviceId, options) : undefined;
 
     return {

@@ -316,6 +316,7 @@ describe('project smoke checks', () => {
 
     expect(managerSource).toContain("'exec-out', 'screencap', '-p'");
     expect(managerSource).toContain('capturePerformanceSnapshot');
+    expect(managerSource).toContain('const [metrics, screenState] = await Promise.all');
     expect(managerSource).toContain("'dumpsys', 'power'");
     expect(managerSource).toContain('screenshotSkippedReason');
     expect(managerSource).toContain('设备息屏，已跳过截图以避免唤醒设备。');
