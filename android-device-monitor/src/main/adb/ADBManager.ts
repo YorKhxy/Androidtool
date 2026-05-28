@@ -34,6 +34,9 @@ type ParsedHttpMessage = {
 };
 
 type DeviceSummary = Pick<DeviceInfo, 'id' | 'connectionType' | 'status'>;
+type StopLogcatProcess = {
+  stop: () => Promise<void>;
+};
 
 type ParsedHttpRequestMessage = ParsedHttpMessage & {
   method: string;
@@ -57,7 +60,7 @@ export class ADBManager extends EventEmitter {
   private adbBinary: ResolvedAdbBinary | null = null;
   private deviceInfoCache = new Map<string, DeviceInfo>();
   private lastDeviceSnapshot = new Map<string, string>();
-  private logcatProcesses = new Map<string, () => void>();
+  private logcatProcesses = new Map<string, StopLogcatProcess>();
   private logcatBuffer = new Map<string, string>();
   private logcatPidPackageCache = new Map<string, Map<number, string>>();
   private logcatPidPackageRefreshAt = new Map<string, number>();
@@ -325,7 +328,7 @@ export class ADBManager extends EventEmitter {
     pid?: string
   ): Promise<void> {
     try {
-      this.stopLogcat(deviceId);
+      await this.stopLogcat(deviceId);
 
       const levelPriority = { V: 0, D: 1, I: 2, W: 3, E: 4, F: 5 };
       const minPriority = levelPriority[minLevel];
@@ -395,44 +398,46 @@ export class ADBManager extends EventEmitter {
         logger.error('ADBManager: logcat process error:', err);
       });
       
-      let stopFn: (() => void) | undefined;
+      let stopEntry: StopLogcatProcess | undefined;
       logcatProcess.on('close', () => {
-        if (this.logcatProcesses.get(deviceId) === stopFn) {
+        if (this.logcatProcesses.get(deviceId) === stopEntry) {
           this.logcatProcesses.delete(deviceId);
         }
         this.logcatBuffer.delete(deviceId);
         this.clearLogcatPackageCache(deviceId);
       });
       
-      stopFn = () => {
+      stopEntry = {
+        stop: async () => {
         logcatProcess.stdout.removeAllListeners('data');
         logcatProcess.stderr.removeAllListeners('data');
 
         if (!logcatProcess.killed) {
           if (process.platform === 'win32' && logcatProcess.pid) {
-            execFile('taskkill', ['/pid', String(logcatProcess.pid), '/T', '/F'], () => {});
+            await this.killWindowsProcessTree(logcatProcess.pid);
           } else {
             logcatProcess.kill('SIGTERM');
           }
         }
-        if (this.logcatProcesses.get(deviceId) === stopFn) {
+        if (this.logcatProcesses.get(deviceId) === stopEntry) {
           this.logcatProcesses.delete(deviceId);
         }
         this.logcatBuffer.delete(deviceId);
         this.clearLogcatPackageCache(deviceId);
+        },
       };
       
-      this.logcatProcesses.set(deviceId, stopFn);
+      this.logcatProcesses.set(deviceId, stopEntry);
     } catch (error) {
       logger.error('ADBManager: startLogcat failed:', error);
       throw new Error('启动日志监听失败: ' + (error as Error).message);
     }
   }
 
-  stopLogcat(deviceId: string): void {
-    const stopFn = this.logcatProcesses.get(deviceId);
-    if (stopFn) {
-      stopFn();
+  async stopLogcat(deviceId: string): Promise<void> {
+    const stopEntry = this.logcatProcesses.get(deviceId);
+    if (stopEntry) {
+      await stopEntry.stop();
     }
     this.logcatBuffer.delete(deviceId);
     this.clearLogcatPackageCache(deviceId);
@@ -845,6 +850,12 @@ export class ADBManager extends EventEmitter {
     }
   }
 
+  private async killWindowsProcessTree(pid: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      execFile('taskkill', ['/pid', String(pid), '/T', '/F'], () => resolve());
+    });
+  }
+
   private parseHttpRequests(output: string, packageName = ''): NetworkRequest[] {
     const packets = this.parseTcpdumpPackets(output);
     const requestMessages: ParsedHttpRequestMessage[] = [];
@@ -1231,6 +1242,20 @@ export class ADBManager extends EventEmitter {
     });
   }
 
+  private async killAdbServer(): Promise<void> {
+    const adbBinary = this.adbBinary ?? await this.resolveAdbBinary().catch(() => null);
+    if (!adbBinary) {
+      return;
+    }
+
+    try {
+      await execFileAsync(adbBinary.path, ['kill-server'], { timeout: 3000 });
+      logger.log(`ADBManager: adb server stopped for ${adbBinary.source} adb`);
+    } catch (error) {
+      logger.warn('ADBManager: failed to stop adb server:', error);
+    }
+  }
+
   private shouldRetryInstallWithoutStreaming(result: { stdout: string; stderr: string; exitCode: number }): boolean {
     if (result.exitCode === 0) {
       return false;
@@ -1426,13 +1451,15 @@ export class ADBManager extends EventEmitter {
     }
   }
 
-  cleanup(): void {
+  async cleanup(): Promise<void> {
     logger.log('ADBManager: cleanup called, stopping all processes...');
-    
-    for (const [deviceId, stopFn] of this.logcatProcesses.entries()) {
+
+    this.stopDeviceMonitoring();
+
+    for (const [deviceId, stopEntry] of this.logcatProcesses.entries()) {
       try {
         logger.log(`ADBManager: stopping logcat for device: ${deviceId}`);
-        stopFn();
+        await stopEntry.stop();
       } catch (error) {
         logger.error('ADBManager: failed to stop logcat for device:', deviceId, error);
       }
@@ -1441,7 +1468,7 @@ export class ADBManager extends EventEmitter {
     this.logcatBuffer.clear();
     this.deviceInfoCache.clear();
     this.lastDeviceSnapshot.clear();
-    this.stopDeviceMonitoring();
+    await this.killAdbServer();
     
     logger.log('ADBManager: cleanup completed');
   }
