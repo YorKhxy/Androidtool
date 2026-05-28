@@ -130,6 +130,14 @@ export class ADBManager extends EventEmitter {
           logger.warn('Failed to get props for', id, e);
         }
 
+        if (device.status === 'connected') {
+          try {
+            device.batteryLevel = await this.getBatteryLevel(id);
+          } catch (e) {
+            logger.warn('Failed to get battery level for', id, e);
+          }
+        }
+
         if (device.connectionType === 'wifi' && device.status === 'connected') {
           const latency = await this.measureWifiLatency(id);
           device.latencyMs = latency.latencyMs;
@@ -172,6 +180,18 @@ export class ADBManager extends EventEmitter {
     }
     
     return props;
+  }
+
+  private async getBatteryLevel(deviceId: string): Promise<number | undefined> {
+    const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'battery'], {
+      timeout: 3000,
+      maxBuffer: 1024 * 64,
+    });
+    const match = stdout.match(/(?:level|capacity):\s*(\d+)/i);
+    if (!match) return undefined;
+    const level = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(level)) return undefined;
+    return Math.max(0, Math.min(level, 100));
   }
 
   async connectWiFi(target: string): Promise<DeviceInfo> {
@@ -591,10 +611,62 @@ export class ADBManager extends EventEmitter {
     });
   }
 
-  async capturePerformanceSnapshot(deviceId: string, currentMetrics?: PerformanceMetrics): Promise<CapturedPerformanceSnapshot> {
+  async installApk(deviceId: string, apkPath: string): Promise<string> {
+    const cleanedApkPath = apkPath.trim();
+    if (!cleanedApkPath.toLowerCase().endsWith('.apk')) {
+      throw new Error('Only APK files can be installed.');
+    }
+
+    const installOptions: ExecFileOptions = {
+      timeout: 10 * 60 * 1000,
+      maxBuffer: 1024 * 1024 * 8,
+    };
+    const baseArgs = ['-s', deviceId, 'install', '-r', cleanedApkPath];
+    const primaryResult = await this.execAdbWithExitCode(baseArgs, installOptions);
+    const primaryOutput = [primaryResult.stdout, primaryResult.stderr].filter(Boolean).join('\n').trim();
+    if (/success/i.test(primaryOutput)) {
+      return primaryOutput;
+    }
+
+    if (this.shouldRetryInstallWithoutStreaming(primaryResult)) {
+      const fallbackArgs = ['-s', deviceId, 'install', '--no-streaming', '-r', cleanedApkPath];
+      const fallbackResult = await this.execAdbWithExitCode(fallbackArgs, installOptions);
+      const fallbackOutput = [fallbackResult.stdout, fallbackResult.stderr].filter(Boolean).join('\n').trim();
+      if (/success/i.test(fallbackOutput)) {
+        return fallbackOutput;
+      }
+
+      throw new AdbCommandError({
+        code: 'ADB_COMMAND_FAILED',
+        message: `安装 APK 失败：${path.basename(cleanedApkPath)}`,
+        hint: '已尝试普通安装和非流式安装，请检查设备存储空间、安装权限、签名兼容性和网络稳定性。',
+        details: fallbackOutput || primaryOutput || 'adb install did not report success.',
+      });
+    }
+
+    throw new AdbCommandError({
+      code: 'ADB_COMMAND_FAILED',
+      message: `安装 APK 失败：${path.basename(cleanedApkPath)}`,
+      hint: '请检查设备连接、调试授权、安装权限、版本签名以及设备剩余空间。',
+      details: primaryOutput || 'adb install did not report success.',
+    });
+  }
+
+  async sleepDevice(deviceId: string): Promise<void> {
+    await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_SLEEP'], {
+      timeout: 8000,
+    });
+  }
+
+  async rebootDevice(deviceId: string): Promise<void> {
+    await this.execAdb(['-s', deviceId, 'reboot'], {
+      timeout: 8000,
+    });
+  }
+
+  async capturePerformanceSnapshot(deviceId: string): Promise<CapturedPerformanceSnapshot> {
     return this.runtimeInspector.capturePerformanceSnapshot(deviceId, {
       preferPico: this.isLikelyPicoDevice(deviceId),
-      currentMetrics,
     });
   }
 
@@ -1078,6 +1150,65 @@ export class ADBManager extends EventEmitter {
     }
   }
 
+  private async execAdbWithExitCode(
+    args: string[],
+    options?: ExecFileOptions
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const adbBinary = await this.resolveAdbBinary();
+    return await new Promise((resolve, reject) => {
+      execFile(adbBinary.path, args, options, (error, stdout, stderr) => {
+        const stdoutText = Buffer.isBuffer(stdout) ? stdout.toString() : String(stdout ?? '');
+        const stderrText = Buffer.isBuffer(stderr) ? stderr.toString() : String(stderr ?? '');
+
+        if (!error) {
+          resolve({ stdout: stdoutText, stderr: stderrText, exitCode: 0 });
+          return;
+        }
+
+        const exitCode = typeof (error as NodeJS.ErrnoException & { code?: unknown }).code === 'number'
+          ? Number((error as NodeJS.ErrnoException & { code?: unknown }).code)
+          : undefined;
+
+        if (exitCode !== undefined) {
+          resolve({ stdout: stdoutText, stderr: stderrText, exitCode });
+          return;
+        }
+
+        const adbError = classifyAdbError(error, args);
+        if (adbError.code === 'ADB_NOT_FOUND') {
+          this.adbBinary = null;
+          this.updateAdbStatus({
+            available: false,
+            version: null,
+            path: null,
+            source: undefined,
+            message: adbError.message,
+            checkedAt: Date.now(),
+            code: adbError.code,
+            hint: adbError.hint,
+          });
+        }
+        reject(adbError);
+      });
+    });
+  }
+
+  private shouldRetryInstallWithoutStreaming(result: { stdout: string; stderr: string; exitCode: number }): boolean {
+    if (result.exitCode === 0) {
+      return false;
+    }
+
+    const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
+    return (
+      output.includes('streamed install') ||
+      output.includes('streaming') ||
+      output.includes('broken pipe') ||
+      output.includes('connection reset') ||
+      output.includes('unexpected eof') ||
+      output.includes('protocol fault')
+    );
+  }
+
   private wrapOperationError(prefix: string, error: unknown): Error {
     if (error instanceof AdbCommandError) {
       return error;
@@ -1157,6 +1288,7 @@ export class ADBManager extends EventEmitter {
       device.manufacturer,
       device.androidVersion,
       device.apiLevel,
+      device.batteryLevel,
     ]);
   }
 
