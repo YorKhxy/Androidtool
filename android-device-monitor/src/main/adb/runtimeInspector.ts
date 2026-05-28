@@ -51,10 +51,12 @@ export class AdbRuntimeInspector {
               logger.warn('AdbRuntimeInspector: getPerformanceMetrics(android sidecar) failed:', error);
               return undefined;
             });
+            const nativePicoFps = picoMetrics.picoMetrics.fps?.value ?? androidMetrics?.fps ?? picoMetrics.fps;
             return {
               ...picoMetrics,
               cpuUsage: androidMetrics?.cpuUsage ?? 0,
               memoryUsage: androidMetrics?.memoryUsage ?? 0,
+              fps: nativePicoFps,
               picoMetricsState: 'native',
               picoAppSupport: appSupport.status,
               picoSupportMessage: appSupport.message,

@@ -1,7 +1,8 @@
 $ErrorActionPreference = "Stop"
 
-$ProjectRoot = "G:\Androidtool\android-device-monitor"
-$ReleaseDir = "G:\Androidtool\android-device-monitor\src\release"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
+$ReleaseDir = Join-Path $ProjectRoot "src\release"
 
 Push-Location $ProjectRoot
 
