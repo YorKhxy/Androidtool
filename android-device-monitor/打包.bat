@@ -1,0 +1,3 @@
+@echo off
+echo Starting Android Device Monitor package...
+call scripts\build-and-package.bat

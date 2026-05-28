@@ -1,0 +1,47 @@
+const { ipcRenderer, contextBridge } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  getAdbStatus: () => ipcRenderer.invoke('adb:get-status'),
+  getDevices: () => ipcRenderer.invoke('adb:get-devices'),
+  connectWiFi: (ip) => ipcRenderer.invoke('adb:connect-wifi', ip),
+  disconnect: (deviceId) => ipcRenderer.invoke('adb:disconnect', deviceId),
+  startLogcat: (deviceId, minLevel, packageName, pid) => ipcRenderer.invoke('adb:start-logcat', deviceId, minLevel, packageName, pid),
+  stopLogcat: (deviceId) => ipcRenderer.invoke('adb:stop-logcat', deviceId),
+  getPerformance: (deviceId) => ipcRenderer.invoke('adb:get-performance', deviceId),
+  capturePerformanceSnapshot: (deviceId) => ipcRenderer.invoke('adb:capture-performance-snapshot', deviceId),
+  getProcesses: (deviceId) => ipcRenderer.invoke('adb:get-processes', deviceId),
+  connectUSB: () => ipcRenderer.invoke('adb:connect-usb'),
+  getActivityStack: (deviceId, packageName) => ipcRenderer.invoke('adb:get-activity-stack', deviceId, packageName),
+  getNetworkRequests: (deviceId, packageName) => ipcRenderer.invoke('adb:get-network-requests', deviceId, packageName),
+  exportLogs: (logs) => ipcRenderer.invoke('log:export', logs),
+  onLogEntry: (callback) => {
+    const listener = (_, entry) => callback(entry);
+    ipcRenderer.on('log:entry', listener);
+    return () => ipcRenderer.removeListener('log:entry', listener);
+  },
+  onLogBatch: (callback) => {
+    const listener = (_, entries) => callback(entries);
+    ipcRenderer.on('log:batch', listener);
+    return () => ipcRenderer.removeListener('log:batch', listener);
+  },
+  onAdbStatusChanged: (callback) => {
+    const listener = (_, status) => callback(status);
+    ipcRenderer.on('adb:status-changed', listener);
+    return () => ipcRenderer.removeListener('adb:status-changed', listener);
+  },
+  onDeviceConnected: (callback) => {
+    const listener = (_, device) => callback(device);
+    ipcRenderer.on('device:connected', listener);
+    return () => ipcRenderer.removeListener('device:connected', listener);
+  },
+  onDeviceDisconnected: (callback) => {
+    const listener = (_, deviceId) => callback(deviceId);
+    ipcRenderer.on('device:disconnected', listener);
+    return () => ipcRenderer.removeListener('device:disconnected', listener);
+  },
+  onDeviceListChanged: (callback) => {
+    const listener = (_, devices) => callback(devices);
+    ipcRenderer.on('device:list-changed', listener);
+    return () => ipcRenderer.removeListener('device:list-changed', listener);
+  },
+});

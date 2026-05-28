@@ -1,0 +1,23 @@
+export const IPC_CHANNELS = {
+  GET_ADB_STATUS: 'adb:get-status',
+  GET_DEVICES: 'adb:get-devices',
+  CONNECT_USB: 'adb:connect-usb',
+  CONNECT_WIFI: 'adb:connect-wifi',
+  DISCONNECT: 'adb:disconnect',
+  START_LOGCAT: 'adb:start-logcat',
+  STOP_LOGCAT: 'adb:stop-logcat',
+  GET_PERFORMANCE: 'adb:get-performance',
+  CAPTURE_PERFORMANCE_SNAPSHOT: 'adb:capture-performance-snapshot',
+  GET_PROCESSES: 'adb:get-processes',
+  GET_ACTIVITY_STACK: 'adb:get-activity-stack',
+  GET_NETWORK_REQUESTS: 'adb:get-network-requests',
+  EXPORT_LOGS: 'log:export',
+  LOG_ENTRY: 'log:entry',
+  LOG_BATCH: 'log:batch',
+  ADB_STATUS_CHANGED: 'adb:status-changed',
+  DEVICE_CONNECTED: 'device:connected',
+  DEVICE_DISCONNECTED: 'device:disconnected',
+  DEVICE_LIST_CHANGED: 'device:list-changed',
+} as const;
+
+export type IpcChannelType = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];
