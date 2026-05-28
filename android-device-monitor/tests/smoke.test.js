@@ -316,6 +316,9 @@ describe('project smoke checks', () => {
 
     expect(managerSource).toContain("'exec-out', 'screencap', '-p'");
     expect(managerSource).toContain('capturePerformanceSnapshot');
+    expect(managerSource).toContain("'dumpsys', 'power'");
+    expect(managerSource).toContain('screenshotSkippedReason');
+    expect(managerSource).toContain('设备息屏，已跳过截图以避免唤醒设备。');
     expect(managerSource).not.toContain('capturePicoSystemScreenshot');
     expect(managerSource).not.toContain("'shell', 'input', 'keyevent', '120'");
     expect(managerSource).not.toContain('listScreenshotCandidates');
@@ -329,7 +332,9 @@ describe('project smoke checks', () => {
     expect(snapshotStoreSource).toContain('path.dirname(process.execPath)');
     expect(snapshotStoreSource).toContain('buildAnnotatedSnapshotImage');
     expect(snapshotStoreSource).toContain('nativeImage.createFromBuffer');
-    expect(snapshotStoreSource).toContain('sourceImage.crop');
+    expect(snapshotStoreSource).toContain('SCREEN OFF - SCREENSHOT SKIPPED');
+    expect(snapshotStoreSource).toContain('NO WAKEUP CAPTURE');
+    expect(snapshotStoreSource).toContain('baseImage.crop');
     expect(snapshotStoreSource).toContain('buildSnapshotMetricLines');
     expect(snapshotStoreSource).toContain('CPU USAGE');
     expect(snapshotStoreSource).toContain('formatMemoryMb');
@@ -340,8 +345,10 @@ describe('project smoke checks', () => {
     expect(preloadSource).toContain('capturePerformanceSnapshot');
     expect(typeSource).toContain("trigger: 'manual' | 'fps_drop' | 'threshold'");
     expect(typeSource).toContain('screenshotPath?: string');
+    expect(typeSource).toContain('screenshotSkippedReason?: string');
     expect(rendererSource).toContain('抓取性能快照');
     expect(rendererSource).toContain('性能快照');
+    expect(rendererSource).toContain('screenshotSkippedReason');
     expect(rendererSource).toContain('CPU 占用率');
     expect(rendererSource).toContain('内存占用');
     expect(rendererSource).not.toContain("'GPU',\n        'GPU 使用率'");

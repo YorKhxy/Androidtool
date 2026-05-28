@@ -21,7 +21,8 @@ type DeviceFingerprint = {
 export type CapturedPerformanceSnapshot = {
   capturedAt: Date;
   metrics: PerformanceMetrics;
-  screenshot: Buffer;
+  screenshot?: Buffer;
+  screenshotSkippedReason?: string;
 };
 
 type PerformanceOptions = {
@@ -211,15 +212,15 @@ export class AdbRuntimeInspector {
   }
 
   async capturePerformanceSnapshot(deviceId: string, options: PerformanceOptions = {}): Promise<CapturedPerformanceSnapshot> {
-    const [metrics, screenshot] = await Promise.all([
-      this.getPerformanceMetrics(deviceId, options),
-      this.captureScreenshot(deviceId, options),
-    ]);
+    const metrics = await this.getPerformanceMetrics(deviceId, options);
+    const screenState = await this.getScreenPowerState(deviceId);
+    const screenshot = screenState.isOn ? await this.captureScreenshot(deviceId, options) : undefined;
 
     return {
       capturedAt: new Date(),
       metrics,
       screenshot,
+      screenshotSkippedReason: screenState.isOn ? undefined : '设备息屏，已跳过截图以避免唤醒设备。',
     };
   }
 
@@ -261,6 +262,47 @@ export class AdbRuntimeInspector {
 
   private async captureScreenshot(deviceId: string, options: PerformanceOptions = {}): Promise<Buffer> {
     return this.captureRawScreenshot(deviceId);
+  }
+
+  private async getScreenPowerState(deviceId: string): Promise<{ isOn: boolean; raw?: string }> {
+    try {
+      const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'power'], {
+        maxBuffer: 1024 * 1024 * 4,
+      });
+      const raw = stdout;
+      const wakefulness = raw.match(/mWakefulness=(\w+)/i)?.[1]?.toLowerCase();
+      if (wakefulness === 'awake') {
+        return { isOn: true, raw };
+      }
+
+      if (wakefulness === 'asleep') {
+        return { isOn: false, raw };
+      }
+
+      const displayPowerState = raw.match(/Display Power:.*state=(ON|OFF)/i)?.[1]?.toLowerCase();
+      if (displayPowerState === 'on') {
+        return { isOn: true, raw };
+      }
+
+      if (displayPowerState === 'off') {
+        return { isOn: false, raw };
+      }
+
+      const screenState = raw.match(/mScreenState=(ON|OFF)/i)?.[1]?.toLowerCase();
+      if (screenState === 'on') {
+        return { isOn: true, raw };
+      }
+
+      if (screenState === 'off') {
+        return { isOn: false, raw };
+      }
+
+      logger.warn('AdbRuntimeInspector: unknown screen power state, capturing screenshot conservatively.');
+      return { isOn: true, raw };
+    } catch (error) {
+      logger.warn('AdbRuntimeInspector: getScreenPowerState failed, capturing screenshot:', error);
+      return { isOn: true };
+    }
   }
 
   private async captureRawScreenshot(deviceId: string): Promise<Buffer> {

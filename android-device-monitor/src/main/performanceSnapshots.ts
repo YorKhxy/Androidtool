@@ -147,10 +147,15 @@ const buildSnapshotMetricLines = (input: PersistPerformanceSnapshotInput): strin
 };
 
 function buildAnnotatedSnapshotImage(input: PersistPerformanceSnapshotInput): Buffer {
-  const sourceImage = nativeImage.createFromBuffer(input.snapshot.screenshot);
-  const croppedImage = input.snapshot.metrics.provider === 'pico'
-    ? sourceImage.crop({ x: 0, y: 0, width: Math.max(1, Math.floor(sourceImage.getSize().width / 2)), height: sourceImage.getSize().height })
+  const sourceImage = input.snapshot.screenshot
+    ? nativeImage.createFromBuffer(input.snapshot.screenshot)
+    : nativeImage.createEmpty();
+  const baseImage = sourceImage.isEmpty()
+    ? nativeImage.createFromBitmap(Buffer.alloc(1280 * 720 * 4, 24), { width: 1280, height: 720 })
     : sourceImage;
+  const croppedImage = input.snapshot.metrics.provider === 'pico'
+    ? baseImage.crop({ x: 0, y: 0, width: Math.max(1, Math.floor(baseImage.getSize().width / 2)), height: baseImage.getSize().height })
+    : baseImage;
   const size = croppedImage.getSize();
   const bitmap = Buffer.from(croppedImage.toBitmap());
   const lines = buildSnapshotMetricLines(input);
@@ -161,6 +166,10 @@ function buildAnnotatedSnapshotImage(input: PersistPerformanceSnapshotInput): Bu
   const panelY = Math.max(0, size.height - panelHeight);
 
   fillRect(bitmap, size.width, size.height, 0, panelY, size.width, panelHeight, [0, 0, 0, 230]);
+  if (!input.snapshot.screenshot) {
+    drawText(bitmap, size.width, size.height, padding, padding, 'SCREEN OFF - SCREENSHOT SKIPPED', scale);
+    drawText(bitmap, size.width, size.height, padding, padding + lineHeight, 'NO WAKEUP CAPTURE', scale);
+  }
   lines.forEach((line, index) => drawText(bitmap, size.width, size.height, padding, panelY + padding + index * lineHeight, line, scale));
 
   return nativeImage.createFromBitmap(bitmap, { width: size.width, height: size.height }).toPNG();
@@ -209,6 +218,7 @@ export async function persistPerformanceSnapshot(
     capturedAt,
     metrics: input.snapshot.metrics,
     screenshotPath,
+    screenshotSkippedReason: input.snapshot.screenshotSkippedReason,
     packageName: input.snapshot.metrics.packageName,
     activityName: input.snapshot.metrics.activityName,
     trigger: input.trigger,

@@ -334,6 +334,9 @@ export function PerformancePanel({
                     <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '8px' }}>
                       {snapshot.trigger === 'manual' ? '手动快照' : snapshot.trigger}
                     </div>
+                    {snapshot.screenshotSkippedReason && (
+                      <div style={{ color: '#fbbf24', fontSize: '12px', marginBottom: '8px' }}>{snapshot.screenshotSkippedReason}</div>
+                    )}
                     {isPicoSnapshot ? renderPicoSnapshotSummary(snapshot) : renderAndroidSnapshotSummary(snapshot)}
                     {renderSnapshotPath(snapshot)}
                   </div>
