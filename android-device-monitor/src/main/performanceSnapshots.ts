@@ -147,10 +147,10 @@ const buildSnapshotMetricLines = (input: PersistPerformanceSnapshotInput): strin
 };
 
 function buildAnnotatedSnapshotImage(input: PersistPerformanceSnapshotInput): Buffer {
-  const sourceImage = nativeImage.createFromBuffer(input.snapshot.screenshot);
+  const baseImage = nativeImage.createFromBuffer(input.snapshot.screenshot);
   const croppedImage = input.snapshot.metrics.provider === 'pico'
-    ? sourceImage.crop({ x: 0, y: 0, width: Math.max(1, Math.floor(sourceImage.getSize().width / 2)), height: sourceImage.getSize().height })
-    : sourceImage;
+    ? baseImage.crop({ x: 0, y: 0, width: Math.max(1, Math.floor(baseImage.getSize().width / 2)), height: baseImage.getSize().height })
+    : baseImage;
   const size = croppedImage.getSize();
   const bitmap = Buffer.from(croppedImage.toBitmap());
   const lines = buildSnapshotMetricLines(input);

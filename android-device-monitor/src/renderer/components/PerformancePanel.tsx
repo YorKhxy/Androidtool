@@ -1,9 +1,12 @@
-import type { MetricReading, PerformanceMetrics, PerformanceSnapshot, PicoMetricsState } from '../../shared/types';
+import type { DeviceInfo, MetricReading, PerformanceMetrics, PerformanceSnapshot, PicoMetricsState } from '../../shared/types';
 
 type PerformancePanelProps = {
+  device: DeviceInfo | null;
   performance: PerformanceMetrics | null;
   snapshots: PerformanceSnapshot[];
+  isMonitoringPerformance: boolean;
   isCapturingSnapshot: boolean;
+  onToggleMonitoring: () => void;
   onCaptureSnapshot: () => void;
 };
 
@@ -58,8 +61,7 @@ const renderSnapshotPath = (snapshot: PerformanceSnapshot) =>
   ) : null;
 
 const renderAndroidMetrics = (performance: PerformanceMetrics | null) => (
-  <>
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
       {renderMetricCard(
         'FPS',
         '前台渲染帧率',
@@ -92,16 +94,7 @@ const renderAndroidMetrics = (performance: PerformanceMetrics | null) => (
         '#f59e0b',
         `${Math.min(((performance?.networkSpeed || 0) / 1000) * 100, 100)}%`
       )}
-    </div>
-    {performance?.androidMetrics && (
-      <div style={{ backgroundColor: '#202038', borderRadius: '8px', padding: '12px 14px', color: '#94a3b8', fontSize: '12px', lineHeight: 1.6 }}>
-        <div style={{ color: '#cbd5e1', fontWeight: 600, marginBottom: '4px' }}>通用 Android Provider</div>
-        <div>{`CPU: ${performance.androidMetrics.cpuSource || '--'}`}</div>
-        <div>{`MEM: ${performance.androidMetrics.memorySource || '--'}`}</div>
-        <div>{`FPS: ${performance.androidMetrics.fpsSource || '--'}`}</div>
-      </div>
-    )}
-  </>
+  </div>
 );
 
 const renderPicoMetrics = (performance: PerformanceMetrics | null) => {
@@ -246,13 +239,24 @@ const getPicoIntroText = (performance: PerformanceMetrics | null) => {
     : '当前显示 Pico 性能回退采样，可抓取快照记录现场。';
 };
 
+const isLikelyPicoDevice = (device: DeviceInfo | null) => {
+  const identity = [device?.manufacturer, device?.name, device?.model]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return identity.includes('pico') || identity.includes('a9210') || identity.includes('sparrow');
+};
+
 export function PerformancePanel({
+  device,
   performance,
   snapshots,
+  isMonitoringPerformance,
   isCapturingSnapshot,
+  onToggleMonitoring,
   onCaptureSnapshot,
 }: PerformancePanelProps) {
-  const isPicoView = performance?.provider === 'pico';
+  const isPicoView = performance?.provider === 'pico' || (!performance && isLikelyPicoDevice(device));
   const picoMetricsState: PicoMetricsState = performance?.picoMetricsState || 'native';
   const showPicoFallback = isPicoView && picoMetricsState !== 'native';
 
@@ -260,25 +264,43 @@ export function PerformancePanel({
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
         <div style={{ color: '#9ca3af', fontSize: '13px' }}>
-          {isPicoView
-            ? getPicoIntroText(performance)
-            : '观察实时指标后，可以把当前画面和指标绑定成一条性能快照。'}
+          {isMonitoringPerformance
+            ? isPicoView
+              ? getPicoIntroText(performance)
+              : '当前设备性能采集中，可以把当前画面和指标绑定成一条性能快照。'
+            : '性能采集已关闭。点击开启后才会获取当前设备的性能参数。'}
         </div>
-        <button
-          onClick={onCaptureSnapshot}
-          disabled={isCapturingSnapshot}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: isCapturingSnapshot ? '#4b5563' : '#4a90d9',
-            border: 'none',
-            borderRadius: '6px',
-            color: 'white',
-            cursor: isCapturingSnapshot ? 'not-allowed' : 'pointer',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {isCapturingSnapshot ? '抓取中...' : '抓取性能快照'}
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            onClick={onToggleMonitoring}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: isMonitoringPerformance ? '#ef4444' : '#22c55e',
+              border: 'none',
+              borderRadius: '6px',
+              color: 'white',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {isMonitoringPerformance ? '关闭采集' : '开启采集'}
+          </button>
+          <button
+            onClick={onCaptureSnapshot}
+            disabled={isCapturingSnapshot || !performance}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: isCapturingSnapshot || !performance ? '#4b5563' : '#4a90d9',
+              border: 'none',
+              borderRadius: '6px',
+              color: 'white',
+              cursor: isCapturingSnapshot || !performance ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {isCapturingSnapshot ? '抓取中...' : '抓取性能快照'}
+          </button>
+        </div>
       </div>
 
       {isPicoView ? (showPicoFallback ? renderPicoFallbackMetrics(performance) : renderPicoMetrics(performance)) : renderAndroidMetrics(performance)}
