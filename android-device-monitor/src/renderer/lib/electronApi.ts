@@ -5,6 +5,7 @@ import type {
   LogEntry,
   NetworkRequest,
   PerformanceMetrics,
+  PerformanceSessionExportPayload,
   PerformanceSnapshot,
   ProcessInfo,
 } from '../../shared/types';
@@ -37,6 +38,7 @@ export interface ElectronAPI {
   getActivityStack: (deviceId: string, packageName?: string) => Promise<ElectronResult<ActivityStackEntry[]>>;
   getNetworkRequests: (deviceId: string, packageName?: string) => Promise<ElectronResult<NetworkRequest[]>>;
   exportLogs: (logs: LogEntry[]) => Promise<ElectronResult<string>>;
+  exportPerformanceSession: (payload: PerformanceSessionExportPayload) => Promise<ElectronResult<string>>;
   onLogEntry: (callback: (entry: LogEntry) => void) => () => void;
   onLogBatch: (callback: (entries: LogEntry[]) => void) => () => void;
   onAdbStatusChanged: (callback: (status: AdbStatus) => void) => () => void;

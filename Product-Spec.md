@@ -191,7 +191,7 @@
     -> 3. 在同一界面实时预览设备画面
     -> 4. 发现卡顿、掉帧或异常波动时，手动抓取性能快照
     -> 5. 可选：配置 FPS 阈值或异常条件，自动截图取证
-    -> 6. 回看快照中的截图、指标和时间点，定位问题
+    -> 6. 回看快照中的截图、指标和时间点，支持单击快照缩略图打开大图预览，定位问题
 ```
 
 ## 5. 数据模型
@@ -233,12 +233,13 @@ interface PerformanceMetrics {
   memoryUsage: number;
   fps: number; // 前台应用渲染 FPS
   gpuFps?: number; // 如保留，用于区分旧实现来源
-  networkSpeed: number;
   packageName?: string;
   activityName?: string;
   capturedAt: Date;
 }
 ```
+
+性能页签不采集、不展示网络速度；网络请求与抓包仍归属网络页签。
 
 ### 5.4 性能快照
 
@@ -255,6 +256,8 @@ interface PerformanceSnapshot {
   note?: string;
 }
 ```
+
+- 快照回看：用户可在性能面板单击快照缩略图打开大图预览，并可通过点击遮罩、关闭按钮或 Esc 退出预览。
 
 ### 5.5 日志条目
 

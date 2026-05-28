@@ -1,13 +1,17 @@
-import type { DeviceInfo, MetricReading, PerformanceMetrics, PerformanceSnapshot, PicoMetricsState } from '../../shared/types';
+import { useEffect, useState } from 'react';
+import type { DeviceInfo, MetricReading, PerformanceMetrics, PerformanceSample, PerformanceSnapshot, PicoMetricsState } from '../../shared/types';
 
 type PerformancePanelProps = {
   device: DeviceInfo | null;
   performance: PerformanceMetrics | null;
+  samples: PerformanceSample[];
   snapshots: PerformanceSnapshot[];
+  sessionSnapshots: PerformanceSnapshot[];
   isMonitoringPerformance: boolean;
   isCapturingSnapshot: boolean;
   onToggleMonitoring: () => void;
   onCaptureSnapshot: () => void;
+  onExportSession: () => void;
 };
 
 const createScreenshotUrl = (screenshotPath?: string) => {
@@ -61,7 +65,7 @@ const renderSnapshotPath = (snapshot: PerformanceSnapshot) =>
   ) : null;
 
 const renderAndroidMetrics = (performance: PerformanceMetrics | null) => (
-  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
       {renderMetricCard(
         'FPS',
         '前台渲染帧率',
@@ -85,14 +89,6 @@ const renderAndroidMetrics = (performance: PerformanceMetrics | null) => (
         'MB',
         '#22c55e',
         `${Math.min(((performance?.memoryUsage || 0) / 8_000_000) * 100, 100)}%`
-      )}
-      {renderMetricCard(
-        'NET',
-        '网络速度',
-        performance ? String(performance.networkSpeed) : '--',
-        'KB/s',
-        '#f59e0b',
-        `${Math.min(((performance?.networkSpeed || 0) / 1000) * 100, 100)}%`
       )}
   </div>
 );
@@ -205,11 +201,10 @@ const renderPicoFallbackMetrics = (performance: PerformanceMetrics | null) => (
 );
 
 const renderAndroidSnapshotSummary = (snapshot: PerformanceSnapshot) => (
-  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px', fontSize: '12px' }}>
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '6px', fontSize: '12px' }}>
     <div style={{ color: '#93c5fd' }}>{`CPU ${snapshot.metrics.cpuUsage.toFixed(1)}%`}</div>
     <div style={{ color: '#86efac' }}>{`MEM ${formatMemoryMb(snapshot.metrics.memoryUsage)}MB`}</div>
     <div style={{ color: '#d8b4fe' }}>{`FPS ${snapshot.metrics.fps}`}</div>
-    <div style={{ color: '#fcd34d' }}>{`NET ${snapshot.metrics.networkSpeed}`}</div>
   </div>
 );
 
@@ -247,18 +242,203 @@ const isLikelyPicoDevice = (device: DeviceInfo | null) => {
   return identity.includes('pico') || identity.includes('a9210') || identity.includes('sparrow');
 };
 
+const chartPadding = { left: 54, right: 76, top: 24, bottom: 38 };
+
+type ChartSeries = {
+  key: string;
+  label: string;
+  color: string;
+  axis: 'percent' | 'memory';
+  getValue: (sample: PerformanceSample) => number | undefined;
+};
+
+const getGpuValue = (sample: PerformanceSample) => sample.metrics.picoMetrics?.gpuUtil?.value;
+
+type HoverPoint = {
+  x: number;
+  y: number;
+  sample: PerformanceSample;
+};
+
+const getSampleValues = (sample: PerformanceSample) => [
+  `FPS ${sample.metrics.fps}`,
+  `CPU ${sample.metrics.cpuUsage.toFixed(1)}%`,
+  `MEM ${formatMemoryMb(sample.metrics.memoryUsage)}MB`,
+  `GPU ${getGpuValue(sample) ?? '--'}%`,
+];
+
+const buildPoints = (
+  samples: PerformanceSample[],
+  width: number,
+  height: number,
+  getValue: (sample: PerformanceSample) => number | undefined,
+  maxValue: number
+) => {
+  if (samples.length === 0) return '';
+  const plotWidth = width - chartPadding.left - chartPadding.right;
+  const plotHeight = height - chartPadding.top - chartPadding.bottom;
+  return samples.map((sample, index) => {
+    const x = chartPadding.left + (samples.length === 1 ? 0 : (index / (samples.length - 1)) * plotWidth);
+    const value = getValue(sample) || 0;
+    const y = chartPadding.top + plotHeight - (Math.max(0, value) / maxValue) * plotHeight;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+};
+
+const findNearestSample = (samples: PerformanceSample[], snapshot: PerformanceSnapshot) => {
+  const snapshotTime = new Date(snapshot.capturedAt).getTime();
+  return samples.reduce<{ sample: PerformanceSample; index: number; delta: number } | null>((nearest, sample, index) => {
+    const delta = Math.abs(new Date(sample.capturedAt).getTime() - snapshotTime);
+    return !nearest || delta < nearest.delta ? { sample, index, delta } : nearest;
+  }, null);
+};
+
+const renderSessionReport = (samples: PerformanceSample[], snapshots: PerformanceSnapshot[]) => {
+  const [hoveredSnapshotId, setHoveredSnapshotId] = useState<string | null>(null);
+  const [hoverPoint, setHoverPoint] = useState<HoverPoint | null>(null);
+  const width = 720;
+  const height = 220;
+  const hoveredSnapshot = snapshots.find((snapshot) => snapshot.id === hoveredSnapshotId);
+  const hoveredUrl = createScreenshotUrl(hoveredSnapshot?.screenshotPath);
+  const memoryValues = samples.map((sample) => Number(formatMemoryMb(sample.metrics.memoryUsage))).filter(Number.isFinite);
+  const memoryMax = Math.max(1, ...memoryValues);
+  const memoryAxisMax = Math.ceil(memoryMax / 512) * 512;
+  const series: ChartSeries[] = [
+    { key: 'fps', label: 'FPS', color: '#a855f7', axis: 'percent', getValue: (sample) => sample.metrics.fps },
+    { key: 'cpu', label: 'CPU%', color: '#3b82f6', axis: 'percent', getValue: (sample) => sample.metrics.cpuUsage },
+    { key: 'gpu', label: 'GPU%', color: '#ec4899', axis: 'percent', getValue: getGpuValue },
+    { key: 'mem', label: 'MEM MB', color: '#22c55e', axis: 'memory', getValue: (sample) => Number(formatMemoryMb(sample.metrics.memoryUsage)) },
+  ];
+  const snapshotMarkers = snapshots
+    .map((snapshot, index) => ({ snapshot, label: `S${index + 1}`, nearest: findNearestSample(samples, snapshot) }))
+    .filter((marker): marker is { snapshot: PerformanceSnapshot; label: string; nearest: { sample: PerformanceSample; index: number; delta: number } } => Boolean(marker.nearest));
+
+  if (samples.length === 0) {
+    return <div style={{ color: '#6b7280', fontSize: '13px' }}>开启采集后，这里会显示本次采集曲线和快照标记。</div>;
+  }
+
+  const plotWidth = width - chartPadding.left - chartPadding.right;
+  const plotHeight = height - chartPadding.top - chartPadding.bottom;
+  const percentTicks = [0, 25, 50, 75, 100];
+  const memoryTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(memoryAxisMax * ratio));
+
+  const updateHoverPoint = (clientX: number, clientY: number, target: SVGSVGElement) => {
+    const rect = target.getBoundingClientRect();
+    const svgX = ((clientX - rect.left) / rect.width) * width;
+    const clampedX = Math.max(chartPadding.left, Math.min(chartPadding.left + plotWidth, svgX));
+    const ratio = plotWidth <= 0 ? 0 : (clampedX - chartPadding.left) / plotWidth;
+    const index = Math.max(0, Math.min(samples.length - 1, Math.round(ratio * (samples.length - 1))));
+    setHoverPoint({ x: clientX - rect.left + 12, y: clientY - rect.top + 12, sample: samples[index] });
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        onMouseMove={(event) => updateHoverPoint(event.clientX, event.clientY, event.currentTarget)}
+        onMouseLeave={() => {
+          setHoverPoint(null);
+          setHoveredSnapshotId(null);
+        }}
+        style={{ width: '100%', height: '280px', background: '#0f172a', borderRadius: '10px' }}
+      >
+        <rect x="0" y="0" width={width} height={height} fill="#0f172a" />
+        {percentTicks.map((tick) => {
+          const y = chartPadding.top + plotHeight - (tick / 100) * plotHeight;
+          return (
+            <g key={tick}>
+              <line x1={chartPadding.left} y1={y} x2={chartPadding.left + plotWidth} y2={y} stroke="#1f2937" />
+              <text x={chartPadding.left - 10} y={y + 4} fill="#94a3b8" fontSize="11" textAnchor="end">{tick}</text>
+            </g>
+          );
+        })}
+        {memoryTicks.map((tick) => {
+          const y = chartPadding.top + plotHeight - (tick / memoryAxisMax) * plotHeight;
+          return <text key={tick} x={chartPadding.left + plotWidth + 10} y={y + 4} fill="#86efac" fontSize="11">{tick}</text>;
+        })}
+        <line x1={chartPadding.left} y1={chartPadding.top} x2={chartPadding.left} y2={chartPadding.top + plotHeight} stroke="#64748b" />
+        <line x1={chartPadding.left + plotWidth} y1={chartPadding.top} x2={chartPadding.left + plotWidth} y2={chartPadding.top + plotHeight} stroke="#22c55e" />
+        <line x1={chartPadding.left} y1={chartPadding.top + plotHeight} x2={chartPadding.left + plotWidth} y2={chartPadding.top + plotHeight} stroke="#64748b" />
+        {series.map((item) => (
+          <polyline
+            key={item.key}
+            points={buildPoints(samples, width, height, item.getValue, item.axis === 'memory' ? memoryAxisMax : 100)}
+            fill="none"
+            stroke={item.color}
+            strokeWidth="2.4"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        ))}
+        {snapshotMarkers.map(({ snapshot, label, nearest }) => {
+          const x = chartPadding.left + (samples.length === 1 ? 0 : (nearest.index / (samples.length - 1)) * plotWidth);
+          const y = chartPadding.top + plotHeight - (Math.max(0, nearest.sample.metrics.fps) / 100) * plotHeight;
+          return (
+            <g
+              key={snapshot.id}
+              onMouseEnter={() => setHoveredSnapshotId(snapshot.id)}
+              onMouseMove={(event) => updateHoverPoint(event.clientX, event.clientY, event.currentTarget.ownerSVGElement!)}
+              style={{ cursor: 'pointer' }}
+            >
+              <circle cx={x} cy={y} r="6" fill="#f59e0b" stroke="#fff" strokeWidth="2" />
+              <text x={x + 8} y={y - 8} fill="#fbbf24" fontSize="12">{label}</text>
+            </g>
+          );
+        })}
+        <text x={chartPadding.left} y="16" fill="#94a3b8" fontSize="11">% / FPS</text>
+        <text x={chartPadding.left + plotWidth - 32} y="16" fill="#86efac" fontSize="11">MEM MB</text>
+        {series.map((item, index) => (
+          <g key={item.key}>
+            <rect x={chartPadding.left + index * 86} y={height - 18} width="10" height="10" fill={item.color} rx="2" />
+            <text x={chartPadding.left + 14 + index * 86} y={height - 9} fill="#cbd5e1" fontSize="11">{item.label}</text>
+          </g>
+        ))}
+      </svg>
+      {hoveredSnapshot && hoveredUrl && (
+        <div style={{ position: 'absolute', left: `${hoverPoint?.x || 16}px`, top: `${hoverPoint?.y || 16}px`, width: '220px', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '8px', padding: '8px', boxShadow: '0 12px 30px rgba(0,0,0,0.35)', pointerEvents: 'none', zIndex: 2 }}>
+          <img src={hoveredUrl} alt={hoveredSnapshot.id} style={{ width: '100%', maxHeight: '120px', objectFit: 'cover', borderRadius: '6px' }} />
+          <div style={{ color: '#fff', fontSize: '12px', marginTop: '6px' }}>{new Date(hoveredSnapshot.capturedAt).toLocaleString('zh-CN', { hour12: false })}</div>
+          <div style={{ color: '#94a3b8', fontSize: '12px' }}>{`FPS ${hoveredSnapshot.metrics.fps} / CPU ${hoveredSnapshot.metrics.cpuUsage.toFixed(1)}% / MEM ${formatMemoryMb(hoveredSnapshot.metrics.memoryUsage)}MB`}</div>
+        </div>
+      )}
+      {hoverPoint && !hoveredSnapshot && (
+        <div style={{ position: 'absolute', left: `${hoverPoint.x}px`, top: `${hoverPoint.y}px`, backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '8px', padding: '8px 10px', boxShadow: '0 12px 30px rgba(0,0,0,0.35)', pointerEvents: 'none', zIndex: 1 }}>
+          <div style={{ color: '#fff', fontSize: '12px', marginBottom: '4px' }}>{new Date(hoverPoint.sample.capturedAt).toLocaleString('zh-CN', { hour12: false })}</div>
+          {getSampleValues(hoverPoint.sample).map((line) => <div key={line} style={{ color: '#cbd5e1', fontSize: '12px' }}>{line}</div>)}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export function PerformancePanel({
   device,
   performance,
+  samples,
   snapshots,
+  sessionSnapshots,
   isMonitoringPerformance,
   isCapturingSnapshot,
   onToggleMonitoring,
   onCaptureSnapshot,
+  onExportSession,
 }: PerformancePanelProps) {
   const isPicoView = performance?.provider === 'pico' || (!performance && isLikelyPicoDevice(device));
   const picoMetricsState: PicoMetricsState = performance?.picoMetricsState || 'native';
   const showPicoFallback = isPicoView && picoMetricsState !== 'native';
+  const [previewSnapshot, setPreviewSnapshot] = useState<PerformanceSnapshot | null>(null);
+  const previewUrl = createScreenshotUrl(previewSnapshot?.screenshotPath);
+
+  useEffect(() => {
+    if (!previewSnapshot) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPreviewSnapshot(null);
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [previewSnapshot]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -300,6 +480,19 @@ export function PerformancePanel({
           >
             {isCapturingSnapshot ? '抓取中...' : '抓取性能快照'}
           </button>
+          <button
+            onClick={onExportSession}
+            disabled={samples.length === 0}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: samples.length === 0 ? '#4b5563' : '#353550',
+              border: 'none',
+              borderRadius: '6px',
+              color: 'white',
+              cursor: samples.length === 0 ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >导出报告</button>
         </div>
       </div>
 
@@ -318,6 +511,14 @@ export function PerformancePanel({
       )}
 
       <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>本次采集报告</div>
+          <div style={{ fontSize: '12px', color: '#94a3b8' }}>{`采样 ${samples.length} 条 / 快照 ${sessionSnapshots.length} 张`}</div>
+        </div>
+        {renderSessionReport(samples, sessionSnapshots)}
+      </div>
+
+      <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '14px' }}>
         <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '12px' }}>性能快照</div>
         {snapshots.length === 0 ? (
           <div style={{ color: '#6b7280', fontSize: '13px' }}>还没有快照，先抓一张看看当时的页面和指标。</div>
@@ -327,7 +528,21 @@ export function PerformancePanel({
               const screenshotUrl = createScreenshotUrl(snapshot.screenshotPath);
               const isPicoSnapshot = snapshot.metrics.provider === 'pico';
               return (
-                <div key={snapshot.id} style={{ backgroundColor: '#202038', borderRadius: '8px', overflow: 'hidden' }}>
+                <div
+                  key={snapshot.id}
+                  onClick={() => {
+                    if (snapshot.screenshotPath) {
+                      setPreviewSnapshot(snapshot);
+                    }
+                  }}
+                  style={{
+                    backgroundColor: '#202038',
+                    borderRadius: '8px',
+                    overflow: 'hidden',
+                    cursor: snapshot.screenshotPath ? 'zoom-in' : 'default',
+                  }}
+                  title={snapshot.screenshotPath ? '点击查看大图' : undefined}
+                >
                   <div
                     style={{
                       height: '124px',
@@ -375,6 +590,87 @@ export function PerformancePanel({
           </div>
         )}
       </div>
+      {previewSnapshot && previewUrl && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="性能快照大图预览"
+          onClick={() => setPreviewSnapshot(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            backgroundColor: 'rgba(5, 8, 15, 0.88)',
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '24px',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '16px',
+              color: '#e5e7eb',
+              marginBottom: '16px',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 600 }}>性能快照大图</div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
+                {new Date(previewSnapshot.capturedAt).toLocaleString('zh-CN', { hour12: false })}
+              </div>
+            </div>
+            <button
+              onClick={(event) => {
+                event.stopPropagation();
+                setPreviewSnapshot(null);
+              }}
+              style={{
+                width: '36px',
+                height: '36px',
+                border: '1px solid #475569',
+                borderRadius: '6px',
+                backgroundColor: '#111827',
+                color: '#e5e7eb',
+                cursor: 'pointer',
+                fontSize: '20px',
+                lineHeight: '20px',
+              }}
+              aria-label="关闭大图预览"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              backgroundColor: '#020617',
+              border: '1px solid #1f2937',
+              borderRadius: '8px',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <img
+              src={previewUrl}
+              alt={`snapshot-preview-${previewSnapshot.id}`}
+              style={{
+                maxWidth: '100%',
+                maxHeight: '100%',
+                width: 'auto',
+                height: 'auto',
+                objectFit: 'contain',
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

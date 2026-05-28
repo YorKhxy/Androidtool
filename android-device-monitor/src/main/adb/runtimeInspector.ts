@@ -85,7 +85,6 @@ export class AdbRuntimeInspector {
         cpuUsage: 0,
         memoryUsage: 0,
         fps: 0,
-        networkSpeed: 0,
       };
     }
   }
@@ -113,7 +112,6 @@ export class AdbRuntimeInspector {
         cpuUsage,
         memoryUsage,
         fps: this.parseGfxInfo(gfxInfo.stdout),
-        networkSpeed: 0,
         packageName: foregroundApp.packageName,
         activityName: foregroundApp.activityName,
         androidMetrics: {
@@ -132,7 +130,6 @@ export class AdbRuntimeInspector {
         cpuUsage: 0,
         memoryUsage: 0,
         fps: 0,
-        networkSpeed: 0,
       };
     }
   }

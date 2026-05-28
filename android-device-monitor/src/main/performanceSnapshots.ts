@@ -141,7 +141,7 @@ const buildSnapshotMetricLines = (input: PersistPerformanceSnapshotInput): strin
   return [
     `ANDROID ${capturedAt}`,
     `FPS ${formatMetricValue(metrics.fps)}  CPU ${formatMetricValue(metrics.cpuUsage, '%')}`,
-    `MEM ${formatMemoryMb(metrics.memoryUsage)}  NET ${formatMetricValue(metrics.networkSpeed)}`,
+    `MEM ${formatMemoryMb(metrics.memoryUsage)}`,
     `APP ${metrics.packageName || '--'}`,
   ];
 };

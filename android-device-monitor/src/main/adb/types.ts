@@ -37,7 +37,6 @@ export interface PerformanceData {
   cpuUsage: number;
   memoryUsage: number;
   fps: number;
-  networkSpeed: number;
   packageName?: string;
   activityName?: string;
 }

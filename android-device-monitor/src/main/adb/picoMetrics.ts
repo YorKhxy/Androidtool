@@ -187,7 +187,6 @@ echo ADM_PICO_SUPPORT_UNSUPPORTED
       cpuUsage: 0,
       memoryUsage: 0,
       fps: fps?.value ?? 0,
-      networkSpeed: 0,
       packageName,
       activityName: foregroundApp.activityName,
       picoMetrics: {

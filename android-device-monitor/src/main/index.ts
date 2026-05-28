@@ -2,9 +2,10 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
-import { LogEntry, PerformanceMetrics } from '../shared/types';
+import { LogEntry, PerformanceMetrics, PerformanceSessionExportPayload } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
+import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 
 let mainWindow: BrowserWindow | null = null;
 let adbManager: ADBManager;
@@ -246,6 +247,25 @@ const setupIpcHandlers = () => {
       return { success: true, data: result.filePath };
     } catch (error) {
       return toIpcErrorResponse(error, '导出日志失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EXPORT_PERFORMANCE_SESSION, async (_event, payload: PerformanceSessionExportPayload) => {
+    try {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: '导出性能采集报告',
+        defaultPath: `performance-session-${Date.now()}.xls`,
+        filters: [{ name: 'Excel 文件', extensions: ['xls'] }]
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: '取消导出' };
+      }
+
+      await fs.writeFile(result.filePath, buildPerformanceSessionWorkbook(payload), 'utf-8');
+      return { success: true, data: result.filePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '导出性能采集报告失败');
     }
   });
 

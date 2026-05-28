@@ -8,6 +8,7 @@ export const IPC_CHANNELS = {
   STOP_LOGCAT: 'adb:stop-logcat',
   GET_PERFORMANCE: 'adb:get-performance',
   CAPTURE_PERFORMANCE_SNAPSHOT: 'adb:capture-performance-snapshot',
+  EXPORT_PERFORMANCE_SESSION: 'performance:export-session',
   GET_PROCESSES: 'adb:get-processes',
   GET_ACTIVITY_STACK: 'adb:get-activity-stack',
   GET_NETWORK_REQUESTS: 'adb:get-network-requests',

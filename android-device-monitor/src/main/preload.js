@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getActivityStack: (deviceId, packageName) => ipcRenderer.invoke('adb:get-activity-stack', deviceId, packageName),
   getNetworkRequests: (deviceId, packageName) => ipcRenderer.invoke('adb:get-network-requests', deviceId, packageName),
   exportLogs: (logs) => ipcRenderer.invoke('log:export', logs),
+  exportPerformanceSession: (payload) => ipcRenderer.invoke('performance:export-session', payload),
   onLogEntry: (callback) => {
     const listener = (_, entry) => callback(entry);
     ipcRenderer.on('log:entry', listener);

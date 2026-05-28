@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { ActivityStackEntry, AdbStatus, DeviceInfo, ProcessInfo, PerformanceMetrics, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
+import { ActivityStackEntry, AdbStatus, DeviceInfo, ProcessInfo, PerformanceMetrics, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { ElectronResult, hasElectronAPI } from './lib/electronApi';
@@ -75,6 +75,8 @@ function SimpleApp() {
   const [logVersion, setLogVersion] = useState(0);
   const [logViewport, setLogViewport] = useState({ scrollTop: 0, height: 320 });
   const [performanceByDeviceId, setPerformanceByDeviceId] = useState<Record<string, PerformanceMetrics>>({});
+  const [performanceSamplesByDeviceId, setPerformanceSamplesByDeviceId] = useState<Record<string, PerformanceSample[]>>({});
+  const [performanceSessionStartedAtByDeviceId, setPerformanceSessionStartedAtByDeviceId] = useState<Record<string, Date>>({});
   const [performanceEnabledDeviceIds, setPerformanceEnabledDeviceIds] = useState<Set<string>>(() => new Set());
   const [performanceSnapshots, setPerformanceSnapshots] = useState<PerformanceSnapshot[]>([]);
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
@@ -356,9 +358,9 @@ function SimpleApp() {
 
   useEffect(() => {
     if (selectedDevice && activeTab === 'performance' && performanceEnabledDeviceIds.has(selectedDevice.id)) {
-      void loadPerformance(selectedDevice.id);
+      void loadPerformance(selectedDevice.id, true);
       const interval = setInterval(() => {
-        loadPerformance(selectedDevice.id);
+        loadPerformance(selectedDevice.id, true);
       }, 1000);
       return () => clearInterval(interval);
     }
@@ -581,7 +583,7 @@ function SimpleApp() {
     setLogVersion(version => version + 1);
   };
 
-  const loadPerformance = async (deviceId = selectedDevice?.id) => {
+  const loadPerformance = async (deviceId = selectedDevice?.id, recordSample = false) => {
     if (!deviceId || !hasElectronAPI()) return;
     if (performanceRequestInFlightRef.current.has(deviceId)) return;
     performanceRequestInFlightRef.current.add(deviceId);
@@ -589,6 +591,16 @@ function SimpleApp() {
       const result = await window.electronAPI!.getPerformance(deviceId);
       if (result.success && result.data) {
         setPerformanceByDeviceId((previous) => ({ ...previous, [deviceId]: result.data! }));
+        if (recordSample) {
+          const capturedAt = new Date();
+          setPerformanceSamplesByDeviceId((previous) => ({
+            ...previous,
+            [deviceId]: [
+              ...(previous[deviceId] || []),
+              { id: `${deviceId}-${capturedAt.getTime()}`, deviceId, capturedAt, metrics: result.data! },
+            ].slice(-3600),
+          }));
+        }
       }
     } catch (err) {
       console.error('Load performance error:', err);
@@ -606,7 +618,9 @@ function SimpleApp() {
         next.delete(deviceId);
       } else {
         next.add(deviceId);
-        void loadPerformance(deviceId);
+        setPerformanceSamplesByDeviceId((previous) => ({ ...previous, [deviceId]: [] }));
+        setPerformanceSessionStartedAtByDeviceId((previous) => ({ ...previous, [deviceId]: new Date() }));
+        void loadPerformance(deviceId, true);
       }
       return next;
     });
@@ -633,6 +647,29 @@ function SimpleApp() {
       setError('抓取性能快照失败：' + (err as Error).message);
     } finally {
       setIsCapturingSnapshot(false);
+    }
+  };
+
+  const exportPerformanceSession = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    const samples = performanceSamplesByDeviceId[selectedDevice.id] || [];
+    if (samples.length === 0) {
+      setError('当前设备还没有性能采样数据，请先开启采集。');
+      return;
+    }
+
+    const result = await window.electronAPI!.exportPerformanceSession({
+      device: selectedDevice,
+      startedAt: performanceSessionStartedAtByDeviceId[selectedDevice.id] || samples[0].capturedAt,
+      endedAt: new Date(),
+      samples,
+      snapshots: visibleSessionSnapshots,
+    });
+
+    if (result.success) {
+      setError('');
+    } else {
+      setError(result.error || '导出性能采集报告失败');
     }
   };
 
@@ -713,11 +750,18 @@ function SimpleApp() {
   const isSelectedLogcatRunning = Boolean(selectedDeviceId && runningLogDeviceIds.has(selectedDeviceId));
   const isSelectedLogPaused = Boolean(selectedDeviceId && pausedLogDeviceIds.has(selectedDeviceId));
   const selectedPerformance = selectedDeviceId ? performanceByDeviceId[selectedDeviceId] || null : null;
+  const selectedPerformanceSamples = selectedDeviceId ? performanceSamplesByDeviceId[selectedDeviceId] || [] : [];
   const isSelectedPerformanceEnabled = Boolean(selectedDeviceId && performanceEnabledDeviceIds.has(selectedDeviceId));
   const visiblePerformanceSnapshots = useMemo(
     () => performanceSnapshots.filter((snapshot) => snapshot.deviceId === selectedDeviceId),
     [performanceSnapshots, selectedDeviceId]
   );
+  const visibleSessionSnapshots = useMemo(() => {
+    const sessionStartedAt = selectedDeviceId ? performanceSessionStartedAtByDeviceId[selectedDeviceId] : undefined;
+    if (!sessionStartedAt) return [];
+    const sessionStartTime = new Date(sessionStartedAt).getTime();
+    return visiblePerformanceSnapshots.filter((snapshot) => new Date(snapshot.capturedAt).getTime() >= sessionStartTime);
+  }, [performanceSessionStartedAtByDeviceId, selectedDeviceId, visiblePerformanceSnapshots]);
   const hasActiveLogFilter = Boolean(
     searchTerm.trim() ||
     filterLevel !== 'all' ||
@@ -1321,11 +1365,14 @@ function SimpleApp() {
                   <PerformancePanel
                     device={selectedDevice}
                     performance={selectedPerformance}
+                    samples={selectedPerformanceSamples}
                     snapshots={visiblePerformanceSnapshots}
+                    sessionSnapshots={visibleSessionSnapshots}
                     isMonitoringPerformance={isSelectedPerformanceEnabled}
                     isCapturingSnapshot={isCapturingSnapshot}
                     onToggleMonitoring={togglePerformanceMonitoring}
                     onCaptureSnapshot={capturePerformanceSnapshot}
+                    onExportSession={exportPerformanceSession}
                   />
                 )}
 
