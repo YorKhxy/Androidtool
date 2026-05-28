@@ -701,6 +701,15 @@ function SimpleApp() {
     }
   };
 
+  const togglePerformanceMonitoring = () => {
+    if (activeTab === 'performance') {
+      setActiveTab('devices');
+      return;
+    }
+
+    setActiveTab('performance');
+  };
+
   const selectApkFiles = async () => {
     if (!selectedDevice || !hasElectronAPI()) {
       setError('Electron 接口不可用');
@@ -1676,9 +1685,12 @@ function SimpleApp() {
                 {activeTab === 'logs' && renderLogcatPanel()}
                 {activeTab === 'performance' && (
                   <PerformancePanel
+                    device={selectedDevice}
                     performance={performance}
                     snapshots={visiblePerformanceSnapshots}
+                    isMonitoringPerformance={activeTab === 'performance'}
                     isCapturingSnapshot={isCapturingSnapshot}
+                    onToggleMonitoring={togglePerformanceMonitoring}
                     onCaptureSnapshot={capturePerformanceSnapshot}
                   />
                 )}
