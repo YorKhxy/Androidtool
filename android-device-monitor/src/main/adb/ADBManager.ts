@@ -659,9 +659,17 @@ export class ADBManager extends EventEmitter {
   }
 
   async rebootDevice(deviceId: string): Promise<void> {
-    await this.execAdb(['-s', deviceId, 'reboot'], {
+    const result = await this.execAdbWithExitCode(['-s', deviceId, 'reboot'], {
       timeout: 8000,
     });
+
+    if (result.exitCode === 0 || this.isExpectedRebootDisconnect(result)) {
+      this.deviceInfoCache.delete(deviceId);
+      this.wifiLatencyCache.delete(deviceId);
+      return;
+    }
+
+    throw this.createRebootError(result);
   }
 
   async capturePerformanceSnapshot(deviceId: string, currentMetrics?: PerformanceMetrics): Promise<CapturedPerformanceSnapshot> {
@@ -1208,6 +1216,34 @@ export class ADBManager extends EventEmitter {
       output.includes('unexpected eof') ||
       output.includes('protocol fault')
     );
+  }
+
+  private isExpectedRebootDisconnect(result: { stdout: string; stderr: string; exitCode: number }): boolean {
+    if (result.exitCode === 0) {
+      return true;
+    }
+
+    const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
+    return (
+      output.includes('device not found') ||
+      output.includes('no devices/emulators found') ||
+      output.includes('closed') ||
+      output.includes('connection reset') ||
+      output.includes('connection aborted') ||
+      output.includes('connection timed out') ||
+      output.includes('transport') ||
+      output.includes('offline')
+    );
+  }
+
+  private createRebootError(result: { stdout: string; stderr: string; exitCode: number }): AdbCommandError {
+    const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+    return new AdbCommandError({
+      code: 'ADB_COMMAND_FAILED',
+      message: '设备重启命令发送失败。',
+      hint: '请确认设备仍在线、调试授权有效，并且当前账号有权限执行 adb reboot。',
+      details: output || `adb reboot exited with code ${result.exitCode}.`,
+    });
   }
 
   private wrapOperationError(prefix: string, error: unknown): Error {
