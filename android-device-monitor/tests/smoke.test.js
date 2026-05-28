@@ -247,7 +247,7 @@ describe('project smoke checks', () => {
     expect(picoSource).toContain('grep -a -m 1 -E');
     expect(picoSource).toContain('rawLine: line');
     expect(picoSource).toContain('rawFields');
-    expect(picoSource).toContain('PxrMetric(?:\\(\\d+\\))?:\\s*(.*)$');
+    expect(picoSource).toContain('PxrMetric(?:\\(\\s*\\d+\\s*\\))?:\\s*(.*)$');
     expect(picoSource).toContain("'FrmCpu'");
     expect(adbManagerSource).toContain('preferPico: this.isLikelyPicoDevice(deviceId)');
     expect(adbManagerSource).toContain('private isLikelyPicoDevice(deviceId: string): boolean');
@@ -262,7 +262,7 @@ describe('project smoke checks', () => {
     expect(typeSource).toContain('picoAppSupport?: PicoAppSupportStatus');
     expect(typeSource).toContain('fps: number');
     expect(rendererSource).toContain('前台渲染帧率');
-    expect(rendererSource).toContain('通用 Android Provider');
+    expect(rendererSource).not.toContain('通用 Android Provider');
     expect(rendererSource).not.toContain('Pico Metrics 官方原始数据');
     expect(rendererSource).not.toContain('当前使用应用内置 ADB');
     expect(rendererSource).not.toContain('adbStatus: AdbStatus | null');
@@ -351,9 +351,13 @@ describe('project smoke checks', () => {
       rendererSource.indexOf('const renderPicoMetrics'),
       rendererSource.indexOf('const renderPicoFallbackMetrics')
     );
-    expect(picoMetricsSource.indexOf("'FPS',\n        'Pico 实时帧率'")).toBeLessThan(picoMetricsSource.indexOf("'CPU',\n        'CPU 占用率'"));
-    expect(picoMetricsSource.indexOf("'CPU',\n        'CPU 占用率'")).toBeLessThan(picoMetricsSource.indexOf("'MEM',\n        '内存占用'"));
-    expect(picoMetricsSource.indexOf("'MEM',\n        '内存占用'")).toBeLessThan(picoMetricsSource.indexOf("'GPU',\n        'GPU 利用率'"));
+    expect(picoMetricsSource.indexOf('Pico 实时帧率')).toBeGreaterThanOrEqual(0);
+    expect(picoMetricsSource.indexOf('CPU 占用率')).toBeGreaterThanOrEqual(0);
+    expect(picoMetricsSource.indexOf('内存占用')).toBeGreaterThanOrEqual(0);
+    expect(picoMetricsSource.indexOf('GPU 利用率')).toBeGreaterThanOrEqual(0);
+    expect(picoMetricsSource.indexOf('Pico 实时帧率')).toBeLessThan(picoMetricsSource.indexOf('CPU 占用率'));
+    expect(picoMetricsSource.indexOf('CPU 占用率')).toBeLessThan(picoMetricsSource.indexOf('内存占用'));
+    expect(picoMetricsSource.indexOf('内存占用')).toBeLessThan(picoMetricsSource.indexOf('GPU 利用率'));
     expect(rendererSource).toContain("width: '200%'");
     expect(rendererSource).toContain("minWidth: '200%'");
     expect(rendererSource).toContain("objectPosition: 'left center'");

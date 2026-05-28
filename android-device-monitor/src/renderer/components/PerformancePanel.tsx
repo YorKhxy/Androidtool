@@ -58,8 +58,7 @@ const renderSnapshotPath = (snapshot: PerformanceSnapshot) =>
   ) : null;
 
 const renderAndroidMetrics = (performance: PerformanceMetrics | null) => (
-  <>
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
       {renderMetricCard(
         'FPS',
         '前台渲染帧率',
@@ -92,16 +91,7 @@ const renderAndroidMetrics = (performance: PerformanceMetrics | null) => (
         '#f59e0b',
         `${Math.min(((performance?.networkSpeed || 0) / 1000) * 100, 100)}%`
       )}
-    </div>
-    {performance?.androidMetrics && (
-      <div style={{ backgroundColor: '#202038', borderRadius: '8px', padding: '12px 14px', color: '#94a3b8', fontSize: '12px', lineHeight: 1.6 }}>
-        <div style={{ color: '#cbd5e1', fontWeight: 600, marginBottom: '4px' }}>通用 Android Provider</div>
-        <div>{`CPU: ${performance.androidMetrics.cpuSource || '--'}`}</div>
-        <div>{`MEM: ${performance.androidMetrics.memorySource || '--'}`}</div>
-        <div>{`FPS: ${performance.androidMetrics.fpsSource || '--'}`}</div>
-      </div>
-    )}
-  </>
+  </div>
 );
 
 const renderPicoMetrics = (performance: PerformanceMetrics | null) => {
