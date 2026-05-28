@@ -106,15 +106,16 @@ const renderAndroidMetrics = (performance: PerformanceMetrics | null) => (
 
 const renderPicoMetrics = (performance: PerformanceMetrics | null) => {
   const pico = performance?.picoMetrics;
+  const picoFpsValue = pico?.fps?.value ?? performance?.fps;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px' }}>
       {renderMetricCard(
         'FPS',
         'Pico 实时帧率',
-        pico?.fps?.value !== undefined ? String(pico.fps.value) : '--',
+        picoFpsValue !== undefined ? String(picoFpsValue) : '--',
         pico?.fps?.maxValue !== undefined ? `/ ${pico.fps.maxValue}` : '',
         '#a855f7',
-        `${Math.min((((pico?.fps?.value ?? performance?.fps) || 0) / 120) * 100, 100)}%`
+        `${Math.min(((picoFpsValue || 0) / 120) * 100, 100)}%`
       )}
       {renderMetricCard(
         'CPU',
