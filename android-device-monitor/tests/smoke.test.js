@@ -44,6 +44,21 @@ describe('project smoke checks', () => {
     expect(source).toContain('maxLogcatBufferChars');
     expect(source).toContain("execFile('taskkill'");
     expect(source).toContain("removeAllListeners('data')");
+    expect(source).toContain('async cleanup(): Promise<void>');
+    expect(source).toContain('await stopEntry.stop()');
+    expect(source).toContain("['kill-server']");
+  });
+
+  test('app waits for adb cleanup before quitting', () => {
+    const devSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+
+    for (const source of [devSource, prodSource]) {
+      expect(source).toContain('cleanupBeforeQuit');
+      expect(source).toContain('event.preventDefault()');
+      expect(source).toContain('await adbManager.cleanup()');
+      expect(source).toContain('app.quit()');
+    }
   });
 
   test('renderer avoids unbounded pending log and performance polling backlog', () => {
@@ -206,11 +221,26 @@ describe('project smoke checks', () => {
     expect(typeSource).toContain('latencyMs?: number');
     expect(typeSource).toContain("latencyStatus?: 'ok' | 'timeout' | 'unknown'");
     expect(managerSource).toContain('measureWifiLatency');
-    expect(managerSource).toContain('wifiLatencyCacheMs = 10000');
-    expect(managerSource).toContain('net.createConnection');
+    expect(managerSource).toContain('wifiLatencyCacheMs = 3000');
+    expect(managerSource).toContain('refreshWifiLatencyForDevice');
+    expect(managerSource).toContain('connectedWifiDevices');
+    expect(managerSource).toContain('hasDeviceHealthChanged');
+    expect(managerSource).toContain("this.execAdb(['-s', deviceId, 'get-state']");
+    expect(managerSource).not.toContain('net.createConnection');
     expect(rendererSource).toContain('getWifiLatencyLabel');
     expect(rendererSource).toContain('延迟 ${device.latencyMs}ms');
     expect(rendererSource).toContain('连接不稳');
+  });
+
+  test('connected device health refreshes battery without full list changes', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+
+    expect(managerSource).toContain('batteryLevelCache');
+    expect(managerSource).toContain('batteryLevelCacheMs = 30000');
+    expect(managerSource).toContain('refreshBatteryLevelForDevice');
+    expect(managerSource).toContain("this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'battery']");
+    expect(managerSource).toContain('hasDeviceHealthChanged');
+    expect(managerSource).toContain('previousDevice?.batteryLevel !== device.batteryLevel');
   });
 
   test('renderer does not show phone text placeholders in empty states', () => {
