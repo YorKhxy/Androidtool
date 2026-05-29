@@ -6,6 +6,8 @@ import type {
   LogEntry,
   NetworkRequest,
   PerformanceMetrics,
+  PerformanceRecording,
+  PerformanceRecordingOptions,
   PerformanceSessionExportPayload,
   PerformanceSnapshot,
   ProcessInfo,
@@ -34,6 +36,7 @@ export interface ElectronAPI {
   stopLogcat: (deviceId: string) => Promise<ElectronResult<undefined>>;
   getPerformance: (deviceId: string) => Promise<ElectronResult<PerformanceMetrics>>;
   capturePerformanceSnapshot: (deviceId: string, currentMetrics?: PerformanceMetrics) => Promise<ElectronResult<PerformanceSnapshot>>;
+  startPerformanceRecording: (deviceId: string, options: PerformanceRecordingOptions) => Promise<ElectronResult<PerformanceRecording>>;
   readSnapshotImage: (screenshotPath: string) => Promise<ElectronResult<string>>;
   getProcesses: (deviceId: string) => Promise<ElectronResult<ProcessInfo[]>>;
   connectUSB: () => Promise<ElectronResult<DeviceInfo[]>>;

@@ -4,11 +4,12 @@ import { promisify } from 'util';
 import { EventEmitter } from 'events';
 import * as path from 'path';
 import type { ExecFileOptions } from 'child_process';
-import { ActivityStackEntry, AdbStatus, DeviceInfo, LogEntry, NetworkRequest, PerformanceMetrics, ProcessInfo } from '../../shared/types';
+import { ActivityStackEntry, AdbStatus, DeviceInfo, LogEntry, NetworkRequest, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo } from '../../shared/types';
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
 import { ResolvedAdbBinary, getBundledAdbCandidates, resolveBundledAdbBinaryPath } from './adbBinary';
 import { AdbRuntimeInspector, CapturedPerformanceSnapshot } from './runtimeInspector';
+import { PerformanceRecordingManager } from './performanceRecording';
 
 export interface PerformanceInfo {
   provider?: 'android' | 'pico';
@@ -56,6 +57,11 @@ export class ADBManager extends EventEmitter {
   private readonly runtimeInspector = new AdbRuntimeInspector(
     (args, options) => this.execAdb(args, options),
     (args, options) => this.execAdbBuffer(args, options)
+  );
+  private readonly performanceRecordingManager = new PerformanceRecordingManager(
+    (args, options) => this.execAdb(args, options),
+    async () => (await this.resolveAdbBinary()).path,
+    (deviceId) => this.getPerformanceMetrics(deviceId)
   );
   private adbBinary: ResolvedAdbBinary | null = null;
   private deviceInfoCache = new Map<string, DeviceInfo>();
@@ -710,6 +716,19 @@ export class ADBManager extends EventEmitter {
     return this.runtimeInspector.capturePerformanceSnapshot(deviceId, {
       preferPico: this.isLikelyPicoDevice(deviceId),
       currentMetrics,
+    });
+  }
+
+  async startPerformanceRecording(
+    deviceId: string,
+    baseDir: string,
+    options: PerformanceRecordingOptions
+  ): Promise<PerformanceRecording> {
+    return this.performanceRecordingManager.startRecording({
+      deviceId,
+      baseDir,
+      options,
+      isPico: this.isLikelyPicoDevice(deviceId),
     });
   }
 

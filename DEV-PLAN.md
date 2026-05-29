@@ -196,6 +196,15 @@ Phase 1 基础框架
 - [x] Pico 快照缩略图裁切为单眼显示
 - [x] 本地 PNG 快照文件写入性能指标条；Pico 本地快照同步裁切为单眼并写入指标
 - [x] 快照落盘目录跟随运行目录，发布包可在应用目录下保存 `performance-snapshots`
+- [x] 短时性能录制：普通 Android 使用设备端 `screenrecord` 录制 MP4，Pico 通过录制 provider 分流，第一版可回退 `pico-screenrecord`
+- [x] 性能录制 manifest：保存录制 provider、设备 ID、起止时间、前台包名 / Activity 与录制期间性能采样序列
+- [x] 性能录制媒体路径改为 `performance-recordings/...` 相对路径，并通过工具内媒体协议读取，避免 UI 依赖本机绝对路径
+- [x] 性能录制缩略图与工具内播放器：单击缩略图播放，播放时按视频时间同步叠加性能采样指标
+- [x] Pico 录制缩略图与播放画面按快照同样的单眼区域展示，避免显示双目并排画面
+- [x] 性能录制最终 MP4 保留设备端原始视频，不将动态性能指标烧录或水印进视频文件
+- [x] 录制完成后清理设备端录屏进程并等待 ADB 链路稳定，避免紧接着抓取快照失败
+- [x] 性能页布局重排：新增“取证操作”区域，合并性能开关、快照和短时录制控制，减少顶部按钮拥挤
+- [x] 性能页记录区顺序调整为快照在前、录制在后
 
 **待补齐**
 - [ ] 在性能模块内增加实时设备画面预览能力
@@ -213,8 +222,10 @@ Phase 1 基础框架
 | `android-device-monitor/src/main/adb/ADBManager.ts` | 性能指标、FPS、截图、进程、Activity 栈采集 |
 | `android-device-monitor/src/main/adb/runtimeInspector.ts` | Android / Pico 性能 Provider 分流、CPU / 内存 / FPS / 快照触发 |
 | `android-device-monitor/src/main/adb/screenshotCapture.ts` | 性能快照截图 provider、raw framebuffer 解析与 PNG screencap 回退 |
+| `android-device-monitor/src/main/adb/performanceRecording.ts` | Android / Pico 短时性能录制 provider、MP4 拉取与 manifest 产物 |
 | `android-device-monitor/src/main/adb/picoMetrics.ts` | Pico 官方 `PxrMetric` 读取、解析与应用支持检测 |
 | `android-device-monitor/src/main/performanceSnapshots.ts` | 性能快照落盘、本地 PNG 指标烙印、Pico 单眼裁切 |
+| `android-device-monitor/src/main/performanceMedia.ts` | 录制视频相对路径到本地文件的安全媒体协议映射 |
 | `android-device-monitor/src/main/index.ts` | 性能、截图、进程、Activity IPC |
 | `android-device-monitor/src/main/preload.js` | `getPerformance` / `getProcesses` / `getActivityStack` / 画面与截图桥接 |
 | `android-device-monitor/src/shared/types/index.ts` | `PerformanceMetrics` / `PerformanceSnapshot` / `ProcessInfo` / `ActivityStackEntry` |
@@ -226,6 +237,13 @@ Phase 1 基础框架
 - 可在性能页看到实时设备画面预览，且不阻塞主要操作
 - 手动抓取性能快照后，可回看对应截图与时间点指标
 - 本地快照 PNG 文件自身包含截图和关键性能指标
+- 短时性能录制可选择 10 / 30 / 60 秒，完成后生成本地 MP4 与 JSON manifest
+- Android 设备录制 provider 为 `android-screenrecord`，Pico 设备录制 provider 为 `pico-screenrecord` 或后续 `pico-sdk`
+- 性能录制期间继续保留指标采样，并将采样序列写入 manifest
+- 工具内可看到录制缩略图和指标，单击缩略图可播放视频；播放器中的指标随视频时间变化
+- 录制视频和 manifest 在 UI 中使用相对路径，不暴露本机绝对路径
+- 最终 MP4 文件必须保留设备端原始视频，不包含动态性能指标水印；Pico 只在工具内缩略图和播放器中按单眼区域展示
+- 录制完成后立即抓取性能快照应可成功触发，不被上一段录制残留状态阻塞
 - Pico 快照在 UI 与本地文件中均应呈现单眼画面，不再是双目并排图
 - 进程列表与 Activity 栈可返回非空结果或明确错误
 - Pico 官方指标读取成功时展示 `FPS / MTP / FrmCpu / FrmGpu / ATWGPU / GPU`，读取失败时回退 Android 通用采样

@@ -3,10 +3,11 @@ import * as path from 'path';
 import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
-import { LogEntry, PerformanceMetrics, PerformanceSessionExportPayload } from '../shared/types';
+import { LogEntry, PerformanceMetrics, PerformanceRecordingOptions, PerformanceSessionExportPayload } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
+import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
 
 let mainWindow: BrowserWindow | null = null;
 let adbManager: ADBManager;
@@ -16,6 +17,8 @@ let cleanupPromise: Promise<void> | null = null;
 const LOG_BATCH_INTERVAL_MS = 250;
 const LOG_BATCH_MAX_SIZE = 200;
 const LOG_QUEUE_MAX_SIZE = 1000;
+
+registerPerformanceMediaScheme();
 
 let logQueue: LogEntry[] = [];
 let logFlushTimer: NodeJS.Timeout | null = null;
@@ -250,6 +253,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.START_PERFORMANCE_RECORDING, async (_event, deviceId: string, options: PerformanceRecordingOptions) => {
+    try {
+      const recording = await adbManager.startPerformanceRecording(deviceId, resolveRuntimeAppRoot(app), options);
+      return { success: true, data: recording };
+    } catch (error) {
+      return toIpcErrorResponse(error, '性能录制失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.READ_SNAPSHOT_IMAGE, async (_event, screenshotPath: string) => {
     try {
       const dataUrl = await readSnapshotImageAsDataUrl(screenshotPath);
@@ -391,6 +403,7 @@ const setupIpcHandlers = () => {
 
 app.whenReady().then(() => {
   adbManager = new ADBManager();
+  registerPerformanceMediaProtocol(() => resolveRuntimeAppRoot(app));
   createWindow();
   setupIpcHandlers();
   adbManager.startDeviceMonitoring();
