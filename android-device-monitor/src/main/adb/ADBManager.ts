@@ -1,5 +1,4 @@
 import { execFile, spawn } from 'child_process';
-import * as net from 'net';
 import { promisify } from 'util';
 import { EventEmitter } from 'events';
 import * as path from 'path';
@@ -66,6 +65,7 @@ export class ADBManager extends EventEmitter {
   private logcatPidPackageRefreshAt = new Map<string, number>();
   private logcatPidPackageRefreshes = new Map<string, Promise<void>>();
   private wifiLatencyCache = new Map<string, { checkedAt: number; latencyMs?: number; status: 'ok' | 'timeout' | 'unknown' }>();
+  private batteryLevelCache = new Map<string, { checkedAt: number; batteryLevel?: number }>();
   private deviceMonitorTimer: NodeJS.Timeout | null = null;
   private isDeviceMonitorPolling = false;
   private adbStatus: AdbStatus = {
@@ -81,7 +81,8 @@ export class ADBManager extends EventEmitter {
   private readonly logcatPidPackageRefreshIntervalMs = 2000;
   private readonly deviceMonitorIntervalMs = 3000;
   private readonly adbStatusCacheMs = 5000;
-  private readonly wifiLatencyCacheMs = 10000;
+  private readonly wifiLatencyCacheMs = 3000;
+  private readonly batteryLevelCacheMs = 30000;
 
   async getDevices(): Promise<DeviceInfo[]> {
     try {
@@ -115,20 +116,8 @@ export class ADBManager extends EventEmitter {
           logger.warn('Failed to get props for', summary.id, e);
         }
 
-        if (device.status === 'connected') {
-          try {
-            device.batteryLevel = await this.getBatteryLevel(summary.id);
-          } catch (e) {
-            logger.warn('Failed to get battery level for', summary.id, e);
-          }
-        }
-
-        if (device.connectionType === 'wifi' && device.status === 'connected') {
-          const latency = await this.measureWifiLatency(summary.id);
-          device.latencyMs = latency.latencyMs;
-          device.latencyStatus = latency.status;
-        }
-        
+        device = await this.refreshBatteryLevelForDevice(device);
+        device = await this.refreshWifiLatencyForDevice(device);
         nextCache.set(summary.id, device);
         return device;
       }));
@@ -215,15 +204,45 @@ export class ADBManager extends EventEmitter {
   }
 
   private async getBatteryLevel(deviceId: string): Promise<number | undefined> {
+    const cached = this.batteryLevelCache.get(deviceId);
+    if (cached && Date.now() - cached.checkedAt < this.batteryLevelCacheMs) {
+      return cached.batteryLevel;
+    }
+
     const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'battery'], {
       timeout: 3000,
       maxBuffer: 1024 * 64,
     });
     const match = stdout.match(/(?:level|capacity):\s*(\d+)/i);
-    if (!match) return undefined;
+    if (!match) {
+      this.batteryLevelCache.set(deviceId, { checkedAt: Date.now(), batteryLevel: undefined });
+      return undefined;
+    }
     const level = Number.parseInt(match[1], 10);
-    if (!Number.isFinite(level)) return undefined;
-    return Math.max(0, Math.min(level, 100));
+    if (!Number.isFinite(level)) {
+      this.batteryLevelCache.set(deviceId, { checkedAt: Date.now(), batteryLevel: undefined });
+      return undefined;
+    }
+    const batteryLevel = Math.max(0, Math.min(level, 100));
+    this.batteryLevelCache.set(deviceId, { checkedAt: Date.now(), batteryLevel });
+    return batteryLevel;
+  }
+
+  private async refreshBatteryLevelForDevice(device: DeviceInfo): Promise<DeviceInfo> {
+    if (device.status !== 'connected') {
+      return device;
+    }
+
+    try {
+      const batteryLevel = await this.getBatteryLevel(device.id);
+      return {
+        ...device,
+        batteryLevel,
+      };
+    } catch (error) {
+      logger.warn('Failed to get battery level for', device.id, error);
+      return device;
+    }
   }
 
   async connectWiFi(target: string): Promise<DeviceInfo> {
@@ -283,6 +302,7 @@ export class ADBManager extends EventEmitter {
       await this.execAdb(['disconnect', deviceId]);
       this.deviceInfoCache.delete(deviceId);
       this.wifiLatencyCache.delete(deviceId);
+      this.batteryLevelCache.delete(deviceId);
     } catch (error) {
       throw this.wrapOperationError('Disconnect failed', error);
     }
@@ -294,30 +314,37 @@ export class ADBManager extends EventEmitter {
       return { latencyMs: cached.latencyMs, status: cached.status };
     }
 
-    const [host, portValue] = deviceId.split(':');
-    const port = Number.parseInt(portValue || '5555', 10);
-    if (!host || Number.isNaN(port)) {
-      return { status: 'unknown' };
-    }
-
     const startedAt = Date.now();
-    const result = await new Promise<{ latencyMs?: number; status: 'ok' | 'timeout' }>((resolve) => {
-      const socket = net.createConnection({ host, port, timeout: 1200 });
-      let settled = false;
-      const finish = (value: { latencyMs?: number; status: 'ok' | 'timeout' }) => {
-        if (settled) return;
-        settled = true;
-        socket.destroy();
-        resolve(value);
-      };
-
-      socket.once('connect', () => finish({ latencyMs: Date.now() - startedAt, status: 'ok' }));
-      socket.once('timeout', () => finish({ status: 'timeout' }));
-      socket.once('error', () => finish({ status: 'timeout' }));
-    });
+    let result: { latencyMs?: number; status: 'ok' | 'timeout' | 'unknown' };
+    try {
+      const { stdout } = await this.execAdb(['-s', deviceId, 'get-state'], {
+        timeout: 3000,
+        maxBuffer: 1024 * 4,
+      });
+      const state = stdout.trim();
+      result = state === 'device'
+        ? { latencyMs: Date.now() - startedAt, status: 'ok' }
+        : { status: 'unknown' };
+    } catch (error) {
+      logger.warn('ADBManager: wifi latency probe failed:', deviceId, error);
+      result = { status: 'unknown' };
+    }
 
     this.wifiLatencyCache.set(deviceId, { checkedAt: Date.now(), latencyMs: result.latencyMs, status: result.status });
     return result;
+  }
+
+  private async refreshWifiLatencyForDevice(device: DeviceInfo): Promise<DeviceInfo> {
+    if (device.connectionType !== 'wifi' || device.status !== 'connected') {
+      return device;
+    }
+
+    const latency = await this.measureWifiLatency(device.id);
+    return {
+      ...device,
+      latencyMs: latency.latencyMs,
+      latencyStatus: latency.status,
+    };
   }
 
   async startLogcat(
@@ -1435,6 +1462,34 @@ export class ADBManager extends EventEmitter {
 
         this.lastDeviceSnapshot = nextSnapshot;
         this.emitDeviceListChanged(devices);
+      } else {
+        const connectedWifiDevices = Array.from(this.deviceInfoCache.values())
+          .filter((device) => device.connectionType === 'wifi' && device.status === 'connected');
+
+        if (connectedWifiDevices.length > 0) {
+          const refreshedWifiDevices = await Promise.all(
+            connectedWifiDevices.map(async (device) => {
+              const withBattery = await this.refreshBatteryLevelForDevice(device);
+              return this.refreshWifiLatencyForDevice(withBattery);
+            })
+          );
+          let hasDeviceHealthChanged = false;
+          for (const device of refreshedWifiDevices) {
+            const previousDevice = this.deviceInfoCache.get(device.id);
+            if (
+              previousDevice?.batteryLevel !== device.batteryLevel ||
+              previousDevice?.latencyMs !== device.latencyMs ||
+              previousDevice?.latencyStatus !== device.latencyStatus
+            ) {
+              hasDeviceHealthChanged = true;
+            }
+            this.deviceInfoCache.set(device.id, device);
+          }
+
+          if (hasDeviceHealthChanged) {
+            this.emitDeviceListChanged(Array.from(this.deviceInfoCache.values()));
+          }
+        }
       }
     } catch (error) {
       logger.warn('ADBManager: device monitor poll failed:', error);
@@ -1467,6 +1522,7 @@ export class ADBManager extends EventEmitter {
     this.logcatProcesses.clear();
     this.logcatBuffer.clear();
     this.deviceInfoCache.clear();
+    this.batteryLevelCache.clear();
     this.lastDeviceSnapshot.clear();
     await this.killAdbServer();
     
