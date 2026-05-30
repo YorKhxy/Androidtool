@@ -21,6 +21,8 @@ export const IPC_CHANNELS = {
   INSTALL_APK: 'adb:install-apk',
   UNINSTALL_APP: 'adb:uninstall-app',
   LIST_INSTALLED_PACKAGES: 'adb:list-installed-packages',
+  LAUNCH_APP: 'adb:launch-app',
+  FORCE_STOP_APP: 'adb:force-stop-app',
   SLEEP_DEVICE: 'adb:sleep-device',
   REBOOT_DEVICE: 'adb:reboot-device',
   EXPORT_LOGS: 'log:export',

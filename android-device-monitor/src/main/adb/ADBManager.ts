@@ -678,17 +678,19 @@ export class ADBManager extends EventEmitter {
     });
   }
 
-  async installApk(deviceId: string, apkPath: string): Promise<string> {
+  async installApk(deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean }): Promise<string> {
     const cleanedApkPath = apkPath.trim();
     if (!cleanedApkPath.toLowerCase().endsWith('.apk')) {
       throw new Error('Only APK files can be installed.');
     }
 
+    // -r 重装保留数据；-d 允许版本降级覆盖（按 options.allowDowngrade 开启）。
+    const installFlags = options?.allowDowngrade ? ['-r', '-d'] : ['-r'];
     const installOptions: ExecFileOptions = {
       timeout: 10 * 60 * 1000,
       maxBuffer: 1024 * 1024 * 8,
     };
-    const baseArgs = ['-s', deviceId, 'install', '-r', cleanedApkPath];
+    const baseArgs = ['-s', deviceId, 'install', ...installFlags, cleanedApkPath];
     const primaryResult = await this.execAdbWithExitCode(baseArgs, installOptions);
     const primaryOutput = [primaryResult.stdout, primaryResult.stderr].filter(Boolean).join('\n').trim();
     if (/success/i.test(primaryOutput)) {
@@ -696,7 +698,7 @@ export class ADBManager extends EventEmitter {
     }
 
     if (this.shouldRetryInstallWithoutStreaming(primaryResult)) {
-      const fallbackArgs = ['-s', deviceId, 'install', '--no-streaming', '-r', cleanedApkPath];
+      const fallbackArgs = ['-s', deviceId, 'install', '--no-streaming', ...installFlags, cleanedApkPath];
       const fallbackResult = await this.execAdbWithExitCode(fallbackArgs, installOptions);
       const fallbackOutput = [fallbackResult.stdout, fallbackResult.stderr].filter(Boolean).join('\n').trim();
       if (/success/i.test(fallbackOutput)) {
@@ -758,6 +760,45 @@ export class ADBManager extends EventEmitter {
       hint: '请确认该应用存在且非受保护的系统应用，部分预装应用无法卸载。',
       details: output || 'adb uninstall did not report success.',
     });
+  }
+
+  async launchApp(deviceId: string, packageName: string): Promise<string> {
+    const cleanedPackage = this.assertValidPackageName(packageName);
+    const result = await this.execAdbWithExitCode(
+      ['-s', deviceId, 'shell', 'monkey', '-p', cleanedPackage, '-c', 'android.intent.category.LAUNCHER', '1'],
+      { timeout: 15 * 1000 }
+    );
+    const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+    if (/Events injected:\s*1/i.test(output)) {
+      return output;
+    }
+
+    throw new AdbCommandError({
+      code: 'ADB_COMMAND_FAILED',
+      message: `启动应用失败：${cleanedPackage}`,
+      hint: '该应用可能没有可启动的入口 Activity（如纯后台/服务类应用），或包名不存在。',
+      details: output || 'monkey did not report an injected launcher event.',
+    });
+  }
+
+  async forceStopApp(deviceId: string, packageName: string): Promise<void> {
+    const cleanedPackage = this.assertValidPackageName(packageName);
+    await this.execAdb(['-s', deviceId, 'shell', 'am', 'force-stop', cleanedPackage], {
+      timeout: 10 * 1000,
+    });
+  }
+
+  private assertValidPackageName(packageName: string): string {
+    const cleaned = packageName.trim();
+    if (!cleaned || !/^[A-Za-z][\w.]*$/.test(cleaned)) {
+      throw new AdbCommandError({
+        code: 'ADB_COMMAND_FAILED',
+        message: `非法包名：${packageName}`,
+        hint: '请从已安装应用列表中选择一个有效的应用包名。',
+        details: `Invalid package name: ${packageName}`,
+      });
+    }
+    return cleaned;
   }
 
   async sleepDevice(deviceId: string): Promise<void> {

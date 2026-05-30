@@ -312,9 +312,9 @@ const setupIpcHandlers = () => {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.INSTALL_APK, async (_event, deviceId: string, apkPath: string) => {
+  ipcMain.handle(IPC_CHANNELS.INSTALL_APK, async (_event, deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean }) => {
     try {
-      const output = await adbManager.installApk(deviceId, apkPath);
+      const output = await adbManager.installApk(deviceId, apkPath, options);
       return { success: true, data: { apkPath, output } };
     } catch (error) {
       return toIpcErrorResponse(error, '安装 APK 失败');
@@ -336,6 +336,24 @@ const setupIpcHandlers = () => {
       return { success: true, data: { packageName, output } };
     } catch (error) {
       return toIpcErrorResponse(error, '卸载应用失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LAUNCH_APP, async (_event, deviceId: string, packageName: string) => {
+    try {
+      const output = await adbManager.launchApp(deviceId, packageName);
+      return { success: true, data: { packageName, output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '启动应用失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.FORCE_STOP_APP, async (_event, deviceId: string, packageName: string) => {
+    try {
+      await adbManager.forceStopApp(deviceId, packageName);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '关闭应用失败');
     }
   });
 
