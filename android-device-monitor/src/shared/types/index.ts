@@ -130,6 +130,32 @@ export interface PerformanceSample {
   metrics: PerformanceMetrics;
 }
 
+export type PerformanceRecordingProvider = 'android-screenrecord' | 'pico-screenrecord' | 'pico-sdk';
+
+export type PerformanceRecordingStatus = 'completed' | 'failed';
+
+export interface PerformanceRecordingOptions {
+  durationSeconds: 10 | 30 | 60;
+  bitRateMbps?: number;
+}
+
+export interface PerformanceRecording {
+  id: string;
+  deviceId: string;
+  provider: PerformanceRecordingProvider;
+  status: PerformanceRecordingStatus;
+  startedAt: Date;
+  endedAt: Date;
+  durationMs: number;
+  videoRelativePath?: string;
+  manifestRelativePath?: string;
+  singleEyeVideo?: boolean;
+  samples: PerformanceSample[];
+  packageName?: string;
+  activityName?: string;
+  error?: string;
+}
+
 export interface PerformanceSessionExportPayload {
   device: DeviceInfo;
   startedAt: Date;
@@ -166,6 +192,7 @@ export type IpcChannel =
   | 'adb:stop-logcat'
   | 'adb:get-performance'
   | 'adb:capture-performance-snapshot'
+  | 'adb:start-performance-recording'
   | 'performance:export-session'
   | 'adb:get-processes'
   | 'adb:get-activity-stack'

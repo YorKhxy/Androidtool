@@ -1,7 +1,7 @@
 {
   "name": "android-device-monitor",
   "version": "1.0.0",
-  "description": "\u5b89\u5353\u8bbe\u5907\u76d1\u63a7 - \u8bbe\u5907\u76d1\u63a7\u5de5\u5177",
+  "description": "安卓设备监控 - 设备监控工具",
   "main": "./dist/main/main/index.js",
   "scripts": {
     "dev": "npm run build:main && concurrently -k -n main,renderer,electron \"npm run dev:main\" \"npm run dev:renderer\" \"node ./scripts/start-dev-electron.js\"",
@@ -18,7 +18,12 @@
     "release-bat": "scripts\\build-and-package.bat",
     "test": "jest"
   },
-  "keywords": ["android", "adb", "monitor", "debug"],
+  "keywords": [
+    "android",
+    "adb",
+    "monitor",
+    "debug"
+  ],
   "author": "Developer",
   "license": "MIT",
   "devDependencies": {
@@ -40,14 +45,14 @@
     "webpack-dev-server": "^4.0.0"
   },
   "dependencies": {
+    "adbkit": "^2.11.1",
     "lucide-react": "^0.290.0",
     "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "adbkit": "^2.11.1"
+    "react-dom": "^18.0.0"
   },
   "build": {
     "appId": "com.example.androiddevicemonitor",
-    "productName": "\u5b89\u5353\u8bbe\u5907\u76d1\u63a7",
+    "productName": "安卓设备监控",
     "directories": {
       "output": "dist"
     },
