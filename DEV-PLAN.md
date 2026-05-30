@@ -39,12 +39,15 @@ Phase 1 基础框架
       -> Phase 4 性能 / 进程 / Activity 监控
         -> Phase 5 网络请求抓取
           -> Phase 6 优化、测试与发布
+    -> Phase 7 投屏镜像与操控（普通设备一键投屏）
+      -> Phase 8 投屏参数配置 + Pico 单眼裁切 + 快捷键速查
 ```
 
 依赖关系说明：
 - Phase 2 是后续所有运行时功能的前置条件。
 - Phase 3 已经沉淀了多设备日志缓存、批量推送、虚拟滚动等基础能力，Phase 4/5 继续复用同一套主界面和 IPC 通道。
 - Phase 6 不是完全独立的新模块，而是对前面各 Phase 的质量补齐和可发布化收尾。
+- Phase 7/8 是新增的「投屏镜像与设备操控」模块（Product-Spec 2.5）。只依赖 Phase 2 的设备连接与内置 ADB 分发能力，与 Phase 4 的 Pico 检测能力复用同一套判定，不依赖 Phase 5/6。Phase 7 先打通普通 Android 的一键投屏与操控；Phase 8 在其上补参数配置、Pico 单眼裁切与快捷键速查。
 
 ---
 
@@ -342,6 +345,84 @@ Phase 1 基础框架
 
 ---
 
+### Phase 7: 投屏镜像与操控（普通设备一键投屏）
+
+**状态**：已落地（编译/测试/构建通过，投屏交互待真机验收）
+
+**目标**：在工具内打包 scrcpy 二进制，主进程以子进程方式 `spawn` scrcpy 调起其原生窗口，实现普通 Android 设备的高帧率低延迟镜像与反向操控（触屏、文字、物理键）。第一版采用 Product-Spec 2.5 的路线 A——不内嵌解码，调起 scrcpy 独立窗口，关闭窗口或点「停止」即结束子进程。
+
+**交付清单**
+- [ ] 打包随附 scrcpy：新增 `scripts/prepare-scrcpy.js`，下载对应 OS 的 scrcpy 发行包（含 `scrcpy.exe`、`scrcpy-server`、依赖 dll）到 `vendor/scrcpy/<os>/`，已存在则跳过；在 `package.json` 的 `electron-builder` `extraResources` 中加入 `scrcpy/` 目录，并把 `prepare-scrcpy` 接入 `pack` / `dist` / `release` 前置步骤（与 `prepare-platform-tools` 同级）
+- [ ] scrcpy 二进制定位：新增 `src/main/scrcpy/scrcpyBinary.ts`，仿照 `adbBinary.ts`，开发态从 `vendor/scrcpy/<os>/` 解析、打包态从 `process.resourcesPath/scrcpy/` 解析 scrcpy 可执行文件路径
+- [ ] scrcpy 进程管理器：新增 `src/main/scrcpy/scrcpyManager.ts`，提供 `startMirror(deviceId, options)` 与 `stopMirror(deviceId)`；用 `child_process.spawn` 启动 scrcpy，传入 `-s <deviceId>`、`--window-title`，并通过设置子进程环境变量 `ADB` 指向内置 adb（`adbBinary.ts` 解析出的路径），避免 scrcpy 另起一个与主程序冲突的 adb server；记录 `deviceId -> ChildProcess` 映射，进程 `exit` / `error` 时清理映射并向渲染层回传状态
+- [ ] 生命周期与异常回收：用户关闭 scrcpy 窗口（子进程自然退出）或在工具内点「停止投屏」时，结束并回收对应子进程；应用退出（`app.before-quit`）时统一 kill 所有存活的 scrcpy 子进程，不残留僵尸进程；scrcpy 启动失败（找不到设备 / 二进制缺失）时返回结构化错误供 UI 提示
+- [ ] IPC 打通：在 `src/shared/ipc/channels.ts` 新增 `MIRROR_START` / `MIRROR_STOP` / `MIRROR_STATUS` 通道；在 `index.ts` 与 `index-prod.ts` 注册对应 `ipcMain.handle` 并委托给 `ScrcpyManager`；在 `preload.js` 暴露 `startMirror` / `stopMirror` / `onMirrorStatus`；在 `src/renderer/lib/electronApi.ts` 增加类型化封装
+- [ ] 共享类型：在 `src/shared/types/index.ts` 新增 `MirrorSession`（`deviceId`、`status: 'starting'|'running'|'stopped'|'failed'`、`startedAt?`、`error?` 等，与 Product-Spec 5.6 对齐）
+- [ ] 最小投屏入口 UI：新增 `src/renderer/components/MirrorPanel.tsx`，提供「投屏」「停止投屏」按钮与当前会话状态（启动中 / 镜像中 / 已停止 / 失败 + 错误文案），在 `SimpleApp.tsx` 中以新页签 / 区域挂载，作用于当前选中设备
+
+**关键文件**
+| 文件路径 | 说明 |
+|----------|------|
+| `android-device-monitor/scripts/prepare-scrcpy.js` | 打包前下载并准备对应 OS 的 scrcpy 发行包到 `vendor/scrcpy/<os>/` |
+| `android-device-monitor/src/main/scrcpy/scrcpyBinary.ts` | 内置 scrcpy 可执行文件路径解析（开发态 / 打包态） |
+| `android-device-monitor/src/main/scrcpy/scrcpyManager.ts` | spawn scrcpy、参数拼装、`ADB` 环境注入、进程生命周期与回收 |
+| `android-device-monitor/src/main/adb/adbBinary.ts` | 复用：解析内置 adb 路径，注入到 scrcpy 子进程 `ADB` 环境变量 |
+| `android-device-monitor/src/main/index.ts` | 开发态投屏 IPC handler，应用退出时回收 scrcpy 子进程 |
+| `android-device-monitor/src/main/index-prod.ts` | 打包态投屏 IPC handler（与 index.ts 保持一致） |
+| `android-device-monitor/src/main/preload.js` | `startMirror` / `stopMirror` / `onMirrorStatus` 桥接 |
+| `android-device-monitor/src/renderer/lib/electronApi.ts` | 渲染层投屏 API 类型化封装 |
+| `android-device-monitor/src/shared/ipc/channels.ts` | 新增 `MIRROR_START` / `MIRROR_STOP` / `MIRROR_STATUS` 通道常量 |
+| `android-device-monitor/src/shared/types/index.ts` | 新增 `MirrorSession` 类型 |
+| `android-device-monitor/src/renderer/components/MirrorPanel.tsx` | 投屏控制 UI（启动 / 停止 / 状态） |
+| `android-device-monitor/src/renderer/SimpleApp.tsx` | 挂载投屏面板，绑定当前选中设备 |
+| `android-device-monitor/package.json` | `extraResources` 加入 `scrcpy/`，`pack`/`dist`/`release` 前置接入 `prepare-scrcpy` |
+
+**验收标准**
+- `npm run build` 通过；`npm test` 通过
+- 选中一台 USB / WiFi 连接的普通 Android 设备，点「投屏」可弹出 scrcpy 镜像窗口，画面高帧率低延迟
+- 在镜像窗口内鼠标点击 / 拖拽可操作设备触屏，键盘可输入文字
+- 通过 scrcpy 原生快捷键（MOD+h Home、MOD+b 返回、MOD+s 最近任务、MOD+p 电源、MOD+↑/↓ 音量）可触发对应物理键
+- 关闭 scrcpy 窗口或点「停止投屏」后，主进程对应子进程被回收（任务管理器中无残留 scrcpy 进程）
+- 设备未连接 / scrcpy 缺失时，UI 显示明确错误，不静默失败
+- scrcpy 使用的是内置 adb（不依赖系统 PATH 中的 adb），不与主程序的 adb server 冲突
+
+---
+
+### Phase 8: 投屏参数配置 + Pico 单眼裁切 + 快捷键速查
+
+**状态**：待开发
+
+**目标**：在 Phase 7 的基础上，补齐启动参数配置（码率 / 分辨率上限 / 裁切）、Pico 设备自动单眼裁切、以及工具内物理键快捷键速查表，使投屏在 Pico 设备上呈现单眼画面并降低用户记忆成本。
+
+**交付清单**
+- [ ] 启动参数配置 UI：在 `MirrorPanel.tsx` 增加可选参数控件——分辨率上限（`--max-size`，如 1280 / 1600 / 不限）、码率（`--video-bit-rate`，如 4M / 8M / 16M）；参数随 `MIRROR_START` 传入，由 `scrcpyManager.ts` 拼装到 scrcpy 命令行
+- [ ] Pico 检测与单眼裁切：复用现有 Pico 判定（`runtimeInspector.ts` / `picoMetrics.ts` 中的 Pico 识别逻辑）判断当前设备是否 Pico；是 Pico 时，先用 `adb shell wm size`（或复用 `screenshotCapture.ts` 的 raw framebuffer 头部尺寸）取设备分辨率，计算单眼裁切区域并自动附加 `--crop <W/2>:<H>:0:0`（左眼），使 scrcpy 窗口只显示单眼画面，与性能快照 / 录制的单眼口径一致
+- [ ] 裁切坐标映射说明：在 `scrcpyManager.ts` 中明确 Pico 裁切后操控坐标由 scrcpy 基于裁切区域自动换算，无需额外处理；将该约束以注释和 `MirrorSession.crop` 字段记录
+- [ ] `MirrorSession` 扩展：在 `src/shared/types/index.ts` 为 `MirrorSession` 补 `isPico`、`crop?`、`maxSize?`、`bitRate?` 字段（与 Product-Spec 5.6 完整对齐）
+- [ ] 快捷键速查表：在 `MirrorPanel.tsx` 增加可折叠「快捷键速查」区域，列出物理键映射（MOD+h=Home、MOD+b=返回、MOD+s=最近任务、MOD+p=电源、MOD+↑/↓=音量、MOD+r=旋转），并标注 MOD 默认为左 Alt / 左 Super
+- [ ] 能力边界提示：在 Pico 设备的投屏面板显著位置标注「仅支持 2D 界面触屏操控，VR 沉浸场景 6DoF 手柄无法操控」，与 Product-Spec 2.5 能力边界一致，避免用户误期望
+
+**关键文件**
+| 文件路径 | 说明 |
+|----------|------|
+| `android-device-monitor/src/main/scrcpy/scrcpyManager.ts` | 拼装 `--max-size` / `--video-bit-rate` / `--crop`，Pico 单眼裁切计算 |
+| `android-device-monitor/src/main/adb/runtimeInspector.ts` | 复用：Pico 设备识别判定 |
+| `android-device-monitor/src/main/adb/picoMetrics.ts` | 复用：Pico 设备识别辅助 |
+| `android-device-monitor/src/main/adb/screenshotCapture.ts` | 复用：raw framebuffer 头部分辨率，用于计算 Pico 单眼裁切区域 |
+| `android-device-monitor/src/shared/types/index.ts` | `MirrorSession` 补 `isPico` / `crop` / `maxSize` / `bitRate` 字段 |
+| `android-device-monitor/src/renderer/components/MirrorPanel.tsx` | 参数配置控件、快捷键速查表、Pico 能力边界提示 |
+
+**验收标准**
+- `npm run build` 通过；`npm test` 通过
+- 可在投屏前选择分辨率上限与码率，所选参数实际作用于 scrcpy 启动命令
+- 选中 Pico 设备点投屏，scrcpy 窗口呈现单眼画面（非双目并排），且单眼区域内点击操控位置正确
+- 选中普通 Android 设备点投屏，画面为完整设备屏幕，不被裁切
+- 投屏面板可展开查看物理键快捷键速查表，内容与 scrcpy 实际快捷键一致
+- Pico 投屏面板显示「仅支持 2D 界面操控、6DoF 手柄不可控」的能力边界提示
+- `MirrorSession` 在 UI 中可反映 `isPico` 与裁切 / 码率 / 分辨率配置
+
+---
+
 ## 4. 当前真实目录结构
 
 ```text
@@ -494,10 +575,12 @@ android-device-monitor/
 | Phase 4: 性能监控 | 主链路完成，继续校准 | Android / Pico 指标、前台 FPS、手动性能快照、本地 PNG 指标烙印已落地；实时预览、自动取证、趋势图仍待做 |
 | Phase 5: 网络监控 | 开发中 | HTTP 请求详情首版已落地，仍待补抓包前检查与 HTTPS 范围决策 |
 | Phase 6: 优化测试 | 持续推进中 | 虚拟滚动、构建、打包、Electron 运行时恢复、内置 ADB 分发、Windows 发布验收已完成，质量体系仍待补齐 |
+| Phase 7: 投屏镜像与操控 | 待开发 | 打包 scrcpy、主进程 spawn 调起独立窗口、普通 Android 一键投屏与触屏/文字/物理键操控、子进程生命周期回收 |
+| Phase 8: 投屏参数 + Pico 单眼 + 快捷键速查 | 待开发 | 启动参数配置、Pico 自动 `--crop` 单眼裁切、物理键快捷键速查表与能力边界提示 |
 
 **当前阶段判断**
 - 项目已经越过“脚手架阶段”
-- 当前最准确的说法是：`Phase 2 / 3 完成，Phase 4 主链路完成但仍需校准和增强，Phase 5 首版已接入，Phase 6 持续收口中`
+- 当前最准确的说法是：`Phase 2 / 3 完成，Phase 4 主链路完成但仍需校准和增强，Phase 5 首版已接入，Phase 6 持续收口中，Phase 7 / 8 投屏镜像模块为新增待开发`
 
 ---
 
@@ -522,5 +605,10 @@ android-device-monitor/
    - 增加集中错误处理
    - 扩测试覆盖
    - 完成安装器形态与跨平台发布验收
+
+4. 开发 Phase 7 / 8（投屏镜像与操控，新增模块）
+   - 先做 Phase 7：打包 scrcpy、主进程 spawn 调起独立窗口、普通 Android 一键投屏与操控、子进程生命周期回收
+   - 再做 Phase 8：启动参数配置、Pico 单眼裁切、物理键快捷键速查与能力边界提示
+   - 注意：scrcpy 子进程必须通过 `ADB` 环境变量复用内置 adb，避免与主程序 adb server 冲突
 
 **进入下一轮实现时，建议优先调用**：`/dev-builder`
