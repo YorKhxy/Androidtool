@@ -1,7 +1,8 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { ActivityStackEntry, AdbStatus, DeviceInfo, ProcessInfo, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
+import { ActivityStackEntry, AdbStatus, DeviceInfo, MirrorSession, ProcessInfo, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
+import { MirrorPanel } from './components/MirrorPanel';
 import { ElectronResult, hasElectronAPI } from './lib/electronApi';
 import {
   BATCH_UPDATE_DELAY,
@@ -15,7 +16,7 @@ import {
   MAX_PENDING_LOG_BUFFER,
 } from './lib/logStore';
 
-type TabType = 'devices' | 'logs' | 'performance' | 'processes' | 'activity' | 'network';
+type TabType = 'devices' | 'logs' | 'performance' | 'processes' | 'activity' | 'network' | 'mirror';
 type LogLevelFilter = LogEntry['level'] | 'all';
 type ApkInstallStatus = 'queued' | 'installing' | 'success' | 'failed';
 
@@ -111,6 +112,8 @@ function SimpleApp() {
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
   const [customDeviceNames, setCustomDeviceNames] = useState<Record<string, string>>(() => loadStoredDeviceNames());
   const [activeTab, setActiveTab] = useState<TabType>('devices');
+  const [mirrorSessionsByDeviceId, setMirrorSessionsByDeviceId] = useState<Record<string, MirrorSession>>({});
+  const [mirrorStartingDeviceIds, setMirrorStartingDeviceIds] = useState<Set<string>>(new Set());
   const [logVersion, setLogVersion] = useState(0);
   const [logViewport, setLogViewport] = useState({ scrollTop: 0, height: 320 });
   const [performanceByDeviceId, setPerformanceByDeviceId] = useState<Record<string, PerformanceMetrics>>({});
@@ -415,6 +418,15 @@ function SimpleApp() {
         const unsubscribeLogBatch = window.electronAPI!.onLogBatch((entries) => {
           enqueueLogEntries(entries);
         });
+        const unsubscribeMirrorStatus = window.electronAPI!.onMirrorStatus((session) => {
+          setMirrorSessionsByDeviceId(prev => ({ ...prev, [session.deviceId]: session }));
+          setMirrorStartingDeviceIds(prev => {
+            if (!prev.has(session.deviceId)) return prev;
+            const next = new Set(prev);
+            next.delete(session.deviceId);
+            return next;
+          });
+        });
 
         return () => {
           unsubscribeAdbStatusChanged();
@@ -423,6 +435,7 @@ function SimpleApp() {
           unsubscribeDeviceDisconnected();
           unsubscribeLogEntry();
           unsubscribeLogBatch();
+          unsubscribeMirrorStatus();
           logStatesRef.current.forEach(state => {
             if (state.flushTimer !== null) {
               window.clearTimeout(state.flushTimer);
@@ -1006,6 +1019,44 @@ function SimpleApp() {
       setNetworkRequests([]);
       setSelectedNetworkRequestId(null);
       setError('\u7f51\u7edc\u6293\u53d6\u5931\u8d25\uff1a' + (err as Error).message);
+    }
+  };
+
+  const handleStartMirror = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    const deviceId = selectedDevice.id;
+    setError('');
+    setMirrorStartingDeviceIds(prev => new Set(prev).add(deviceId));
+    try {
+      const result = await window.electronAPI!.startMirror(deviceId);
+      if (!result.success) {
+        setMirrorStartingDeviceIds(prev => {
+          const next = new Set(prev);
+          next.delete(deviceId);
+          return next;
+        });
+        setMirrorSessionsByDeviceId(prev => ({
+          ...prev,
+          [deviceId]: { deviceId, status: 'failed', error: result.error || '启动投屏失败' },
+        }));
+        setError(result.error || '启动投屏失败');
+      }
+    } catch (err) {
+      setMirrorStartingDeviceIds(prev => {
+        const next = new Set(prev);
+        next.delete(deviceId);
+        return next;
+      });
+      setError('启动投屏失败：' + (err as Error).message);
+    }
+  };
+
+  const handleStopMirror = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    try {
+      await window.electronAPI!.stopMirror(selectedDevice.id);
+    } catch (err) {
+      setError('停止投屏失败：' + (err as Error).message);
     }
   };
 
@@ -1683,6 +1734,7 @@ function SimpleApp() {
                   { key: 'processes' as TabType, label: '\u8fdb\u7a0b' },
                   { key: 'activity' as TabType, label: 'Activity \u6808' },
                   { key: 'network' as TabType, label: '\u7f51\u7edc' },
+                  { key: 'mirror' as TabType, label: '\u6295\u5c4f' },
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -1911,6 +1963,16 @@ function SimpleApp() {
                     selectedNetworkRequestId={selectedNetworkRequestId}
                     onSelectNetworkRequest={setSelectedNetworkRequestId}
                     onCaptureRequests={loadNetworkRequests}
+                  />
+                )}
+
+                {activeTab === 'mirror' && selectedDevice && (
+                  <MirrorPanel
+                    deviceName={customDeviceNames[selectedDevice.id] || selectedDevice.name || selectedDevice.id}
+                    session={mirrorSessionsByDeviceId[selectedDevice.id] || null}
+                    starting={mirrorStartingDeviceIds.has(selectedDevice.id)}
+                    onStart={handleStartMirror}
+                    onStop={handleStopMirror}
                   />
                 )}
               </div>
