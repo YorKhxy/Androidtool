@@ -389,7 +389,7 @@ const setupIpcHandlers = () => {
 
   ipcMain.handle(IPC_CHANNELS.MIRROR_START, async (_event, deviceId: string, options?: MirrorStartOptions) => {
     try {
-      const session = scrcpyManager.startMirror(deviceId, options ?? {});
+      const session = await scrcpyManager.startMirror(deviceId, options ?? {});
       return { success: true, data: session };
     } catch (error) {
       return toIpcErrorResponse(error, '启动投屏失败');

@@ -644,7 +644,7 @@ describe('project smoke checks', () => {
     expect(managerSource).toContain('resolveBundledScrcpyBinaryPath');
     expect(managerSource).toContain('resolveBundledAdbBinaryPath');
     expect(managerSource).toContain('ADB: adbPath');
-    expect(managerSource).toContain("['-s', deviceId, '--window-title', windowTitle]");
+    expect(managerSource).toContain("['-s', deviceId, '--window-title', windowTitle, '--no-mouse-hover']");
     expect(managerSource).toContain('stopAll');
     expect(managerSource).toContain("child.on('exit'");
 
@@ -667,5 +667,40 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('handleStartMirror');
     expect(simpleAppSource).toContain('onMirrorStatus');
     expect(simpleAppSource).toContain("{ key: 'mirror' as TabType");
+  });
+
+  test('mirror supports launch params, Pico single-eye crop and shortcut cheatsheet', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/scrcpy/scrcpyManager.ts'), 'utf-8');
+    const typeSource = fs.readFileSync(path.join(root, 'src/shared/types/index.ts'), 'utf-8');
+    const mirrorPanelSource = fs.readFileSync(path.join(root, 'src/renderer/components/MirrorPanel.tsx'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    // 启动参数拼装 + Pico 单眼裁切
+    expect(managerSource).toContain("'--max-size'");
+    expect(managerSource).toContain("'--video-bit-rate'");
+    expect(managerSource).toContain("'--crop'");
+    expect(managerSource).toContain('computePicoSingleEyeCrop');
+    expect(managerSource).toContain('--no-mouse-hover');
+    expect(managerSource).toContain("'shell', 'wm', 'size'");
+    expect(managerSource).toContain('options.isPico');
+    expect(managerSource).toContain('${halfWidth}:${height}:0:0');
+
+    // 类型扩展
+    expect(typeSource).toContain('isPico?: boolean');
+    expect(typeSource).toContain('crop?: string');
+    expect(typeSource).toContain('maxSize?: number');
+    expect(typeSource).toContain('bitRate?: string');
+
+    // 参数 UI + 快捷键速查 + Pico 边界提示
+    expect(mirrorPanelSource).toContain('分辨率上限');
+    expect(mirrorPanelSource).toContain('码率');
+    expect(mirrorPanelSource).toContain('快捷键速查');
+    expect(mirrorPanelSource).toContain('Alt + h');
+    expect(mirrorPanelSource).toContain('6DoF 手柄无法操控');
+    expect(mirrorPanelSource).toContain('单眼显示');
+
+    // 渲染层 Pico 检测与传参
+    expect(simpleAppSource).toContain('isLikelyPicoDevice');
+    expect(simpleAppSource).toContain('isPico: isLikelyPicoDevice(selectedDevice)');
   });
 });

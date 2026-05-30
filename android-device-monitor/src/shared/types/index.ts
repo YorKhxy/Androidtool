@@ -184,20 +184,24 @@ export interface LogcatFilters {
 
 export type MirrorSessionStatus = 'starting' | 'running' | 'stopped' | 'failed';
 
-/**
- * 投屏会话状态。第一版（Phase 7）只承载基础生命周期字段；
- * Pico 单眼裁切 / 码率 / 分辨率等配置字段在 Phase 8 扩展。
- */
+/** 投屏会话状态，含 Pico 单眼裁切与画质配置。 */
 export interface MirrorSession {
   deviceId: string;
   status: MirrorSessionStatus;
   startedAt?: string;
   error?: string;
+  isPico?: boolean;
+  crop?: string; // scrcpy --crop 参数，Pico 单眼裁切，如 "1920:1920:0:0"
+  maxSize?: number; // scrcpy --max-size 分辨率上限
+  bitRate?: string; // scrcpy --video-bit-rate 码率，如 "8M"
 }
 
-/** 启动投屏的可选参数。Phase 7 暂为空，Phase 8 补 maxSize / bitRate / crop。 */
+/** 启动投屏的可选参数。 */
 export interface MirrorStartOptions {
   windowTitle?: string;
+  isPico?: boolean; // Pico 设备自动附加单眼裁切
+  maxSize?: number; // --max-size
+  bitRate?: string; // --video-bit-rate，如 "8M"
 }
 
 export type IpcChannel =

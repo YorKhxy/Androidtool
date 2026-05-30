@@ -16,6 +16,14 @@ import {
   MAX_PENDING_LOG_BUFFER,
 } from './lib/logStore';
 
+const isLikelyPicoDevice = (device: DeviceInfo | null): boolean => {
+  const identity = [device?.manufacturer, device?.name, device?.model, device?.id]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return identity.includes('pico') || identity.includes('a9210') || identity.includes('sparrow');
+};
+
 type TabType = 'devices' | 'logs' | 'performance' | 'processes' | 'activity' | 'network' | 'mirror';
 type LogLevelFilter = LogEntry['level'] | 'all';
 type ApkInstallStatus = 'queued' | 'installing' | 'success' | 'failed';
@@ -1022,13 +1030,17 @@ function SimpleApp() {
     }
   };
 
-  const handleStartMirror = async () => {
+  const handleStartMirror = async (params: { maxSize?: number; bitRate?: string }) => {
     if (!selectedDevice || !hasElectronAPI()) return;
     const deviceId = selectedDevice.id;
     setError('');
     setMirrorStartingDeviceIds(prev => new Set(prev).add(deviceId));
     try {
-      const result = await window.electronAPI!.startMirror(deviceId);
+      const result = await window.electronAPI!.startMirror(deviceId, {
+        isPico: isLikelyPicoDevice(selectedDevice),
+        maxSize: params.maxSize,
+        bitRate: params.bitRate,
+      });
       if (!result.success) {
         setMirrorStartingDeviceIds(prev => {
           const next = new Set(prev);
@@ -1969,6 +1981,7 @@ function SimpleApp() {
                 {activeTab === 'mirror' && selectedDevice && (
                   <MirrorPanel
                     deviceName={customDeviceNames[selectedDevice.id] || selectedDevice.name || selectedDevice.id}
+                    isPico={isLikelyPicoDevice(selectedDevice)}
                     session={mirrorSessionsByDeviceId[selectedDevice.id] || null}
                     starting={mirrorStartingDeviceIds.has(selectedDevice.id)}
                     onStart={handleStartMirror}
