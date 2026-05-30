@@ -454,6 +454,40 @@ Phase 1 基础框架
 
 ---
 
+### Phase 10: 批量安装
+
+**状态**：待开发
+
+**目标**：选择单个 APK 并行安装到多台已连接设备，并发限流、故障隔离、逐台状态与重试。
+
+**整合修订**：单设备安装与批量安装已整合为同一个「应用安装」面板（设备页），复用 per-device 队列 + 进度计时器，每台设备独立展示安装队列与进度条；移除独立 BatchInstallPanel 组件。统一面板：选 1+ APK + 勾选 1+ 设备（默认当前）+ 并发上限 + 安装模式，并发池逐台安装，逐台进度条/状态/重试。
+
+**交付清单**
+- [x] 后端安装模式：`ADBManager.installApk` 增可选 `{ allowDowngrade }`，开启时安装参数加 `-d`（`install -r -d`，含 `--no-streaming` 兜底同步）；IPC/preload/electronApi 透传 options，向后兼容
+- [x] 并发编排 UI：`components/BatchInstallPanel.tsx` —— 选 APK、并发数(2/4/8/不限)、安装模式(保留数据/允许降级)、设备多选(在线可选/离线禁用/全选清空)、开始按钮；并发池(默认4)对每台调 `installApk`，逐台状态(排队/安装中/成功/失败+原因)、顶部汇总(完成/成功/失败)、失败行单独重试
+- [x] 设备页挂载：`SimpleApp.tsx` 设备页签底部挂载 `BatchInstallPanel`，传入全局 `devices` 列表
+
+**关键文件**
+| 文件路径 | 说明 |
+|----------|------|
+| `android-device-monitor/src/main/adb/ADBManager.ts` | `installApk` 安装模式选项（-r / -r -d）|
+| `android-device-monitor/src/main/index.ts` / `index-prod.ts` | INSTALL_APK handler 透传 options |
+| `android-device-monitor/src/main/preload.js` / `src/renderer/lib/electronApi.ts` | installApk options 透传与类型 |
+| `android-device-monitor/src/renderer/components/BatchInstallPanel.tsx` | 批量安装并发编排 UI |
+| `android-device-monitor/src/renderer/SimpleApp.tsx` | 设备页挂载 BatchInstallPanel |
+
+**验收标准**
+- `npm run build` 通过；`npm test` 通过
+- 选 APK + 勾选多台设备 + 开始 → 各设备并行安装，受并发数限制
+- 单台失败不阻塞其他，失败行可单独重试，顶部汇总正确
+- 离线设备不可勾选；安装进行中控件禁用
+
+**后续扩展**
+- 「卸载后清数据全新安装」需读取 APK 包名（解析 APK 或加解析依赖），暂未实现
+- 多个 APK → 多设备（队列）暂未实现
+
+---
+
 ## 4. 当前真实目录结构
 
 ```text
