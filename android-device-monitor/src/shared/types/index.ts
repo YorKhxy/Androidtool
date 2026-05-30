@@ -12,6 +12,12 @@ export interface DeviceInfo {
   batteryLevel?: number;
 }
 
+export interface PairResult {
+  message: string;
+  device: DeviceInfo | null;
+  alreadyPaired?: boolean;
+}
+
 export interface ProcessInfo {
   pid: number;
   ppid: number;
@@ -209,6 +215,7 @@ export type IpcChannel =
   | 'adb:get-devices'
   | 'adb:connect-usb'
   | 'adb:connect-wifi'
+  | 'adb:pair-wifi'
   | 'adb:disconnect'
   | 'adb:start-logcat'
   | 'adb:stop-logcat'

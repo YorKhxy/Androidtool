@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import { EventEmitter } from 'events';
 import * as path from 'path';
 import type { ExecFileOptions } from 'child_process';
-import { ActivityStackEntry, AdbStatus, DeviceInfo, LogEntry, NetworkRequest, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo } from '../../shared/types';
+import { ActivityStackEntry, AdbStatus, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo } from '../../shared/types';
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
 import { ResolvedAdbBinary, getBundledAdbCandidates, resolveBundledAdbBinaryPath } from './adbBinary';
@@ -162,6 +162,14 @@ export class ADBManager extends EventEmitter {
         continue;
       }
 
+      // 过滤 adb 列出的 mDNS 服务条目（如 adb-xxxx._adb-tls-connect._tcp）。
+      // 无线调试自动连接后，adb devices 会同时列出真实连接（IP:端口）和这个服务名，
+      // 服务名不是真实设备，否则会在设备列表里多出一张重复卡片。
+      if (id.includes('._tcp') || id.includes('_adb-tls-') || id.includes('_adb._')) {
+        logger.log('ADBManager: skipping mdns service entry:', id);
+        continue;
+      }
+
       summaries.push({
         id,
         connectionType: id.includes(':') ? 'wifi' : 'usb',
@@ -301,6 +309,104 @@ export class ADBManager extends EventEmitter {
       logger.error('ADBManager: connectWiFi failed:', error);
       throw this.wrapOperationError('WiFi connection failed', error);
     }
+  }
+
+  async pairDevice(target: string, pairingCode: string): Promise<PairResult> {
+    try {
+      logger.log('ADBManager: pairDevice called with:', target);
+
+      const trimmedTarget = target.trim();
+      const trimmedCode = pairingCode.trim();
+
+      if (!trimmedTarget.includes(':')) {
+        throw new Error('请填写配对地址 IP:端口（无线调试「使用配对码配对设备」里显示的地址和端口）');
+      }
+
+      // 先检查是否已配对过：adb 无法直接查询"配对记录"，但配对成功后设备会自动连接并留在设备列表里。
+      // 因此设备列表中已存在该 IP 的已连接设备，即视为已配对过，直接返回避免重复配对。
+      const ip = trimmedTarget.split(':')[0];
+      const alreadyConnected = (await this.getDevices()).find(
+        (d) => d.id.startsWith(`${ip}:`) && d.status === 'connected'
+      );
+      if (alreadyConnected) {
+        alreadyConnected.connectionType = 'wifi';
+        return { message: '该设备已配对并连接', device: alreadyConnected, alreadyPaired: true };
+      }
+
+      if (!/^\d{6}$/.test(trimmedCode)) {
+        throw new Error('配对码应为 6 位数字（无线调试弹窗里显示的配对码）');
+      }
+
+      // adb pair 是交互式命令：正常会提示输入配对码，这里通过参数直接传入
+      const { stdout, stderr } = await this.execAdb(['pair', trimmedTarget, trimmedCode], {
+        timeout: 20000,
+      });
+      logger.log('ADBManager: pair result:', stdout, stderr);
+
+      const output = `${stdout}\n${stderr}`;
+      if (!output.includes('Successfully paired')) {
+        // 失败时把 adb 的原始提示带出去，便于排查（配对码错误 / 端口不对 / 配对窗口已关闭）
+        throw new Error(stdout.trim() || stderr.trim() || '配对失败，请确认配对地址、端口和配对码是否正确');
+      }
+
+      // 配对成功后，现代 adb 会通过 mDNS/TLS 自动把设备连上，并以 IP:连接端口 出现在设备列表里。
+      // 这里轮询设备列表，按配对地址的 IP 找到那台自动连上的设备，省去用户再手填连接端口。
+      const device = await this.discoverPairedConnection(ip);
+      if (device) {
+        return { message: '配对并连接成功', device };
+      }
+      return {
+        message: '配对成功，但未能自动连接。请用上方「连接」填写无线调试主界面显示的 IP:连接端口',
+        device: null,
+      };
+    } catch (error) {
+      logger.error('ADBManager: pairDevice failed:', error);
+      throw this.wrapOperationError('WiFi pairing failed', error);
+    }
+  }
+
+  // 配对成功后发现并返回已自动连接的设备：优先轮询设备列表按 IP 匹配，
+  // 兜底用 adb mdns services 找到连接端口后主动 connect（部分 Windows 环境 mDNS 不稳定，仅作兜底）。
+  private async discoverPairedConnection(ip: string): Promise<DeviceInfo | null> {
+    for (let i = 0; i < 10; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      const devices = await this.getDevices();
+      const found = devices.find((d) => d.id.startsWith(`${ip}:`) && d.status === 'connected');
+      if (found) {
+        found.connectionType = 'wifi';
+        return found;
+      }
+
+      const discovered = await this.discoverConnectAddress(ip);
+      if (discovered) {
+        try {
+          return await this.connectWiFi(discovered);
+        } catch (error) {
+          logger.warn('ADBManager: auto-connect after pair failed:', discovered, error);
+        }
+      }
+    }
+    return null;
+  }
+
+  private async discoverConnectAddress(ip: string): Promise<string | null> {
+    try {
+      const { stdout } = await this.execAdb(['mdns', 'services'], { timeout: 5000 });
+      const escapedIp = ip.replace(/\./g, '\\.');
+      const matcher = new RegExp(`(${escapedIp}:\\d+)`);
+      for (const line of stdout.split('\n')) {
+        if (line.includes('_adb-tls-connect._tcp')) {
+          const match = line.match(matcher);
+          if (match) {
+            return match[1];
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn('ADBManager: mdns services discovery failed:', error);
+    }
+    return null;
   }
 
   async disconnect(deviceId: string): Promise<void> {

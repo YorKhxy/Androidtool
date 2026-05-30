@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAdbStatus: () => ipcRenderer.invoke('adb:get-status'),
   getDevices: () => ipcRenderer.invoke('adb:get-devices'),
   connectWiFi: (ip) => ipcRenderer.invoke('adb:connect-wifi', ip),
+  pairWiFi: (target, pairingCode) => ipcRenderer.invoke('adb:pair-wifi', target, pairingCode),
   disconnect: (deviceId) => ipcRenderer.invoke('adb:disconnect', deviceId),
   startLogcat: (deviceId, minLevel, packageName, pid) => ipcRenderer.invoke('adb:start-logcat', deviceId, minLevel, packageName, pid),
   stopLogcat: (deviceId) => ipcRenderer.invoke('adb:stop-logcat', deviceId),

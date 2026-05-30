@@ -12,6 +12,7 @@ import type {
   PerformanceRecordingOptions,
   PerformanceSessionExportPayload,
   PerformanceSnapshot,
+  PairResult,
   ProcessInfo,
 } from '../../shared/types';
 
@@ -28,6 +29,7 @@ export interface ElectronAPI {
   getAdbStatus: () => Promise<ElectronResult<AdbStatus>>;
   getDevices: () => Promise<ElectronResult<DeviceInfo[]>>;
   connectWiFi: (ip: string) => Promise<ElectronResult<DeviceInfo>>;
+  pairWiFi: (target: string, pairingCode: string) => Promise<ElectronResult<PairResult>>;
   disconnect: (deviceId: string) => Promise<ElectronResult<undefined>>;
   startLogcat: (
     deviceId: string,

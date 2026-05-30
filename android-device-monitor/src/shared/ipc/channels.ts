@@ -3,6 +3,7 @@ export const IPC_CHANNELS = {
   GET_DEVICES: 'adb:get-devices',
   CONNECT_USB: 'adb:connect-usb',
   CONNECT_WIFI: 'adb:connect-wifi',
+  PAIR_WIFI: 'adb:pair-wifi',
   DISCONNECT: 'adb:disconnect',
   START_LOGCAT: 'adb:start-logcat',
   STOP_LOGCAT: 'adb:stop-logcat',

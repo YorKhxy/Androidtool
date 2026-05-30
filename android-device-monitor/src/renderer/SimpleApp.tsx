@@ -140,6 +140,10 @@ function SimpleApp() {
   const [selectedNetworkRequestId, setSelectedNetworkRequestId] = useState<string | null>(null);
   const [runningLogDeviceIds, setRunningLogDeviceIds] = useState<Set<string>>(() => new Set());
   const [wifiIp, setWifiIp] = useState('');
+  const [showPairForm, setShowPairForm] = useState(false);
+  const [pairAddress, setPairAddress] = useState('');
+  const [pairCode, setPairCode] = useState('');
+  const [pairing, setPairing] = useState(false);
   const [packageFilter, setPackageFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterLevel, setFilterLevel] = useState<LogLevelFilter>('all');
@@ -150,6 +154,7 @@ function SimpleApp() {
   const [pausedLogDeviceIds, setPausedLogDeviceIds] = useState<Set<string>>(() => new Set());
   const [selectedLogEntry, setSelectedLogEntry] = useState<LogEntry | null>(null);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [maxLogEntries, setMaxLogEntries] = useState(MAX_LOG_ENTRIES);
   const [batchUpdateSize, setBatchUpdateSize] = useState(BATCH_UPDATE_SIZE);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
@@ -613,6 +618,66 @@ function SimpleApp() {
       console.error('connectWiFi error:', err);
       setError('WiFi \u8fde\u63a5\u5931\u8d25\uff1a' + (err as Error).message);
       await loadAdbStatus();
+    }
+  };
+
+  const pairWiFiDevice = async () => {
+    if (!pairAddress.trim()) {
+      setError('\u8bf7\u8f93\u5165\u914d\u5bf9\u5730\u5740 IP:\u7aef\u53e3');
+      return;
+    }
+    if (!pairCode.trim()) {
+      setError('\u8bf7\u8f93\u5165 6 \u4f4d\u914d\u5bf9\u7801');
+      return;
+    }
+    if (!hasElectronAPI()) {
+      setError('Electron \u63a5\u53e3\u4e0d\u53ef\u7528');
+      return;
+    }
+
+    setPairing(true);
+    try {
+      setError('\u6b63\u5728\u914d\u5bf9...');
+      const result = await window.electronAPI!.pairWiFi(pairAddress, pairCode);
+      if (result.success) {
+        setError('');
+        setPairCode('');
+        if (result.data?.alreadyPaired) {
+          // \u5df2\u914d\u5bf9\u8fc7\uff1a\u63d0\u793a\u5e76\u628a\u5df2\u8fde\u63a5\u7684 IP:\u7aef\u53e3\u586b\u5165\u4e0a\u65b9 WiFi \u8fde\u63a5\u6846\uff0c\u65b9\u4fbf\u7528\u6237\u76f4\u63a5\u8fde\u63a5
+          setSuccess(result.data.message || '\u8be5\u8bbe\u5907\u5df2\u914d\u5bf9\u8fc7');
+          if (result.data.device) {
+            setWifiIp(result.data.device.id);
+          } else {
+            const ipPart = pairAddress.trim().split(':')[0];
+            if (ipPart) {
+              setWifiIp(ipPart + ':');
+            }
+          }
+          await loadAdbStatus();
+          await loadDevices();
+        } else if (result.data?.device) {
+          // \u914d\u5bf9\u540e\u5df2\u81ea\u52a8\u8fde\u4e0a\uff0c\u76f4\u63a5\u5237\u65b0\u8bbe\u5907\u5217\u8868\uff0c\u65e0\u9700\u7528\u6237\u518d\u586b IP:\u7aef\u53e3
+          setSuccess(result.data.message || '\u914d\u5bf9\u5e76\u8fde\u63a5\u6210\u529f');
+          setShowPairForm(false);
+          setPairAddress('');
+          await loadAdbStatus();
+          await loadDevices();
+        } else {
+          // \u81ea\u52a8\u8fde\u63a5\u5931\u8d25\uff08\u5c11\u6570\u73af\u5883\uff09\uff0c\u9000\u56de\u624b\u52a8\uff1a\u628a IP \u586b\u5230\u8fde\u63a5\u6846\u8ba9\u7528\u6237\u8865\u7aef\u53e3
+          setSuccess(result.data?.message || '\u914d\u5bf9\u6210\u529f\uff0c\u8bf7\u5728\u4e0a\u65b9\u586b\u5199 IP:\u8fde\u63a5\u7aef\u53e3\u70b9\u300c\u8fde\u63a5\u300d');
+          const ipPart = pairAddress.trim().split(':')[0];
+          if (ipPart) {
+            setWifiIp(ipPart + ':');
+          }
+        }
+      } else {
+        setError(formatOperationError(result, 'WiFi \u914d\u5bf9\u5931\u8d25'));
+      }
+    } catch (err) {
+      console.error('pairWiFi error:', err);
+      setError('WiFi \u914d\u5bf9\u5931\u8d25\uff1a' + (err as Error).message);
+    } finally {
+      setPairing(false);
     }
   };
 
@@ -1822,6 +1887,44 @@ function SimpleApp() {
                 }}
               >{'\u8fde\u63a5'}</button>
             </div>
+
+            <div style={{ marginTop: '8px' }}>
+              <button
+                onClick={() => setShowPairForm((v) => !v)}
+                style={{ background: 'none', border: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: '12px', padding: 0 }}
+              >{showPairForm ? '\u6536\u8d77\u914d\u5bf9' : 'Android 11+ \u65e0\u7ebf\u8c03\u8bd5\uff1f\u70b9\u6b64\u914d\u5bf9'}</button>
+            </div>
+
+            {showPairForm && (
+              <div style={{ marginTop: '8px', padding: '10px', backgroundColor: '#2a2a40', borderRadius: '8px' }}>
+                <div style={{ fontSize: '11px', color: '#9ca3af', lineHeight: '1.6', marginBottom: '8px' }}>
+                  {'\u8bbe\u5907\uff1a\u8bbe\u7f6e \u2192 \u5f00\u53d1\u8005\u9009\u9879 \u2192 \u65e0\u7ebf\u8c03\u8bd5 \u2192 \u300c\u4f7f\u7528\u914d\u5bf9\u7801\u914d\u5bf9\u8bbe\u5907\u300d\uff0c\u586b\u4e0b\u65b9\u5f39\u7a97\u91cc\u7684\u914d\u5bf9\u5730\u5740\uff08IP:\u7aef\u53e3\uff09\u548c 6 \u4f4d\u914d\u5bf9\u7801\u3002\u914d\u5bf9\u6210\u529f\u540e\u4f1a\u81ea\u52a8\u8fde\u63a5\u8bbe\u5907\uff0c\u65e0\u9700\u518d\u624b\u52a8\u586b\u7aef\u53e3\u3002'}
+                </div>
+                <input
+                  type="text"
+                  placeholder={'\u914d\u5bf9\u5730\u5740 IP:\u7aef\u53e3\uff08\u5982 192.168.1.75:37123\uff09'}
+                  value={pairAddress}
+                  onChange={(e) => setPairAddress(e.target.value)}
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none', marginBottom: '8px' }}
+                />
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder={'6 \u4f4d\u914d\u5bf9\u7801'}
+                    value={pairCode}
+                    onChange={(e) => setPairCode(e.target.value)}
+                    onKeyPress={(e) => { if (e.key === 'Enter') { pairWiFiDevice(); } }}
+                    style={{ flex: 1, padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
+                  />
+                  <button
+                    onClick={pairWiFiDevice}
+                    disabled={pairing}
+                    style={{ padding: '0 16px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', cursor: pairing ? 'not-allowed' : 'pointer', fontSize: '13px', opacity: pairing ? 0.6 : 1 }}
+                  >{pairing ? '\u914d\u5bf9\u4e2d\u2026' : '\u914d\u5bf9'}</button>
+                </div>
+              </div>
+            )}
           </div>
 
           {selectedDevice && (
@@ -2061,6 +2164,26 @@ function SimpleApp() {
         }}>
           {error}
           <button onClick={() => setError('')} style={{ cursor: 'pointer' }}>{'\u5173\u95ed'}</button>
+        </div>
+      )}
+
+      {success && (
+        <div style={{
+          position: 'fixed',
+          bottom: error ? '72px' : '16px',
+          right: '16px',
+          maxWidth: '420px',
+          padding: '12px 16px',
+          backgroundColor: '#22c55e',
+          color: 'white',
+          borderRadius: '8px',
+          fontSize: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          {success}
+          <button onClick={() => setSuccess('')} style={{ cursor: 'pointer' }}>{'\u5173\u95ed'}</button>
         </div>
       )}
 

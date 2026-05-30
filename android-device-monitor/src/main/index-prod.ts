@@ -188,6 +188,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.PAIR_WIFI, async (_event, target: string, pairingCode: string) => {
+    try {
+      const result = await adbManager.pairDevice(target, pairingCode);
+      return { success: true, data: result };
+    } catch (error) {
+      return toIpcErrorResponse(error, 'WiFi 配对失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.CONNECT_USB, async () => {
     try {
       const devices = await adbManager.connectUSB();

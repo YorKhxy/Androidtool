@@ -520,7 +520,15 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
 
   const plotWidth = width - chartPadding.left - chartPadding.right;
   const plotHeight = height - chartPadding.top - chartPadding.bottom;
-  const percentTicks = [0, 25, 50, 75, 100];
+  // FPS 与 CPU%/GPU% 共用左轴。CPU/GPU 是 0-100 百分比，但 FPS 在高刷设备（120/144Hz 等）会超过 100，
+  // 写死上限 100 会让 FPS 曲线溢出顶部。这里按本次采集的 FPS 峰值动态取最接近的刷新率档位
+  // （100/120/144/165/240，再高则向上取 60 的倍数），并保底 100 以免低帧时 CPU/GPU 百分比反而溢出。
+  const fpsValues = samples.map((sample) => sample.metrics.fps).filter(Number.isFinite);
+  const fpsMax = Math.max(0, ...fpsValues);
+  const FPS_AXIS_TIERS = [100, 120, 144, 165, 240];
+  const fpsAxisCeil = FPS_AXIS_TIERS.find((tier) => tier >= fpsMax) ?? Math.ceil(fpsMax / 60) * 60;
+  const leftAxisMax = Math.max(100, fpsAxisCeil);
+  const percentTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(leftAxisMax * ratio));
   const memoryTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(memoryAxisMax * ratio));
 
   const updateHoverPoint = (clientX: number, clientY: number, target: SVGSVGElement) => {
@@ -545,7 +553,7 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
       >
         <rect x="0" y="0" width={width} height={height} fill="#0f172a" />
         {percentTicks.map((tick) => {
-          const y = chartPadding.top + plotHeight - (tick / 100) * plotHeight;
+          const y = chartPadding.top + plotHeight - (tick / leftAxisMax) * plotHeight;
           return (
             <g key={tick}>
               <line x1={chartPadding.left} y1={y} x2={chartPadding.left + plotWidth} y2={y} stroke="#1f2937" />
@@ -563,7 +571,7 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
         {series.map((item) => (
           <polyline
             key={item.key}
-            points={buildPoints(samples, width, height, item.getValue, item.axis === 'memory' ? memoryAxisMax : 100)}
+            points={buildPoints(samples, width, height, item.getValue, item.axis === 'memory' ? memoryAxisMax : leftAxisMax)}
             fill="none"
             stroke={item.color}
             strokeWidth="2.4"
@@ -573,7 +581,7 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
         ))}
         {snapshotMarkers.map(({ snapshot, label, nearest }) => {
           const x = chartPadding.left + (samples.length === 1 ? 0 : (nearest.index / (samples.length - 1)) * plotWidth);
-          const y = chartPadding.top + plotHeight - (Math.max(0, nearest.sample.metrics.fps) / 100) * plotHeight;
+          const y = chartPadding.top + plotHeight - (Math.max(0, nearest.sample.metrics.fps) / leftAxisMax) * plotHeight;
           return (
             <g
               key={snapshot.id}
