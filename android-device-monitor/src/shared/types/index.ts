@@ -254,6 +254,7 @@ export type IpcChannel =
   | 'adb:install-apk'
   | 'adb:list-device-files'
   | 'adb:pull-device-file'
+  | 'adb:delete-device-file'
   | 'adb:push-device-file'
   | 'adb:push-device-file-progress'
   | 'adb:select-upload-files'

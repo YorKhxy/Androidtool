@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listInstalledPackages: (deviceId) => ipcRenderer.invoke('adb:list-installed-packages', deviceId),
   listDeviceFiles: (deviceId, dirPath) => ipcRenderer.invoke('adb:list-device-files', deviceId, dirPath),
   pullDeviceFile: (deviceId, remotePath, name, isDir) => ipcRenderer.invoke('adb:pull-device-file', deviceId, remotePath, name, isDir),
+  deleteDeviceFile: (deviceId, remotePath, isDir) => ipcRenderer.invoke('adb:delete-device-file', deviceId, remotePath, isDir),
   selectUploadFiles: () => ipcRenderer.invoke('adb:select-upload-files'),
   pushDeviceFile: (deviceId, remoteDir, localPaths, uploadId) => ipcRenderer.invoke('adb:push-device-file', deviceId, remoteDir, localPaths, uploadId),
   onPushProgress: (callback) => {

@@ -57,6 +57,7 @@ export interface ElectronAPI {
   listInstalledPackages: (deviceId: string) => Promise<ElectronResult<string[]>>;
   listDeviceFiles: (deviceId: string, dirPath: string) => Promise<ElectronResult<DeviceFileList>>;
   pullDeviceFile: (deviceId: string, remotePath: string, name: string, isDir: boolean) => Promise<ElectronResult<string>>;
+  deleteDeviceFile: (deviceId: string, remotePath: string, isDir: boolean) => Promise<ElectronResult<undefined>>;
   selectUploadFiles: () => Promise<ElectronResult<string[]>>;
   pushDeviceFile: (deviceId: string, remoteDir: string, localPaths: string[], uploadId: string) => Promise<ElectronResult<number>>;
   onPushProgress: (callback: (progress: PushProgress) => void) => () => void;

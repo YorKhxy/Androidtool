@@ -572,6 +572,28 @@ export class ADBManager extends EventEmitter {
     }
   }
 
+  // 删除设备上的文件或目录（adb shell rm）。目录用 -rf 递归删除，文件用 -f。
+  // 删除不可逆，二次确认由渲染层负责；这里只做实际删除并把权限/失败提示带回。
+  async deleteDeviceFile(deviceId: string, remotePath: string, isDir: boolean): Promise<void> {
+    try {
+      const rmArgs = isDir ? ['rm', '-rf'] : ['rm', '-f'];
+      const result = await this.execAdbWithExitCode(
+        ['-s', deviceId, 'shell', ...rmArgs, this.quoteRemotePath(remotePath)],
+        { timeout: 15000, maxBuffer: 1024 * 64 }
+      );
+      const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
+      if (output.includes('permission denied') || output.includes('read-only')) {
+        throw new Error('没有删除权限（可能需要 root）');
+      }
+      if (result.exitCode !== 0 || output.includes('no such file')) {
+        throw new Error(result.stderr.trim() || result.stdout.trim() || '删除失败');
+      }
+    } catch (error) {
+      logger.error('ADBManager: deleteDeviceFile failed:', error);
+      throw this.wrapOperationError('删除设备文件失败', error);
+    }
+  }
+
   private normalizeRemoteDir(dirPath: string): string {
     const trimmed = (dirPath || '').trim() || '/sdcard';
     // 统一为以 / 开头、不以 / 结尾（根目录除外），并去掉重复斜杠

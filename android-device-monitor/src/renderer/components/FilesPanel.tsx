@@ -49,6 +49,8 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
   const [entries, setEntries] = useState<DeviceFileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
+  const [confirmDeletePath, setConfirmDeletePath] = useState<string | null>(null);
+  const [deletingPath, setDeletingPath] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
   const [dragOver, setDragOver] = useState(false);
   const [upload, setUpload] = useState<PushProgress | null>(null);
@@ -115,6 +117,27 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       onError('下载失败：' + (err as Error).message);
     } finally {
       setDownloadingPath(null);
+    }
+  };
+
+  // 删除采用行内二次确认：第一次点「删除」进入确认态，再点「确认删除」才真正删除。
+  const doDelete = async (entry: DeviceFileEntry) => {
+    if (!deviceId || !hasElectronAPI()) return;
+    setConfirmDeletePath(null);
+    setDeletingPath(entry.path);
+    setNotice('');
+    try {
+      const result = await window.electronAPI!.deleteDeviceFile(deviceId, entry.path, entry.isDir);
+      if (result.success) {
+        setNotice(`已删除：${entry.name}`);
+        loadDir(currentPath);
+      } else {
+        onError(result.error || '删除失败');
+      }
+    } catch (err) {
+      onError('删除失败：' + (err as Error).message);
+    } finally {
+      setDeletingPath(null);
     }
   };
 
@@ -288,7 +311,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
 
       {/* 文件列表 */}
       <div style={{ border: '1px solid #1f2937', borderRadius: '8px', overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px 150px 90px', backgroundColor: '#1f2937', color: '#94a3b8', fontSize: '12px', fontWeight: 700, padding: '8px 12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 115px 200px', backgroundColor: '#1f2937', color: '#94a3b8', fontSize: '12px', fontWeight: 700, padding: '8px 12px' }}>
           <span>名称</span>
           <span style={{ textAlign: 'right' }}>大小</span>
           <span style={{ textAlign: 'right' }}>修改时间</span>
@@ -305,7 +328,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
               key={entry.path}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '1fr 110px 150px 90px',
+                gridTemplateColumns: '1fr 80px 115px 200px',
                 alignItems: 'center',
                 padding: '8px 12px',
                 borderTop: '1px solid #1f2937',
@@ -328,7 +351,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
               </span>
               <span style={{ textAlign: 'right', color: '#94a3b8' }}>{entry.isDir ? '--' : formatSize(entry.size)}</span>
               <span style={{ textAlign: 'right', color: '#94a3b8' }}>{entry.mtime}</span>
-              <span style={{ textAlign: 'right' }}>
+              <span style={{ textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                 <button
                   onClick={() => handleDownload(entry)}
                   disabled={downloadingPath === entry.path}
@@ -345,6 +368,24 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
                 >
                   {downloadingPath === entry.path ? '下载中…' : '下载'}
                 </button>
+                {confirmDeletePath === entry.path ? (
+                  <>
+                    <button
+                      onClick={() => doDelete(entry)}
+                      style={{ padding: '3px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+                    >确认删除</button>
+                    <button
+                      onClick={() => setConfirmDeletePath(null)}
+                      style={{ padding: '3px 8px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                    >取消</button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeletePath(entry.path)}
+                    disabled={deletingPath === entry.path}
+                    style={{ padding: '3px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: deletingPath === entry.path ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: deletingPath === entry.path ? 0.6 : 1 }}
+                  >{deletingPath === entry.path ? '删除中…' : '删除'}</button>
+                )}
               </span>
             </div>
           ))

@@ -24,6 +24,7 @@ export const IPC_CHANNELS = {
   LIST_INSTALLED_PACKAGES: 'adb:list-installed-packages',
   LIST_DEVICE_FILES: 'adb:list-device-files',
   PULL_DEVICE_FILE: 'adb:pull-device-file',
+  DELETE_DEVICE_FILE: 'adb:delete-device-file',
   PUSH_DEVICE_FILE: 'adb:push-device-file',
   PUSH_DEVICE_FILE_PROGRESS: 'adb:push-device-file-progress',
   SELECT_UPLOAD_FILES: 'adb:select-upload-files',

@@ -355,6 +355,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.DELETE_DEVICE_FILE, async (_event, deviceId: string, remotePath: string, isDir: boolean) => {
+    try {
+      await adbManager.deleteDeviceFile(deviceId, remotePath, isDir);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '删除设备文件失败');
+    }
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.PULL_DEVICE_FILE,
     async (_event, deviceId: string, remotePath: string, name: string, isDir: boolean) => {
