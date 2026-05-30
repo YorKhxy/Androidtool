@@ -49,6 +49,8 @@ export interface ElectronAPI {
   onMirrorStatus: (callback: (session: MirrorSession) => void) => () => void;
   selectApkFiles: () => Promise<ElectronResult<string[]>>;
   installApk: (deviceId: string, apkPath: string) => Promise<ElectronResult<ApkInstallResult>>;
+  uninstallApp: (deviceId: string, packageName: string) => Promise<ElectronResult<{ packageName: string; output: string }>>;
+  listInstalledPackages: (deviceId: string) => Promise<ElectronResult<string[]>>;
   sleepDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
   rebootDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
   exportLogs: (logs: LogEntry[]) => Promise<ElectronResult<string>>;

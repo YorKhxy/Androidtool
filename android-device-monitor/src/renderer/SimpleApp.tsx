@@ -132,6 +132,10 @@ function SimpleApp() {
   const [performanceRecordings, setPerformanceRecordings] = useState<PerformanceRecording[]>([]);
   const [recordingDeviceIds, setRecordingDeviceIds] = useState<Set<string>>(() => new Set());
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
+  const [installedPackages, setInstalledPackages] = useState<string[]>([]);
+  const [installedPackagesLoading, setInstalledPackagesLoading] = useState(false);
+  const [appFilter, setAppFilter] = useState('');
+  const [uninstallingPackage, setUninstallingPackage] = useState<string | null>(null);
   const [activities, setActivities] = useState<ActivityStackEntry[]>([]);
   const [networkRequests, setNetworkRequests] = useState<NetworkRequest[]>([]);
   const [selectedNetworkRequestId, setSelectedNetworkRequestId] = useState<string | null>(null);
@@ -480,6 +484,20 @@ function SimpleApp() {
       loadProcesses();
     }
   }, [selectedDevice, activeTab]);
+
+  // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
+  // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
+  useEffect(() => {
+    if (selectedDevice?.id) {
+      setInstalledPackages([]);
+      setAppFilter('');
+      loadInstalledPackages();
+    } else {
+      setInstalledPackages([]);
+      setAppFilter('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDevice?.id]);
 
   useEffect(() => {
     if (selectedDevice && activeTab === 'activity') {
@@ -931,6 +949,10 @@ function SimpleApp() {
     } finally {
       installingApkDeviceIdsRef.current.delete(deviceId);
       updateDeviceApkInstallState(deviceId, previousState => ({ ...previousState, isInstalling: false }));
+      // 安装完成后刷新当前设备的已安装应用列表
+      if (selectedDeviceRef.current?.id === deviceId) {
+        void loadInstalledPackages();
+      }
     }
   };
 
@@ -1069,6 +1091,50 @@ function SimpleApp() {
       await window.electronAPI!.stopMirror(selectedDevice.id);
     } catch (err) {
       setError('停止投屏失败：' + (err as Error).message);
+    }
+  };
+
+  const loadInstalledPackages = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    const targetDeviceId = selectedDevice.id;
+    setInstalledPackagesLoading(true);
+    try {
+      const result = await window.electronAPI!.listInstalledPackages(targetDeviceId);
+      if (selectedDeviceRef.current?.id !== targetDeviceId) return; // 设备已切换，丢弃过期结果
+      if (result.success && result.data) {
+        setInstalledPackages(result.data);
+        setError('');
+      } else {
+        setInstalledPackages([]);
+        setError(result.error || '获取已安装应用失败');
+      }
+    } catch (err) {
+      if (selectedDeviceRef.current?.id !== targetDeviceId) return;
+      setInstalledPackages([]);
+      setError('获取已安装应用失败：' + (err as Error).message);
+    } finally {
+      if (selectedDeviceRef.current?.id === targetDeviceId) {
+        setInstalledPackagesLoading(false);
+      }
+    }
+  };
+
+  const handleUninstallApp = async (packageName: string) => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    if (!window.confirm(`确定卸载应用「${packageName}」？此操作不可撤销。`)) return;
+    setUninstallingPackage(packageName);
+    try {
+      setError('');
+      const result = await window.electronAPI!.uninstallApp(selectedDevice.id, packageName);
+      if (result.success) {
+        await loadInstalledPackages();
+      } else {
+        setError(result.error || '卸载失败');
+      }
+    } catch (err) {
+      setError('卸载失败：' + (err as Error).message);
+    } finally {
+      setUninstallingPackage(null);
     }
   };
 
@@ -1769,6 +1835,7 @@ function SimpleApp() {
 
               <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
                 {activeTab === 'devices' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'minmax(420px, 600px) minmax(420px, 1fr)', gap: '20px', alignItems: 'stretch' }}>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <h2 style={{ fontSize: '20px', fontWeight: '600', margin: '0 0 16px 0' }}>{'\u8bbe\u5907\u8be6\u60c5'}</h2>
@@ -1859,6 +1926,65 @@ function SimpleApp() {
                     <div style={{ marginTop: '40px', display: 'flex' }}>
                       {renderApkInstallPanel()}
                     </div>
+                  </div>
+
+                  <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '12px' }}>
+                      <h2 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
+                        {'已安装应用'}
+                        <span style={{ fontSize: '13px', color: '#888', marginLeft: '8px', fontWeight: 400 }}>
+                          {installedPackagesLoading ? '加载中…' : `共 ${installedPackages.length} 个`}
+                        </span>
+                      </h2>
+                      <div style={{ display: 'flex', gap: '8px', flex: 1, maxWidth: '420px' }}>
+                        <input
+                          type="text"
+                          placeholder={'搜索包名'}
+                          value={appFilter}
+                          onChange={(e) => setAppFilter(e.target.value)}
+                          style={{ flex: 1, padding: '8px 12px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
+                        />
+                        <button
+                          onClick={loadInstalledPackages}
+                          disabled={installedPackagesLoading}
+                          style={{ padding: '8px 16px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: installedPackagesLoading ? 'not-allowed' : 'pointer', opacity: installedPackagesLoading ? 0.7 : 1 }}
+                        >{'刷新'}</button>
+                      </div>
+                    </div>
+
+                    {(() => {
+                      const keyword = appFilter.trim().toLowerCase();
+                      const filtered = keyword ? installedPackages.filter(pkg => pkg.toLowerCase().includes(keyword)) : installedPackages;
+                      if (installedPackagesLoading && installedPackages.length === 0) {
+                        return <div style={{ padding: '24px', textAlign: 'center', color: '#888', fontSize: '13px' }}>{'正在读取已安装应用…'}</div>;
+                      }
+                      if (installedPackages.length === 0) {
+                        return <div style={{ padding: '24px', textAlign: 'center', color: '#666', fontSize: '13px' }}>{'未获取到第三方应用，点击刷新重试'}</div>;
+                      }
+                      if (filtered.length === 0) {
+                        return <div style={{ padding: '24px', textAlign: 'center', color: '#666', fontSize: '13px' }}>{'没有匹配的应用'}</div>;
+                      }
+                      return (
+                        <div style={{ maxHeight: '420px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          {filtered.map(pkg => (
+                            <div
+                              key={pkg}
+                              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', gap: '12px' }}
+                            >
+                              <span style={{ fontSize: '13px', color: '#e5e7eb', fontFamily: 'monospace', wordBreak: 'break-all' }}>{pkg}</span>
+                              <button
+                                onClick={() => handleUninstallApp(pkg)}
+                                disabled={uninstallingPackage === pkg}
+                                style={{ flexShrink: 0, padding: '5px 14px', fontSize: '12px', color: '#fca5a5', backgroundColor: '#ef444422', border: '1px solid #ef444455', borderRadius: '6px', cursor: uninstallingPackage === pkg ? 'not-allowed' : 'pointer', opacity: uninstallingPackage === pkg ? 0.6 : 1 }}
+                              >
+                                {uninstallingPackage === pkg ? '卸载中…' : '卸载'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
                   </div>
                 )}
 

@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   selectApkFiles: () => ipcRenderer.invoke('adb:select-apk-files'),
   installApk: (deviceId, apkPath) => ipcRenderer.invoke('adb:install-apk', deviceId, apkPath),
+  uninstallApp: (deviceId, packageName) => ipcRenderer.invoke('adb:uninstall-app', deviceId, packageName),
+  listInstalledPackages: (deviceId) => ipcRenderer.invoke('adb:list-installed-packages', deviceId),
   sleepDevice: (deviceId) => ipcRenderer.invoke('adb:sleep-device', deviceId),
   rebootDevice: (deviceId) => ipcRenderer.invoke('adb:reboot-device', deviceId),
   exportLogs: (logs) => ipcRenderer.invoke('log:export', logs),

@@ -719,6 +719,47 @@ export class ADBManager extends EventEmitter {
     });
   }
 
+  async listInstalledPackages(deviceId: string): Promise<string[]> {
+    // -3 仅列出第三方（用户安装）应用，排除系统应用。
+    const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'pm', 'list', 'packages', '-3'], {
+      timeout: 30 * 1000,
+    });
+    const packages = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('package:'))
+      .map((line) => line.slice('package:'.length).trim())
+      .filter(Boolean);
+    return Array.from(new Set(packages)).sort((a, b) => a.localeCompare(b));
+  }
+
+  async uninstallApp(deviceId: string, packageName: string): Promise<string> {
+    const cleanedPackage = packageName.trim();
+    if (!cleanedPackage || !/^[A-Za-z][\w.]*$/.test(cleanedPackage)) {
+      throw new AdbCommandError({
+        code: 'ADB_COMMAND_FAILED',
+        message: `卸载失败：非法包名 ${packageName}`,
+        hint: '请从进程/应用列表中选择一个有效的应用包名。',
+        details: `Invalid package name: ${packageName}`,
+      });
+    }
+
+    const result = await this.execAdbWithExitCode(['-s', deviceId, 'uninstall', cleanedPackage], {
+      timeout: 60 * 1000,
+    });
+    const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+    if (/success/i.test(output)) {
+      return output;
+    }
+
+    throw new AdbCommandError({
+      code: 'ADB_COMMAND_FAILED',
+      message: `卸载应用失败：${cleanedPackage}`,
+      hint: '请确认该应用存在且非受保护的系统应用，部分预装应用无法卸载。',
+      details: output || 'adb uninstall did not report success.',
+    });
+  }
+
   async sleepDevice(deviceId: string): Promise<void> {
     await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_SLEEP'], {
       timeout: 8000,

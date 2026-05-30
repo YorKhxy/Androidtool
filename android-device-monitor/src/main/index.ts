@@ -328,6 +328,24 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.LIST_INSTALLED_PACKAGES, async (_event, deviceId: string) => {
+    try {
+      const packages = await adbManager.listInstalledPackages(deviceId);
+      return { success: true, data: packages };
+    } catch (error) {
+      return toIpcErrorResponse(error, '获取已安装应用失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UNINSTALL_APP, async (_event, deviceId: string, packageName: string) => {
+    try {
+      const output = await adbManager.uninstallApp(deviceId, packageName);
+      return { success: true, data: { packageName, output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '卸载应用失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.SLEEP_DEVICE, async (_event, deviceId: string) => {
     try {
       await adbManager.sleepDevice(deviceId);

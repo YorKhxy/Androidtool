@@ -703,4 +703,37 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('isLikelyPicoDevice');
     expect(simpleAppSource).toContain('isPico: isLikelyPicoDevice(selectedDevice)');
   });
+
+  test('uninstall app flow goes through adb uninstall with confirm and process refresh', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    expect(managerSource).toContain('async uninstallApp(deviceId: string, packageName: string)');
+    expect(managerSource).toContain("['-s', deviceId, 'uninstall', cleanedPackage]");
+    expect(managerSource).toContain('async listInstalledPackages(deviceId: string)');
+    expect(managerSource).toContain("['-s', deviceId, 'shell', 'pm', 'list', 'packages', '-3']");
+    expect(channelSource).toContain("UNINSTALL_APP: 'adb:uninstall-app'");
+    expect(channelSource).toContain("LIST_INSTALLED_PACKAGES: 'adb:list-installed-packages'");
+    expect(preloadSource).toContain('uninstallApp');
+    expect(preloadSource).toContain('listInstalledPackages');
+    expect(electronApiSource).toContain('uninstallApp');
+    expect(electronApiSource).toContain('listInstalledPackages');
+    for (const source of [indexSource, prodSource]) {
+      expect(source).toContain('IPC_CHANNELS.UNINSTALL_APP');
+      expect(source).toContain('adbManager.uninstallApp(deviceId, packageName)');
+      expect(source).toContain('IPC_CHANNELS.LIST_INSTALLED_PACKAGES');
+      expect(source).toContain('adbManager.listInstalledPackages(deviceId)');
+    }
+    expect(simpleAppSource).toContain('handleUninstallApp');
+    expect(simpleAppSource).toContain('window.confirm');
+    expect(simpleAppSource).toContain('uninstallApp(selectedDevice.id, packageName)');
+    // 卸载入口在设备页的已安装应用列表，进程页不再承载
+    expect(simpleAppSource).toContain('loadInstalledPackages');
+    expect(simpleAppSource).toContain('已安装应用');
+  });
 });

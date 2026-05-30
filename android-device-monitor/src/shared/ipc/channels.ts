@@ -19,6 +19,8 @@ export const IPC_CHANNELS = {
   MIRROR_STATUS: 'mirror:status',
   SELECT_APK_FILES: 'adb:select-apk-files',
   INSTALL_APK: 'adb:install-apk',
+  UNINSTALL_APP: 'adb:uninstall-app',
+  LIST_INSTALLED_PACKAGES: 'adb:list-installed-packages',
   SLEEP_DEVICE: 'adb:sleep-device',
   REBOOT_DEVICE: 'adb:reboot-device',
   EXPORT_LOGS: 'log:export',
