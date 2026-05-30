@@ -346,6 +346,94 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.LIST_DEVICE_FILES, async (_event, deviceId: string, dirPath: string) => {
+    try {
+      const list = await adbManager.listDeviceFiles(deviceId, dirPath);
+      return { success: true, data: list };
+    } catch (error) {
+      return toIpcErrorResponse(error, '列出设备文件失败');
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.PULL_DEVICE_FILE,
+    async (_event, deviceId: string, remotePath: string, name: string, isDir: boolean) => {
+      try {
+        let localPath: string;
+        if (isDir) {
+          const result = await dialog.showOpenDialog(mainWindow!, {
+            title: '选择保存到电脑的文件夹',
+            properties: ['openDirectory', 'createDirectory'],
+          });
+          if (result.canceled || result.filePaths.length === 0) {
+            return { success: false, error: '取消下载' };
+          }
+          localPath = path.join(result.filePaths[0], name);
+        } else {
+          const result = await dialog.showSaveDialog(mainWindow!, {
+            title: '保存到电脑',
+            defaultPath: name,
+          });
+          if (result.canceled || !result.filePath) {
+            return { success: false, error: '取消下载' };
+          }
+          localPath = result.filePath;
+        }
+        await adbManager.pullDeviceFile(deviceId, remotePath, localPath);
+        return { success: true, data: localPath };
+      } catch (error) {
+        return toIpcErrorResponse(error, '下载设备文件失败');
+      }
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.SELECT_UPLOAD_FILES, async () => {
+    try {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: '选择要上传到设备的文件',
+        properties: ['openFile', 'multiSelections'],
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, error: '取消选择' };
+      }
+      return { success: true, data: result.filePaths };
+    } catch (error) {
+      return toIpcErrorResponse(error, '选择上传文件失败');
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.PUSH_DEVICE_FILE,
+    async (_event, deviceId: string, remoteDir: string, localPaths: string[], uploadId: string) => {
+      const total = localPaths.length;
+      try {
+        for (let index = 0; index < total; index++) {
+          const localPath = localPaths[index];
+          const fileName = path.basename(localPath);
+          try {
+            await adbManager.pushDeviceFile(deviceId, localPath, remoteDir, fileName, (percent) => {
+              mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
+                uploadId, fileName, index, total, percent, status: 'uploading',
+              });
+            });
+            mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
+              uploadId, fileName, index, total, percent: 100, status: 'done',
+            });
+          } catch (err) {
+            mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
+              uploadId, fileName, index, total, percent: 0, status: 'error',
+              error: (err as Error).message,
+            });
+            throw err;
+          }
+        }
+        return { success: true, data: total };
+      } catch (error) {
+        return toIpcErrorResponse(error, '上传文件失败');
+      }
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.UNINSTALL_APP, async (_event, deviceId: string, packageName: string) => {
     try {
       const output = await adbManager.uninstallApp(deviceId, packageName);

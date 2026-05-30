@@ -2,8 +2,10 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { EventEmitter } from 'events';
 import * as path from 'path';
+import { statSync as nodeFsStatSync, mkdtempSync as nodeFsMkdtempSync, renameSync as nodeFsRenameSync, copyFileSync as nodeFsCopyFileSync, rmSync as nodeFsRmSync } from 'fs';
+import { tmpdir as nodeOsTmpdir } from 'os';
 import type { ExecFileOptions } from 'child_process';
-import { ActivityStackEntry, AdbStatus, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo } from '../../shared/types';
+import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo } from '../../shared/types';
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
 import { ResolvedAdbBinary, getBundledAdbCandidates, resolveBundledAdbBinaryPath } from './adbBinary';
@@ -407,6 +409,220 @@ export class ADBManager extends EventEmitter {
       logger.warn('ADBManager: mdns services discovery failed:', error);
     }
     return null;
+  }
+
+  // 列出设备上指定目录的内容（默认从 /sdcard 起步）。基于 toybox `ls -lA` 解析，
+  // 兼容主流 Android ROM。访问受限目录（如 /data/data）时 adb 会返回 Permission denied，
+  // 这里转成友好的中文错误抛出，让前端如实提示而不是假装能进。
+  async listDeviceFiles(deviceId: string, dirPath: string): Promise<DeviceFileList> {
+    const normalizedDir = this.normalizeRemoteDir(dirPath);
+    // 末尾补斜杠：/sdcard 本身是指向 /storage/self/primary 的符号链接，
+    // 不带斜杠时 ls -lA 只会返回链接自身一行；带斜杠才会跟随进目录列出内容。
+    const lsTarget = normalizedDir === '/' ? '/' : `${normalizedDir}/`;
+    try {
+      const { stdout, stderr } = await this.execAdbWithExitCode(
+        ['-s', deviceId, 'shell', 'ls', '-lA', this.quoteRemotePath(lsTarget)],
+        { timeout: 15000, maxBuffer: 1024 * 1024 * 16 }
+      ).then((r) => ({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }));
+
+      const lowerErr = (stderr || '').toLowerCase();
+      if (lowerErr.includes('permission denied')) {
+        throw new Error('该目录需要更高权限（可能需要 root），无法访问');
+      }
+      if (lowerErr.includes('no such file') || lowerErr.includes('not a directory')) {
+        throw new Error('目录不存在或不是文件夹');
+      }
+
+      const entries = this.parseLsOutput(stdout, normalizedDir);
+      return { path: normalizedDir, entries };
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes('权限') || error.message.includes('目录'))) {
+        throw error;
+      }
+      logger.error('ADBManager: listDeviceFiles failed:', error);
+      throw this.wrapOperationError('列出设备文件失败', error);
+    }
+  }
+
+  // 把电脑本地文件上传到设备目录（adb push）。adb push 在 pipe 模式下不输出中间进度，
+  // 因此用 spawn 启动 push 的同时，定时轮询设备端目标文件已写入大小，按本地总大小算真实百分比。
+  // onProgress 回调把 0-100 的百分比上报给上层（再经 IPC 推给渲染层进度条）。
+  async pushDeviceFile(
+    deviceId: string,
+    localPath: string,
+    remoteDir: string,
+    fileName: string,
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    const adbBinary = await this.resolveAdbBinary();
+    const normalizedDir = this.normalizeRemoteDir(remoteDir);
+    const remotePath = normalizedDir === '/' ? `/${fileName}` : `${normalizedDir}/${fileName}`;
+
+    let totalBytes = 0;
+    try {
+      totalBytes = nodeFsStatSync(localPath).size;
+    } catch {
+      totalBytes = 0;
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const child = spawn(adbBinary.path, ['-s', deviceId, 'push', localPath, remotePath], {
+        windowsHide: true,
+      });
+
+      let stderrText = '';
+      let stdoutText = '';
+      let settled = false;
+
+      // 轮询设备端已写入大小，换算百分比；本地很快就传完时这条最多触发一两次
+      let pollTimer: NodeJS.Timeout | null = null;
+      if (totalBytes > 0 && onProgress) {
+        const poll = async () => {
+          try {
+            const { stdout } = await this.execAdb(
+              ['-s', deviceId, 'shell', 'stat', '-c', '%s', this.quoteRemotePath(remotePath)],
+              { timeout: 5000, maxBuffer: 1024 * 64 }
+            );
+            const written = parseInt(stdout.trim(), 10);
+            if (Number.isFinite(written) && written > 0) {
+              const percent = Math.min(99, Math.round((written / totalBytes) * 100));
+              onProgress(percent);
+            }
+          } catch {
+            // 文件还没创建或 stat 失败，忽略本次轮询
+          }
+          if (!settled) {
+            pollTimer = setTimeout(poll, 500);
+          }
+        };
+        pollTimer = setTimeout(poll, 500);
+      }
+
+      const finish = (err?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (pollTimer) clearTimeout(pollTimer);
+        if (err) {
+          reject(this.wrapOperationError('上传文件失败', err));
+        } else {
+          onProgress?.(100);
+          resolve();
+        }
+      };
+
+      child.stdout.on('data', (d) => { stdoutText += d.toString(); });
+      child.stderr.on('data', (d) => { stderrText += d.toString(); });
+      child.on('error', (err) => finish(err));
+      child.on('close', (code) => {
+        const combined = `${stdoutText}\n${stderrText}`.toLowerCase();
+        if (code === 0 && combined.includes('file pushed') && !combined.includes('error:')) {
+          finish();
+        } else if (combined.includes('permission denied') || combined.includes('read-only')) {
+          finish(new Error('目标目录没有写入权限'));
+        } else if (code === 0 && !combined.includes('error:')) {
+          // 某些 adb 版本成功也可能不打 "file pushed"，按退出码兜底
+          finish();
+        } else {
+          finish(new Error(stderrText.trim() || stdoutText.trim() || '上传失败'));
+        }
+      });
+    });
+  }
+
+  // 把设备上的文件/目录拉取到电脑本地路径（adb pull）。localPath 由主进程的保存对话框确定。
+  async pullDeviceFile(deviceId: string, remotePath: string, localPath: string): Promise<void> {
+    // adb 已知缺陷：pull 无法把文件直接写到盘符根目录（如 F:\file.mp4），但写到任意子目录正常。
+    // 当目标在盘根时，先 pull 到系统临时目录，再移动到用户选定位置，规避该缺陷。
+    const parsed = path.parse(localPath);
+    const isDriveRoot = parsed.dir === parsed.root && parsed.root !== '';
+
+    try {
+      if (isDriveRoot) {
+        const tempDir = nodeFsMkdtempSync(path.join(nodeOsTmpdir(), 'adm-pull-'));
+        const tempPath = path.join(tempDir, parsed.base);
+        try {
+          await this.runAdbPull(deviceId, remotePath, tempPath);
+          // 跨卷移动用复制+删除兜底（rename 跨盘会失败）
+          try {
+            nodeFsRenameSync(tempPath, localPath);
+          } catch {
+            nodeFsCopyFileSync(tempPath, localPath);
+            nodeFsRmSync(tempPath, { force: true });
+          }
+        } finally {
+          nodeFsRmSync(tempDir, { recursive: true, force: true });
+        }
+      } else {
+        await this.runAdbPull(deviceId, remotePath, localPath);
+      }
+    } catch (error) {
+      logger.error('ADBManager: pullDeviceFile failed:', error);
+      throw this.wrapOperationError('下载设备文件失败', error);
+    }
+  }
+
+  private async runAdbPull(deviceId: string, remotePath: string, localPath: string): Promise<void> {
+    const result = await this.execAdbWithExitCode(
+      ['-s', deviceId, 'pull', remotePath, localPath],
+      { timeout: 300000, maxBuffer: 1024 * 1024 * 16 }
+    );
+    const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
+    if (result.exitCode !== 0 || output.includes('permission denied') || output.includes('error:')) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || '拉取文件失败');
+    }
+  }
+
+  private normalizeRemoteDir(dirPath: string): string {
+    const trimmed = (dirPath || '').trim() || '/sdcard';
+    // 统一为以 / 开头、不以 / 结尾（根目录除外），并去掉重复斜杠
+    const collapsed = ('/' + trimmed).replace(/\/+/g, '/');
+    if (collapsed.length > 1 && collapsed.endsWith('/')) {
+      return collapsed.slice(0, -1);
+    }
+    return collapsed;
+  }
+
+  private quoteRemotePath(remotePath: string): string {
+    // 用单引号包裹，处理带空格的路径；转义路径内的单引号
+    return `'${remotePath.replace(/'/g, `'\\''`)}'`;
+  }
+
+  private parseLsOutput(stdout: string, baseDir: string): DeviceFileEntry[] {
+    const entries: DeviceFileEntry[] = [];
+    // toybox `ls -lA` 行格式：mode links owner group size YYYY-MM-DD HH:MM name
+    // 符号链接行尾形如 "name -> target"
+    const lineRe = /^([dlbcps-])[rwxsStT.+@-]{9,}\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(.+)$/;
+    for (const rawLine of stdout.split('\n')) {
+      const line = rawLine.replace(/\r$/, '');
+      if (!line.trim() || line.startsWith('total ')) continue;
+      const match = line.match(lineRe);
+      if (!match) continue;
+
+      const typeChar = match[1];
+      const size = parseInt(match[2], 10) || 0;
+      const mtime = match[3];
+      let name = match[4];
+
+      const isSymlink = typeChar === 'l';
+      if (isSymlink) {
+        const arrowIdx = name.indexOf(' -> ');
+        if (arrowIdx >= 0) {
+          name = name.slice(0, arrowIdx);
+        }
+      }
+      if (name === '.' || name === '..') continue;
+
+      const isDir = typeChar === 'd';
+      const childPath = baseDir === '/' ? `/${name}` : `${baseDir}/${name}`;
+      entries.push({ name, path: childPath, isDir, isSymlink, size, mtime });
+    }
+
+    // 目录在前，再按名称排序，符合文件管理器习惯
+    entries.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      return a.name.localeCompare(b.name, 'zh');
+    });
+    return entries;
   }
 
   async disconnect(deviceId: string): Promise<void> {

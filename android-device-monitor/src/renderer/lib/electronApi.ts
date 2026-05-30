@@ -13,6 +13,8 @@ import type {
   PerformanceSessionExportPayload,
   PerformanceSnapshot,
   PairResult,
+  DeviceFileList,
+  PushProgress,
   ProcessInfo,
 } from '../../shared/types';
 
@@ -53,6 +55,11 @@ export interface ElectronAPI {
   installApk: (deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean }) => Promise<ElectronResult<ApkInstallResult>>;
   uninstallApp: (deviceId: string, packageName: string) => Promise<ElectronResult<{ packageName: string; output: string }>>;
   listInstalledPackages: (deviceId: string) => Promise<ElectronResult<string[]>>;
+  listDeviceFiles: (deviceId: string, dirPath: string) => Promise<ElectronResult<DeviceFileList>>;
+  pullDeviceFile: (deviceId: string, remotePath: string, name: string, isDir: boolean) => Promise<ElectronResult<string>>;
+  selectUploadFiles: () => Promise<ElectronResult<string[]>>;
+  pushDeviceFile: (deviceId: string, remoteDir: string, localPaths: string[], uploadId: string) => Promise<ElectronResult<number>>;
+  onPushProgress: (callback: (progress: PushProgress) => void) => () => void;
   launchApp: (deviceId: string, packageName: string) => Promise<ElectronResult<{ packageName: string; output: string }>>;
   forceStopApp: (deviceId: string, packageName: string) => Promise<ElectronResult<undefined>>;
   sleepDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;

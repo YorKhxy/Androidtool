@@ -3,6 +3,7 @@ import { AdbStatus, DeviceInfo, MirrorSession, PerformanceMetrics, PerformanceRe
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
+import { FilesPanel } from './components/FilesPanel';
 import { ElectronResult, hasElectronAPI } from './lib/electronApi';
 import {
   BATCH_UPDATE_DELAY,
@@ -167,6 +168,7 @@ function SimpleApp() {
   const [installAllowDowngrade, setInstallAllowDowngrade] = useState(false);
   const [isUnifiedInstalling, setIsUnifiedInstalling] = useState(false);
   const [busyDeviceAction, setBusyDeviceAction] = useState<{ id: string; action: 'sleep' | 'wake' | 'unlock' | 'reboot' } | null>(null);
+  const [fileBrowserDevice, setFileBrowserDevice] = useState<DeviceInfo | null>(null);
   
   const logStatesRef = useRef(new Map<string, DeviceLogState>());
   const logsContainerRef = useRef<HTMLDivElement>(null);
@@ -1846,6 +1848,13 @@ function SimpleApp() {
                       style={{ padding: '4px 8px', backgroundColor: '#555', border: 'none', borderRadius: '4px', color: '#ff6b6b', cursor: 'pointer', fontSize: '12px' }}
                     >断开设备</button>
                   </div>
+                  <div style={{ marginTop: '6px' }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setFileBrowserDevice(device); }}
+                      title="浏览设备文件、下载到电脑、上传文件到设备"
+                      style={{ width: '100%', padding: '6px 8px', backgroundColor: '#2a3550', border: '1px solid #3b4a6b', borderRadius: '4px', color: '#fcd34d', cursor: 'pointer', fontSize: '12px' }}
+                    >📁 文件管理</button>
+                  </div>
                 </div>
               )})}
             </div>
@@ -2148,13 +2157,38 @@ function SimpleApp() {
         </main>
       </div>
 
+      {fileBrowserDevice && (
+        <div
+          onClick={() => setFileBrowserDevice(null)}
+          style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1500 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 'min(900px, 92vw)', maxHeight: '88vh', display: 'flex', flexDirection: 'column', backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.5)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid #1f2937' }}>
+              <span style={{ fontSize: '15px', fontWeight: 700, color: '#fff' }}>
+                {'📁 设备文件 · '}{customDeviceNames[fileBrowserDevice.id] || fileBrowserDevice.name || fileBrowserDevice.id}
+              </span>
+              <button
+                onClick={() => setFileBrowserDevice(null)}
+                style={{ width: '28px', height: '28px', background: '#1f2937', border: 'none', borderRadius: '6px', color: '#cbd5e1', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}
+              >×</button>
+            </div>
+            <div style={{ overflow: 'auto', flex: 1 }}>
+              <FilesPanel selectedDevice={fileBrowserDevice} onError={setError} />
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && (
-        <div style={{ 
-          position: 'fixed', 
-          bottom: '16px', 
-          right: '16px', 
-          padding: '12px 16px', 
-          backgroundColor: '#ef4444', 
+        <div style={{
+          position: 'fixed',
+          bottom: '16px',
+          right: '16px',
+          padding: '12px 16px',
+          backgroundColor: '#ef4444',
           color: 'white', 
           borderRadius: '8px',
           fontSize: '14px',

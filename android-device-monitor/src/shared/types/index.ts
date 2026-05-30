@@ -18,6 +18,30 @@ export interface PairResult {
   alreadyPaired?: boolean;
 }
 
+export interface DeviceFileEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  isSymlink: boolean;
+  size: number;
+  mtime: string;
+}
+
+export interface DeviceFileList {
+  path: string;
+  entries: DeviceFileEntry[];
+}
+
+export interface PushProgress {
+  uploadId: string;
+  fileName: string;
+  index: number;       // 当前是第几个文件（从 0 起）
+  total: number;       // 本批共多少个文件
+  percent: number;     // 当前文件 0-100
+  status: 'uploading' | 'done' | 'error';
+  error?: string;
+}
+
 export interface ProcessInfo {
   pid: number;
   ppid: number;
@@ -228,6 +252,11 @@ export type IpcChannel =
   | 'adb:get-network-requests'
   | 'adb:select-apk-files'
   | 'adb:install-apk'
+  | 'adb:list-device-files'
+  | 'adb:pull-device-file'
+  | 'adb:push-device-file'
+  | 'adb:push-device-file-progress'
+  | 'adb:select-upload-files'
   | 'adb:sleep-device'
   | 'adb:wake-device'
   | 'adb:unlock-device'

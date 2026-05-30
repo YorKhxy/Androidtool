@@ -27,6 +27,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installApk: (deviceId, apkPath, options) => ipcRenderer.invoke('adb:install-apk', deviceId, apkPath, options),
   uninstallApp: (deviceId, packageName) => ipcRenderer.invoke('adb:uninstall-app', deviceId, packageName),
   listInstalledPackages: (deviceId) => ipcRenderer.invoke('adb:list-installed-packages', deviceId),
+  listDeviceFiles: (deviceId, dirPath) => ipcRenderer.invoke('adb:list-device-files', deviceId, dirPath),
+  pullDeviceFile: (deviceId, remotePath, name, isDir) => ipcRenderer.invoke('adb:pull-device-file', deviceId, remotePath, name, isDir),
+  selectUploadFiles: () => ipcRenderer.invoke('adb:select-upload-files'),
+  pushDeviceFile: (deviceId, remoteDir, localPaths, uploadId) => ipcRenderer.invoke('adb:push-device-file', deviceId, remoteDir, localPaths, uploadId),
+  onPushProgress: (callback) => {
+    const listener = (_, progress) => callback(progress);
+    ipcRenderer.on('adb:push-device-file-progress', listener);
+    return () => ipcRenderer.removeListener('adb:push-device-file-progress', listener);
+  },
   launchApp: (deviceId, packageName) => ipcRenderer.invoke('adb:launch-app', deviceId, packageName),
   forceStopApp: (deviceId, packageName) => ipcRenderer.invoke('adb:force-stop-app', deviceId, packageName),
   sleepDevice: (deviceId) => ipcRenderer.invoke('adb:sleep-device', deviceId),
