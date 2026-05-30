@@ -10,6 +10,23 @@ The repo root holds product/process docs only: `Product-Spec.md` (requirements),
 
 Code, comments, product docs, and commit messages are written in **Chinese** — match that convention.
 
+## 路径规范（共同开发约定）
+
+本仓库由多人协作，每个人的克隆位置不同（一个人在 `G:\Androidtool`，另一个人可能在 `D:\projects\xxx` 或 `~/androidtool`）。**禁止在源码、脚本、配置、测试中硬编码任何绝对路径或盘符**（如 `G:\Androidtool\...`、`C:\Users\...`、`/Users/...`、`/home/...`），否则换一台机器就会因为路径找不到而崩溃——无论是开发运行还是打包发布。
+
+铁律：
+
+- **一切路径都从锚点动态推导**，不写死。常用锚点：
+  - 仓库/模块内的文件 → `path.join(__dirname, ...)` 或 `path.resolve(__dirname, '..', ...)`（`scripts/` 和 `src/main` 已有大量这种写法，照抄）
+  - Electron 运行时资源（打包后的 `extraResources`，如 bundled adb / scrcpy / platform-tools）→ `process.resourcesPath`（生产）与开发期的相对回退，二者都要覆盖，参考 `src/main/adb/adbBinary.ts`
+  - 用户数据 / 录制 / 快照等可写目录 → `app.getPath('userData')` 等 Electron API，绝不写死磁盘位置（见 `CONTEXT.md`：UI 永远不暴露宿主绝对路径）
+- **跨平台拼接用 `path.join` / `path.resolve`**，不要手写 `\` 或 `/` 字符串拼接；需要落到磁盘的字符串路径用 `path.sep` 处理分隔符。
+- **配置文件里同样禁止绝对路径**：`package.json`、`electron-builder` 配置、`tsconfig*.json` 的 `paths`、webpack 配置等，一律用相对路径或项目内别名（`@/*` 已映射到 `src/*`）。
+- **例外（这些不算"路径"，可以写死）**：URL（`http://localhost:3000`、下载源 URL）、设备端的 Android 路径（adb shell 内 `/sdcard/...`、`pm path` 输出）、正则表达式、字符串字面量。
+- 文档里出现绝对路径仅用于"举例说明本机位置"（如本文件开头的 git root 示例）是可以的，但**代码和脚本不行**。
+
+新增或修改涉及文件/资源定位的代码时，先确认它在别人的机器上、以及打包成安装包后仍能正确解析。Code Review 时把"有没有硬编码绝对路径"作为必查项。
+
 ## Commands (run from `android-device-monitor/`)
 
 | Task | Command |

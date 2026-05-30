@@ -161,7 +161,7 @@ function SimpleApp() {
   const [installConcurrency, setInstallConcurrency] = useState(4);
   const [installAllowDowngrade, setInstallAllowDowngrade] = useState(false);
   const [isUnifiedInstalling, setIsUnifiedInstalling] = useState(false);
-  const [busyDeviceAction, setBusyDeviceAction] = useState<{ id: string; action: 'sleep' | 'reboot' } | null>(null);
+  const [busyDeviceAction, setBusyDeviceAction] = useState<{ id: string; action: 'sleep' | 'wake' | 'unlock' | 'reboot' } | null>(null);
   
   const logStatesRef = useRef(new Map<string, DeviceLogState>());
   const logsContainerRef = useRef<HTMLDivElement>(null);
@@ -1022,6 +1022,44 @@ function SimpleApp() {
     }
   };
 
+  const handleWakeDevice = async (device: DeviceInfo) => {
+    if (!hasElectronAPI() || busyDeviceAction) return;
+    setBusyDeviceAction({ id: device.id, action: 'wake' });
+    const startedAt = Date.now();
+    try {
+      const result = await window.electronAPI!.wakeDevice(device.id);
+      if (!result.success) {
+        setError(formatOperationError(result, '设备唤醒失败'));
+        return;
+      }
+      setError('');
+    } catch (err) {
+      setError('设备唤醒失败: ' + (err as Error).message);
+    } finally {
+      await withMinCooldown(startedAt, 500);
+      setBusyDeviceAction(null);
+    }
+  };
+
+  const handleUnlockDevice = async (device: DeviceInfo) => {
+    if (!hasElectronAPI() || busyDeviceAction) return;
+    setBusyDeviceAction({ id: device.id, action: 'unlock' });
+    const startedAt = Date.now();
+    try {
+      const result = await window.electronAPI!.unlockDevice(device.id);
+      if (!result.success) {
+        setError(formatOperationError(result, '设备解锁失败'));
+        return;
+      }
+      setError('');
+    } catch (err) {
+      setError('设备解锁失败: ' + (err as Error).message);
+    } finally {
+      await withMinCooldown(startedAt, 500);
+      setBusyDeviceAction(null);
+    }
+  };
+
   const handleRebootDevice = async (device: DeviceInfo) => {
     if (!hasElectronAPI() || busyDeviceAction) return;
     setBusyDeviceAction({ id: device.id, action: 'reboot' });
@@ -1723,6 +1761,17 @@ function SimpleApp() {
                       style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#d1d5db', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
                     >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'sleep' ? '息屏中…' : '息屏'}</button>
                     <button
+                      onClick={(e) => { e.stopPropagation(); handleWakeDevice(device); }}
+                      disabled={Boolean(busyDeviceAction)}
+                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#86efac', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
+                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'wake' ? '唤醒中…' : '唤醒'}</button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleUnlockDevice(device); }}
+                      disabled={Boolean(busyDeviceAction)}
+                      title="唤醒并上滑解锁；有 PIN/密码/手势的设备请在设备上手动输入"
+                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#93c5fd', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
+                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'unlock' ? '解锁中…' : '解锁'}</button>
+                    <button
                       onClick={(e) => { e.stopPropagation(); handleRebootDevice(device); }}
                       disabled={Boolean(busyDeviceAction)}
                       style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
@@ -1730,7 +1779,7 @@ function SimpleApp() {
                     <button
                       onClick={(e) => { e.stopPropagation(); disconnectDevice(device); }}
                       style={{ padding: '4px 8px', backgroundColor: '#555', border: 'none', borderRadius: '4px', color: '#ff6b6b', cursor: 'pointer', fontSize: '12px' }}
-                    >断开</button>
+                    >断开设备</button>
                   </div>
                 </div>
               )})}

@@ -54,6 +54,8 @@ export interface ElectronAPI {
   launchApp: (deviceId: string, packageName: string) => Promise<ElectronResult<{ packageName: string; output: string }>>;
   forceStopApp: (deviceId: string, packageName: string) => Promise<ElectronResult<undefined>>;
   sleepDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
+  wakeDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
+  unlockDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
   rebootDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
   exportLogs: (logs: LogEntry[]) => Promise<ElectronResult<string>>;
   exportPerformanceSession: (payload: PerformanceSessionExportPayload) => Promise<ElectronResult<string>>;

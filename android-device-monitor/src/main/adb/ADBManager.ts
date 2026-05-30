@@ -807,6 +807,46 @@ export class ADBManager extends EventEmitter {
     });
   }
 
+  async wakeDevice(deviceId: string): Promise<void> {
+    await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'], {
+      timeout: 8000,
+    });
+  }
+
+  async unlockDevice(deviceId: string): Promise<void> {
+    // 先点亮屏幕
+    await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'], {
+      timeout: 8000,
+    });
+
+    // 读取屏幕分辨率以计算上滑坐标，读取失败时退回常见的 1080x1920
+    let width = 1080;
+    let height = 1920;
+    try {
+      const { stdout: sizeOutput } = await this.execAdb(['-s', deviceId, 'shell', 'wm', 'size'], {
+        timeout: 8000,
+      });
+      const match =
+        sizeOutput.match(/Override size:\s*(\d+)x(\d+)/) || sizeOutput.match(/Physical size:\s*(\d+)x(\d+)/);
+      if (match) {
+        width = parseInt(match[1], 10);
+        height = parseInt(match[2], 10);
+      }
+    } catch {
+      // 分辨率读取失败时使用默认值继续上滑
+    }
+
+    // 从屏幕下方向上滑动划开锁屏：无锁屏/滑动锁直接进入桌面；
+    // 有 PIN/密码/手势的设备会停在输入界面，需在设备上手动输入
+    const x = Math.round(width / 2);
+    const startY = Math.round(height * 0.8);
+    const endY = Math.round(height * 0.2);
+    await this.execAdb(
+      ['-s', deviceId, 'shell', 'input', 'swipe', String(x), String(startY), String(x), String(endY), '300'],
+      { timeout: 8000 }
+    );
+  }
+
   async rebootDevice(deviceId: string): Promise<void> {
     const result = await this.execAdbWithExitCode(['-s', deviceId, 'reboot'], {
       timeout: 8000,

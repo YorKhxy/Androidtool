@@ -24,6 +24,8 @@ export const IPC_CHANNELS = {
   LAUNCH_APP: 'adb:launch-app',
   FORCE_STOP_APP: 'adb:force-stop-app',
   SLEEP_DEVICE: 'adb:sleep-device',
+  WAKE_DEVICE: 'adb:wake-device',
+  UNLOCK_DEVICE: 'adb:unlock-device',
   REBOOT_DEVICE: 'adb:reboot-device',
   EXPORT_LOGS: 'log:export',
   LOG_ENTRY: 'log:entry',

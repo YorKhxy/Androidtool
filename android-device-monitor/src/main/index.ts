@@ -373,6 +373,24 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.WAKE_DEVICE, async (_event, deviceId: string) => {
+    try {
+      await adbManager.wakeDevice(deviceId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '设备唤醒失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UNLOCK_DEVICE, async (_event, deviceId: string) => {
+    try {
+      await adbManager.unlockDevice(deviceId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '设备解锁失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.REBOOT_DEVICE, async (_event, deviceId: string) => {
     try {
       await adbManager.rebootDevice(deviceId);

@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   launchApp: (deviceId, packageName) => ipcRenderer.invoke('adb:launch-app', deviceId, packageName),
   forceStopApp: (deviceId, packageName) => ipcRenderer.invoke('adb:force-stop-app', deviceId, packageName),
   sleepDevice: (deviceId) => ipcRenderer.invoke('adb:sleep-device', deviceId),
+  wakeDevice: (deviceId) => ipcRenderer.invoke('adb:wake-device', deviceId),
+  unlockDevice: (deviceId) => ipcRenderer.invoke('adb:unlock-device', deviceId),
   rebootDevice: (deviceId) => ipcRenderer.invoke('adb:reboot-device', deviceId),
   exportLogs: (logs) => ipcRenderer.invoke('log:export', logs),
   exportPerformanceSession: (payload) => ipcRenderer.invoke('performance:export-session', payload),

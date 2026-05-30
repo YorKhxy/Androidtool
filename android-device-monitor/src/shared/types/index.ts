@@ -222,6 +222,8 @@ export type IpcChannel =
   | 'adb:select-apk-files'
   | 'adb:install-apk'
   | 'adb:sleep-device'
+  | 'adb:wake-device'
+  | 'adb:unlock-device'
   | 'adb:reboot-device'
   | 'adb:status-changed'
   | 'device:connected'
