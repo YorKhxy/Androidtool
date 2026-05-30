@@ -592,7 +592,7 @@ describe('project smoke checks', () => {
     expect(rendererSource).toContain("return isPicoRecording(recording) && !recording.singleEyeVideo");
     expect(rendererSource).not.toContain('recording.metricsBurnedIn');
     expect(rendererSource).toContain("style={getRecordingVideoStyle(shouldCropVideo, 'cover')}");
-    expect(rendererSource).toContain("style={getRecordingVideoStyle(shouldCropRecordingInTool(previewRecording), 'contain')}");
+    expect(rendererSource).toContain("getRecordingVideoStyle(false, 'contain')");
     expect(rendererSource).toContain('{renderRecordingMetricOverlay(firstSample, true)}');
     expect(rendererSource).toContain('{renderRecordingMetricOverlay(previewRecordingSample)}');
     expect(rendererSource).toContain('disabled={isCapturingSnapshot}');
@@ -613,5 +613,59 @@ describe('project smoke checks', () => {
 
     expect(rendererSource).not.toContain("if (selectedDevice && activeTab === 'network') {\r\n      loadNetworkRequests();");
     expect(rendererSource).not.toContain("\\u6b63\\u5728\\u6293\\u53d6 HTTP \\u8bf7\\u6c42...");
+  });
+
+  test('mirror feature bundles scrcpy, spawns it with bundled adb, and reclaims child processes', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
+    const prepareSource = fs.readFileSync(path.join(root, 'scripts/prepare-scrcpy.js'), 'utf-8');
+    const binarySource = fs.readFileSync(path.join(root, 'src/main/scrcpy/scrcpyBinary.ts'), 'utf-8');
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/scrcpy/scrcpyManager.ts'), 'utf-8');
+    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const mirrorPanelSource = fs.readFileSync(path.join(root, 'src/renderer/components/MirrorPanel.tsx'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    // 打包接线
+    expect(pkg.scripts['scrcpy:prepare']).toContain('prepare-scrcpy.js');
+    expect(pkg.scripts.pack).toContain('scrcpy:prepare');
+    expect(pkg.scripts.dist).toContain('scrcpy:prepare');
+    expect(pkg.build.extraResources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ from: 'vendor/scrcpy', to: 'scrcpy' }),
+      ])
+    );
+    expect(prepareSource).toContain('scrcpy-win64');
+    expect(binarySource).toContain('resolveBundledScrcpyBinaryPath');
+
+    // scrcpy 复用内置 adb + 进程生命周期
+    expect(managerSource).toContain('resolveBundledScrcpyBinaryPath');
+    expect(managerSource).toContain('resolveBundledAdbBinaryPath');
+    expect(managerSource).toContain('ADB: adbPath');
+    expect(managerSource).toContain("['-s', deviceId, '--window-title', windowTitle]");
+    expect(managerSource).toContain('stopAll');
+    expect(managerSource).toContain("child.on('exit'");
+
+    // IPC 链路 + 退出回收
+    expect(channelSource).toContain("MIRROR_START: 'mirror:start'");
+    expect(channelSource).toContain("MIRROR_STATUS: 'mirror:status'");
+    expect(preloadSource).toContain('startMirror');
+    expect(preloadSource).toContain("ipcRenderer.on('mirror:status'");
+    expect(electronApiSource).toContain('startMirror');
+    expect(electronApiSource).toContain('onMirrorStatus');
+    for (const source of [indexSource, prodSource]) {
+      expect(source).toContain('IPC_CHANNELS.MIRROR_START');
+      expect(source).toContain('scrcpyManager.stopAll()');
+      expect(source).toContain('scrcpyManager.onStatus');
+    }
+
+    // 渲染层入口
+    expect(mirrorPanelSource).toContain('开始投屏');
+    expect(mirrorPanelSource).toContain('停止投屏');
+    expect(simpleAppSource).toContain('handleStartMirror');
+    expect(simpleAppSource).toContain('onMirrorStatus');
+    expect(simpleAppSource).toContain("{ key: 'mirror' as TabType");
   });
 });
