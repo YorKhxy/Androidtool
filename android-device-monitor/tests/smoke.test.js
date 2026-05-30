@@ -717,6 +717,24 @@ describe('project smoke checks', () => {
     expect(managerSource).toContain("['-s', deviceId, 'uninstall', cleanedPackage]");
     expect(managerSource).toContain('async listInstalledPackages(deviceId: string)');
     expect(managerSource).toContain("['-s', deviceId, 'shell', 'pm', 'list', 'packages', '-3']");
+    expect(managerSource).toContain('async launchApp(deviceId: string, packageName: string)');
+    expect(managerSource).toContain("'monkey', '-p', cleanedPackage");
+    expect(managerSource).toContain('async forceStopApp(deviceId: string, packageName: string)');
+    expect(managerSource).toContain("['-s', deviceId, 'shell', 'am', 'force-stop', cleanedPackage]");
+    expect(channelSource).toContain("LAUNCH_APP: 'adb:launch-app'");
+    expect(channelSource).toContain("FORCE_STOP_APP: 'adb:force-stop-app'");
+    expect(preloadSource).toContain('launchApp');
+    expect(preloadSource).toContain('forceStopApp');
+    expect(electronApiSource).toContain('launchApp');
+    expect(electronApiSource).toContain('forceStopApp');
+    for (const source of [indexSource, prodSource]) {
+      expect(source).toContain('IPC_CHANNELS.LAUNCH_APP');
+      expect(source).toContain('IPC_CHANNELS.FORCE_STOP_APP');
+      expect(source).toContain('adbManager.launchApp(deviceId, packageName)');
+      expect(source).toContain('adbManager.forceStopApp(deviceId, packageName)');
+    }
+    expect(simpleAppSource).toContain('handleLaunchApp');
+    expect(simpleAppSource).toContain('handleForceStopApp');
     expect(channelSource).toContain("UNINSTALL_APP: 'adb:uninstall-app'");
     expect(channelSource).toContain("LIST_INSTALLED_PACKAGES: 'adb:list-installed-packages'");
     expect(preloadSource).toContain('uninstallApp');
@@ -732,8 +750,35 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('handleUninstallApp');
     expect(simpleAppSource).toContain('window.confirm');
     expect(simpleAppSource).toContain('uninstallApp(selectedDevice.id, packageName)');
-    // 卸载入口在设备页的已安装应用列表，进程页不再承载
     expect(simpleAppSource).toContain('loadInstalledPackages');
     expect(simpleAppSource).toContain('已安装应用');
+  });
+
+  test('unified install panel installs to one or many devices with per-device progress and concurrency', () => {
+    expect(fs.existsSync(path.join(root, 'src/renderer/components/BatchInstallPanel.tsx'))).toBe(false);
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    // 安装模式（-r / -r -d）
+    expect(managerSource).toContain("options?.allowDowngrade ? ['-r', '-d'] : ['-r']");
+    expect(managerSource).toContain('async installApk(deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean })');
+    expect(preloadSource).toContain('installApk: (deviceId, apkPath, options)');
+    expect(electronApiSource).toContain('options?: { allowDowngrade?: boolean }');
+
+    // 统一安装面板：单/多设备 + 并发 + 每台队列进度条
+    expect(simpleAppSource).toContain('renderUnifiedInstallPanel');
+    expect(simpleAppSource).toContain('startUnifiedInstall');
+    expect(simpleAppSource).toContain('installItemsOnDevice');
+    expect(simpleAppSource).toContain('const limit = installConcurrency > 0 ? installConcurrency : targetIds.length');
+    expect(simpleAppSource).toContain('installApk(deviceId, item.path, { allowDowngrade: installAllowDowngrade })');
+    expect(simpleAppSource).toContain('pendingApks');
+    expect(simpleAppSource).toContain('installTargets');
+    expect(simpleAppSource).toContain('retryDeviceInstall');
+    expect(simpleAppSource).toContain('应用安装');
+    expect(simpleAppSource).toContain('目标设备');
+    // 单设备默认目标
+    expect(simpleAppSource).toContain('prev.size === 0 ? new Set([selectedDevice.id]) : prev');
   });
 });

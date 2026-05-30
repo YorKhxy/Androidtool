@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { ActivityStackEntry, AdbStatus, DeviceInfo, MirrorSession, ProcessInfo, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
+import { AdbStatus, DeviceInfo, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
@@ -24,7 +24,7 @@ const isLikelyPicoDevice = (device: DeviceInfo | null): boolean => {
   return identity.includes('pico') || identity.includes('a9210') || identity.includes('sparrow');
 };
 
-type TabType = 'devices' | 'logs' | 'performance' | 'processes' | 'activity' | 'network' | 'mirror';
+type TabType = 'devices' | 'logs' | 'performance' | 'network' | 'mirror';
 type LogLevelFilter = LogEntry['level'] | 'all';
 type ApkInstallStatus = 'queued' | 'installing' | 'success' | 'failed';
 
@@ -131,12 +131,11 @@ function SimpleApp() {
   const [performanceSnapshots, setPerformanceSnapshots] = useState<PerformanceSnapshot[]>([]);
   const [performanceRecordings, setPerformanceRecordings] = useState<PerformanceRecording[]>([]);
   const [recordingDeviceIds, setRecordingDeviceIds] = useState<Set<string>>(() => new Set());
-  const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [installedPackages, setInstalledPackages] = useState<string[]>([]);
   const [installedPackagesLoading, setInstalledPackagesLoading] = useState(false);
   const [appFilter, setAppFilter] = useState('');
-  const [uninstallingPackage, setUninstallingPackage] = useState<string | null>(null);
-  const [activities, setActivities] = useState<ActivityStackEntry[]>([]);
+  const [busyPackage, setBusyPackage] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<'launch' | 'stop' | 'uninstall' | null>(null);
   const [networkRequests, setNetworkRequests] = useState<NetworkRequest[]>([]);
   const [selectedNetworkRequestId, setSelectedNetworkRequestId] = useState<string | null>(null);
   const [runningLogDeviceIds, setRunningLogDeviceIds] = useState<Set<string>>(() => new Set());
@@ -157,7 +156,12 @@ function SimpleApp() {
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
   const [apkInstallStates, setApkInstallStates] = useState<Record<string, DeviceApkInstallState>>({});
-  const [isDeviceMoreMenuOpen, setIsDeviceMoreMenuOpen] = useState(false);
+  const [pendingApks, setPendingApks] = useState<{ path: string; fileName: string }[]>([]);
+  const [installTargets, setInstallTargets] = useState<Set<string>>(new Set());
+  const [installConcurrency, setInstallConcurrency] = useState(4);
+  const [installAllowDowngrade, setInstallAllowDowngrade] = useState(false);
+  const [isUnifiedInstalling, setIsUnifiedInstalling] = useState(false);
+  const [busyDeviceAction, setBusyDeviceAction] = useState<{ id: string; action: 'sleep' | 'reboot' } | null>(null);
   
   const logStatesRef = useRef(new Map<string, DeviceLogState>());
   const logsContainerRef = useRef<HTMLDivElement>(null);
@@ -165,7 +169,6 @@ function SimpleApp() {
   const maxLogEntriesRef = useRef(MAX_LOG_ENTRIES);
   const batchUpdateSizeRef = useRef(BATCH_UPDATE_SIZE);
   const performanceRequestInFlightRef = useRef(new Set<string>());
-  const installingApkDeviceIdsRef = useRef(new Set<string>());
   const apkInstallProgressTimersRef = useRef(new Map<string, number>());
 
   const resetDeviceRuntimeState = useCallback(() => {
@@ -327,7 +330,6 @@ function SimpleApp() {
 
   useEffect(() => {
     selectedDeviceRef.current = selectedDevice;
-    setIsDeviceMoreMenuOpen(false);
   }, [selectedDevice]);
 
   useEffect(() => {
@@ -479,12 +481,6 @@ function SimpleApp() {
     }
   }, [selectedDevice, activeTab, performanceEnabledDeviceIds]);
 
-  useEffect(() => {
-    if (selectedDevice && activeTab === 'processes') {
-      loadProcesses();
-    }
-  }, [selectedDevice, activeTab]);
-
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
   useEffect(() => {
@@ -492,18 +488,14 @@ function SimpleApp() {
       setInstalledPackages([]);
       setAppFilter('');
       loadInstalledPackages();
+      // 默认把当前设备加入安装目标（仅当尚未选择任何目标时）
+      setInstallTargets((prev) => (prev.size === 0 ? new Set([selectedDevice.id]) : prev));
     } else {
       setInstalledPackages([]);
       setAppFilter('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDevice?.id]);
-
-  useEffect(() => {
-    if (selectedDevice && activeTab === 'activity') {
-      loadActivityStack();
-    }
-  }, [selectedDevice, activeTab]);
 
   useEffect(() => {
     setSelectedNetworkRequestId(null);
@@ -853,142 +845,170 @@ function SimpleApp() {
   };
 
   const selectApkFiles = async () => {
-    if (!selectedDevice || !hasElectronAPI()) {
+    if (!hasElectronAPI()) {
       setError('Electron 接口不可用');
       return;
     }
-
     try {
       const result = await window.electronAPI!.selectApkFiles();
       if (!result.success || !result.data) {
         setError(formatOperationError(result, '选择安装包失败'));
         return;
       }
-
-      if (result.data.length === 0) {
-        return;
-      }
-
-      const deviceId = selectedDevice.id;
-      const existingPaths = new Set(getDeviceApkInstallState(deviceId).queue.map(item => item.path));
-      const nextItems = result.data
-        .filter(filePath => filePath.toLowerCase().endsWith('.apk'))
-        .filter(filePath => !existingPaths.has(filePath))
-        .map(filePath => ({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          path: filePath,
-          fileName: filePath.split(/[\\/]/).pop() || filePath,
-          status: 'queued' as ApkInstallStatus,
-          progress: 0,
-        }));
-
-      if (nextItems.length > 0) {
-        updateDeviceApkInstallState(deviceId, previousState => ({
-          ...previousState,
-          queue: [...previousState.queue, ...nextItems],
-        }));
-        setError('');
-      }
+      if (result.data.length === 0) return;
+      setPendingApks((prev) => {
+        const existing = new Set(prev.map((a) => a.path));
+        const added = result.data!
+          .filter((p) => p.toLowerCase().endsWith('.apk') && !existing.has(p))
+          .map((p) => ({ path: p, fileName: p.split(/[\\/]/).pop() || p }));
+        return [...prev, ...added];
+      });
+      setError('');
     } catch (err) {
       setError('选择安装包失败：' + (err as Error).message);
     }
   };
 
-  const installQueuedApks = async () => {
-    if (!selectedDevice || !hasElectronAPI()) return;
-    const deviceId = selectedDevice.id;
-    if (installingApkDeviceIdsRef.current.has(deviceId)) return;
-    const queuedItems = getDeviceApkInstallState(deviceId).queue.filter(item => item.status === 'queued' || item.status === 'failed');
-    if (queuedItems.length === 0) return;
+  const removePendingApk = (path: string) => {
+    setPendingApks((prev) => prev.filter((a) => a.path !== path));
+  };
 
-    installingApkDeviceIdsRef.current.add(deviceId);
-    updateDeviceApkInstallState(deviceId, previousState => ({ ...previousState, isInstalling: true }));
-    setError('');
+  const toggleInstallTarget = (deviceId: string) => {
+    if (isUnifiedInstalling) return;
+    setInstallTargets((prev) => {
+      const next = new Set(prev);
+      if (next.has(deviceId)) next.delete(deviceId);
+      else next.add(deviceId);
+      return next;
+    });
+  };
 
-    try {
-      for (const item of queuedItems) {
-        updateDeviceApkInstallState(deviceId, previousState => ({
+  // 给指定设备安装一组 items（items 直接传入，避免读取尚未刷新的队列状态）。
+  const installItemsOnDevice = async (deviceId: string, items: ApkInstallQueueItem[]) => {
+    for (const item of items) {
+      updateDeviceApkInstallState(deviceId, (previousState) => ({
+        ...previousState,
+        queue: previousState.queue.map((q) =>
+          q.id === item.id ? { ...q, status: 'installing', progress: Math.max(q.progress, 8), error: undefined, output: undefined } : q
+        ),
+      }));
+      startApkInstallProgressTimer(deviceId, item.id);
+      try {
+        const result = await window.electronAPI!.installApk(deviceId, item.path, { allowDowngrade: installAllowDowngrade });
+        stopApkInstallProgressTimer(item.id);
+        updateDeviceApkInstallState(deviceId, (previousState) => ({
           ...previousState,
-          queue: previousState.queue.map(queueItem =>
-            queueItem.id === item.id
-              ? { ...queueItem, status: 'installing', progress: Math.max(queueItem.progress, 8), error: undefined, output: undefined }
-              : queueItem
+          queue: previousState.queue.map((q) =>
+            q.id === item.id
+              ? { ...q, status: result.success ? 'success' : 'failed', progress: 100, output: result.data?.output, error: result.success ? undefined : formatOperationError(result, '安装失败') }
+              : q
           ),
         }));
-        startApkInstallProgressTimer(deviceId, item.id);
-
-        try {
-          const result = await window.electronAPI!.installApk(deviceId, item.path);
-          stopApkInstallProgressTimer(item.id);
-          updateDeviceApkInstallState(deviceId, previousState => ({
-            ...previousState,
-            queue: previousState.queue.map(queueItem =>
-              queueItem.id === item.id
-                ? {
-                    ...queueItem,
-                    status: result.success ? 'success' : 'failed',
-                    progress: 100,
-                    output: result.data?.output,
-                    error: result.success ? undefined : formatOperationError(result, '安装失败'),
-                  }
-                : queueItem
-            ),
-          }));
-        } catch (err) {
-          stopApkInstallProgressTimer(item.id);
-          updateDeviceApkInstallState(deviceId, previousState => ({
-            ...previousState,
-            queue: previousState.queue.map(queueItem =>
-              queueItem.id === item.id
-                ? { ...queueItem, status: 'failed', progress: 100, error: (err as Error).message }
-                : queueItem
-            ),
-          }));
-        }
+      } catch (err) {
+        stopApkInstallProgressTimer(item.id);
+        updateDeviceApkInstallState(deviceId, (previousState) => ({
+          ...previousState,
+          queue: previousState.queue.map((q) => (q.id === item.id ? { ...q, status: 'failed', progress: 100, error: (err as Error).message } : q)),
+        }));
       }
+    }
+    updateDeviceApkInstallState(deviceId, (previousState) => ({ ...previousState, isInstalling: false }));
+    if (selectedDeviceRef.current?.id === deviceId) {
+      void loadInstalledPackages();
+    }
+  };
+
+  // 统一安装：把待装 APK 入队到所选在线设备，按并发上限并行安装。
+  const startUnifiedInstall = async () => {
+    if (isUnifiedInstalling || !hasElectronAPI()) return;
+    const targetIds = Array.from(installTargets).filter((id) => devices.find((d) => d.id === id)?.status === 'connected');
+    if (pendingApks.length === 0 || targetIds.length === 0) return;
+
+    const perDeviceItems: Record<string, ApkInstallQueueItem[]> = {};
+    targetIds.forEach((id) => {
+      perDeviceItems[id] = pendingApks.map((a) => ({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${id}`,
+        path: a.path,
+        fileName: a.fileName,
+        status: 'queued' as ApkInstallStatus,
+        progress: 0,
+      }));
+    });
+    setApkInstallStates((prev) => {
+      const next = { ...prev };
+      targetIds.forEach((id) => {
+        const existing = next[id]?.queue.filter((it) => it.status !== 'success') || [];
+        next[id] = { queue: [...existing, ...perDeviceItems[id]], isInstalling: true };
+      });
+      return next;
+    });
+    setError('');
+    setIsUnifiedInstalling(true);
+
+    const limit = installConcurrency > 0 ? installConcurrency : targetIds.length;
+    let index = 0;
+    const worker = async () => {
+      while (index < targetIds.length) {
+        const deviceId = targetIds[index];
+        index += 1;
+        await installItemsOnDevice(deviceId, perDeviceItems[deviceId]);
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(limit, targetIds.length) || 1 }, () => worker()));
     } finally {
-      installingApkDeviceIdsRef.current.delete(deviceId);
-      updateDeviceApkInstallState(deviceId, previousState => ({ ...previousState, isInstalling: false }));
-      // 安装完成后刷新当前设备的已安装应用列表
-      if (selectedDeviceRef.current?.id === deviceId) {
-        void loadInstalledPackages();
-      }
+      setIsUnifiedInstalling(false);
     }
   };
 
-  const clearCompletedApkInstalls = () => {
-    if (!selectedDevice) return;
-    updateDeviceApkInstallState(selectedDevice.id, previousState => ({
-      ...previousState,
-      queue: previousState.queue.filter(item => item.status !== 'success'),
-    }));
-  };
-
-  const removeApkInstallItem = (itemId: string) => {
-    if (!selectedDevice) return;
-    updateDeviceApkInstallState(selectedDevice.id, previousState => ({
-      ...previousState,
-      queue: previousState.queue.filter(item => item.id !== itemId || item.status === 'installing'),
-    }));
-  };
-
-  const loadProcesses = async () => {
-    if (!selectedDevice || !hasElectronAPI()) return;
+  const retryDeviceInstall = async (deviceId: string) => {
+    if (isUnifiedInstalling || !hasElectronAPI()) return;
+    if (devices.find((d) => d.id === deviceId)?.status !== 'connected') {
+      updateDeviceApkInstallState(deviceId, (previousState) => ({
+        ...previousState,
+        queue: previousState.queue.map((q) => (q.status === 'failed' ? { ...q, error: '设备已离线' } : q)),
+      }));
+      return;
+    }
+    const failed = getDeviceApkInstallState(deviceId).queue.filter((it) => it.status === 'failed');
+    if (failed.length === 0) return;
+    setIsUnifiedInstalling(true);
+    updateDeviceApkInstallState(deviceId, (s) => ({ ...s, isInstalling: true }));
     try {
-      const result = await window.electronAPI!.getProcesses(selectedDevice.id);
-      if (result.success && result.data) {
-        setProcesses(result.data);
-      }
-    } catch (err) {
-      console.error('Load processes error:', err);
+      await installItemsOnDevice(deviceId, failed);
+    } finally {
+      setIsUnifiedInstalling(false);
     }
   };
 
-  const sleepSelectedDevice = async () => {
-    if (!selectedDevice || !hasElectronAPI()) return;
-    setIsDeviceMoreMenuOpen(false);
+  const clearCompletedApkInstalls = (deviceId: string) => {
+    updateDeviceApkInstallState(deviceId, (previousState) => ({
+      ...previousState,
+      queue: previousState.queue.filter((item) => item.status !== 'success'),
+    }));
+  };
+
+  const removeApkInstallItem = (deviceId: string, itemId: string) => {
+    updateDeviceApkInstallState(deviceId, (previousState) => ({
+      ...previousState,
+      queue: previousState.queue.filter((item) => item.id !== itemId || item.status === 'installing'),
+    }));
+  };
+
+  // 保证按钮冷却至少 minMs，让点击有可见反馈（即使 adb 指令秒回）。
+  const withMinCooldown = async (startedAt: number, minMs: number) => {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed < minMs) {
+      await new Promise((resolve) => setTimeout(resolve, minMs - elapsed));
+    }
+  };
+
+  const handleSleepDevice = async (device: DeviceInfo) => {
+    if (!hasElectronAPI() || busyDeviceAction) return;
+    setBusyDeviceAction({ id: device.id, action: 'sleep' });
+    const startedAt = Date.now();
     try {
-      const result = await window.electronAPI!.sleepDevice(selectedDevice.id);
+      const result = await window.electronAPI!.sleepDevice(device.id);
       if (!result.success) {
         setError(formatOperationError(result, '设备息屏失败'));
         return;
@@ -996,14 +1016,18 @@ function SimpleApp() {
       setError('');
     } catch (err) {
       setError('设备息屏失败: ' + (err as Error).message);
+    } finally {
+      await withMinCooldown(startedAt, 500);
+      setBusyDeviceAction(null);
     }
   };
 
-  const rebootSelectedDevice = async () => {
-    if (!selectedDevice || !hasElectronAPI()) return;
-    setIsDeviceMoreMenuOpen(false);
+  const handleRebootDevice = async (device: DeviceInfo) => {
+    if (!hasElectronAPI() || busyDeviceAction) return;
+    setBusyDeviceAction({ id: device.id, action: 'reboot' });
+    const startedAt = Date.now();
     try {
-      const result = await window.electronAPI!.rebootDevice(selectedDevice.id);
+      const result = await window.electronAPI!.rebootDevice(device.id);
       if (!result.success) {
         setError(formatOperationError(result, '设备重启失败'));
         return;
@@ -1011,23 +1035,9 @@ function SimpleApp() {
       setError('');
     } catch (err) {
       setError('设备重启失败: ' + (err as Error).message);
-    }
-  };
-
-  const loadActivityStack = async () => {
-    if (!selectedDevice || !hasElectronAPI()) return;
-    try {
-      const result = await window.electronAPI!.getActivityStack(selectedDevice.id, packageFilter.trim() || undefined);
-      if (result.success && result.data) {
-        setActivities(result.data);
-        setError('');
-      } else {
-        setActivities([]);
-        setError(result.error || '\u52a0\u8f7d Activity \u6808\u5931\u8d25');
-      }
-    } catch (err) {
-      setActivities([]);
-      setError('\u52a0\u8f7d Activity \u6808\u5931\u8d25\uff1a' + (err as Error).message);
+    } finally {
+      await withMinCooldown(startedAt, 500);
+      setBusyDeviceAction(null);
     }
   };
 
@@ -1119,10 +1129,47 @@ function SimpleApp() {
     }
   };
 
+  const handleLaunchApp = async (packageName: string) => {
+    if (!selectedDevice || !hasElectronAPI() || busyPackage) return;
+    setBusyPackage(packageName);
+    setBusyAction('launch');
+    try {
+      setError('');
+      const result = await window.electronAPI!.launchApp(selectedDevice.id, packageName);
+      if (!result.success) {
+        setError(result.error || '启动应用失败');
+      }
+    } catch (err) {
+      setError('启动应用失败：' + (err as Error).message);
+    } finally {
+      setBusyPackage(null);
+      setBusyAction(null);
+    }
+  };
+
+  const handleForceStopApp = async (packageName: string) => {
+    if (!selectedDevice || !hasElectronAPI() || busyPackage) return;
+    setBusyPackage(packageName);
+    setBusyAction('stop');
+    try {
+      setError('');
+      const result = await window.electronAPI!.forceStopApp(selectedDevice.id, packageName);
+      if (!result.success) {
+        setError(result.error || '关闭应用失败');
+      }
+    } catch (err) {
+      setError('关闭应用失败：' + (err as Error).message);
+    } finally {
+      setBusyPackage(null);
+      setBusyAction(null);
+    }
+  };
+
   const handleUninstallApp = async (packageName: string) => {
-    if (!selectedDevice || !hasElectronAPI()) return;
+    if (!selectedDevice || !hasElectronAPI() || busyPackage) return;
     if (!window.confirm(`确定卸载应用「${packageName}」？此操作不可撤销。`)) return;
-    setUninstallingPackage(packageName);
+    setBusyPackage(packageName);
+    setBusyAction('uninstall');
     try {
       setError('');
       const result = await window.electronAPI!.uninstallApp(selectedDevice.id, packageName);
@@ -1134,7 +1181,8 @@ function SimpleApp() {
     } catch (err) {
       setError('卸载失败：' + (err as Error).message);
     } finally {
-      setUninstallingPackage(null);
+      setBusyPackage(null);
+      setBusyAction(null);
     }
   };
 
@@ -1181,10 +1229,6 @@ function SimpleApp() {
     const sessionStartTime = new Date(sessionStartedAt).getTime();
     return visiblePerformanceSnapshots.filter((snapshot) => new Date(snapshot.capturedAt).getTime() >= sessionStartTime);
   }, [performanceSessionStartedAtByDeviceId, selectedDeviceId, visiblePerformanceSnapshots]);
-  const currentApkInstallState = selectedDeviceId ? getDeviceApkInstallState(selectedDeviceId) : { queue: [], isInstalling: false };
-  const currentApkInstallQueue = currentApkInstallState.queue;
-  const isInstallingApks = currentApkInstallState.isInstalling;
-
   const getApkInstallStatusMeta = (status: ApkInstallStatus) => {
     switch (status) {
       case 'installing':
@@ -1198,113 +1242,112 @@ function SimpleApp() {
     }
   };
 
-  const renderApkInstallPanel = () => {
-    const hasInstallableItems = currentApkInstallQueue.some(item => item.status === 'queued' || item.status === 'failed');
-    const successCount = currentApkInstallQueue.filter(item => item.status === 'success').length;
-    const finishedCount = currentApkInstallQueue.filter(item => item.status === 'success' || item.status === 'failed').length;
-    const overallProgress = currentApkInstallQueue.length > 0
-      ? Math.round((finishedCount / currentApkInstallQueue.length) * 100)
-      : 0;
+  const renderUnifiedInstallPanel = () => {
+    const onlineDevices = devices.filter((d) => d.status === 'connected');
+    const selectedOnlineCount = Array.from(installTargets).filter((id) => onlineDevices.some((d) => d.id === id)).length;
+    const canStart = pendingApks.length > 0 && selectedOnlineCount > 0 && !isUnifiedInstalling;
+    const activeDeviceIds = devices.map((d) => d.id).filter((id) => (apkInstallStates[id]?.queue.length || 0) > 0);
 
     return (
-      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', minHeight: '420px', flex: 1, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ fontSize: '12px', color: '#9ca3af', minWidth: 0 }}>
-            {selectedDevice ? `目标设备：${getDeviceDisplayName(selectedDevice)}` : '未选择设备'}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, justifyContent: 'flex-end' }}>
-            <button
-              onClick={selectApkFiles}
-              disabled={isInstallingApks}
-              style={{ padding: '8px 12px', backgroundColor: isInstallingApks ? '#4b5563' : '#4a90d9', border: 'none', borderRadius: '6px', color: '#fff', cursor: isInstallingApks ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600 }}
-            >
-              选择 APK
-            </button>
-            <button
-              onClick={installQueuedApks}
-              disabled={!hasInstallableItems || isInstallingApks || !selectedDevice}
-              style={{ padding: '8px 14px', backgroundColor: hasInstallableItems && !isInstallingApks ? '#4a90d9' : '#4b5563', border: 'none', borderRadius: '6px', color: '#fff', cursor: hasInstallableItems && !isInstallingApks ? 'pointer' : 'not-allowed', fontSize: '13px', fontWeight: 600 }}
-            >
-              {isInstallingApks ? '安装中...' : '开始安装'}
-            </button>
-          </div>
+      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{'应用安装'}</h2>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <button onClick={selectApkFiles} disabled={isUnifiedInstalling} style={{ padding: '8px 14px', backgroundColor: isUnifiedInstalling ? '#4b5563' : '#4a90d9', border: 'none', borderRadius: '6px', color: '#fff', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600 }}>选择 APK</button>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#cbd5e1' }}>并发数
+            <select value={installConcurrency} disabled={isUnifiedInstalling} onChange={(e) => setInstallConcurrency(Number(e.target.value))} style={{ padding: '6px 10px', fontSize: '13px', color: '#e5e7eb', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
+              <option value={2}>2</option><option value={4}>4</option><option value={8}>8</option><option value={0}>不限</option>
+            </select>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#cbd5e1' }}>
+            <input type="checkbox" checked={installAllowDowngrade} disabled={isUnifiedInstalling} onChange={(e) => setInstallAllowDowngrade(e.target.checked)} />允许降级覆盖
+          </label>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', color: '#9ca3af', fontSize: '12px' }}>
-          <span>{`队列 ${currentApkInstallQueue.length}`}</span>
-          <span>{`成功 ${successCount}`}</span>
-          {currentApkInstallQueue.length > 0 && <span>{`进度 ${finishedCount}/${currentApkInstallQueue.length}`}</span>}
-          {successCount > 0 && (
-            <button onClick={clearCompletedApkInstalls} disabled={isInstallingApks} style={{ background: 'transparent', border: 'none', color: '#60a5fa', cursor: isInstallingApks ? 'not-allowed' : 'pointer', padding: 0, fontSize: '12px' }}>
-              清空成功项
-            </button>
-          )}
-        </div>
-
-        {currentApkInstallQueue.length > 0 && (
-          <div style={{ height: '6px', backgroundColor: '#353550', borderRadius: '999px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${overallProgress}%`, backgroundColor: '#4a90d9', transition: 'width 220ms ease' }} />
-          </div>
-        )}
-
-        {currentApkInstallQueue.length === 0 ? (
-          <div style={{ flex: 1, minHeight: '260px', border: '1px dashed #454560', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', textAlign: 'center', padding: '24px' }}>
-            <div>
-              <div style={{ color: '#cbd5e1', fontSize: '15px', marginBottom: '6px' }}>还没有待安装文件</div>
-              <div style={{ fontSize: '13px' }}>选择一个或多个 APK 后，按队列顺序推送安装到当前设备。</div>
-            </div>
+        {pendingApks.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {pendingApks.map((a) => (
+              <span key={a.path} title={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '999px', fontSize: '12px', color: '#e5e7eb' }}>
+                {a.fileName}
+                <button onClick={() => removePendingApk(a.path)} disabled={isUnifiedInstalling} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', padding: 0, fontSize: '13px' }}>✕</button>
+              </span>
+            ))}
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', overflow: 'auto', paddingRight: '4px' }}>
-            {currentApkInstallQueue.map(item => {
-              const statusMeta = getApkInstallStatusMeta(item.status);
-              const canRemove = item.status !== 'installing';
+          <div style={{ fontSize: '13px', color: '#6b7280' }}>还没有待安装文件，点「选择 APK」添加（可多选）</div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '13px', color: '#9ca3af' }}>目标设备（{selectedOnlineCount}/{onlineDevices.length}）</span>
+            <button onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set(onlineDevices.map((d) => d.id))); }} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#60a5fa', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>全选</button>
+            <button onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set()); }} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#9ca3af', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>清空</button>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {devices.length === 0 ? (
+              <div style={{ padding: '8px', color: '#666', fontSize: '13px' }}>暂无已连接设备</div>
+            ) : devices.map((d) => {
+              const online = d.status === 'connected';
               return (
-                <div key={item.id} style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '12px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start' }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ color: '#fff', fontSize: '14px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.fileName}>{item.fileName}</div>
-                      <div style={{ color: '#7b8197', fontSize: '11px', marginTop: '5px', wordBreak: 'break-all' }}>{item.path}</div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                      <span style={{ color: statusMeta.color, backgroundColor: statusMeta.background, borderRadius: '999px', padding: '3px 8px', fontSize: '12px' }}>
-                        {statusMeta.label}
-                      </span>
-                      <button
-                        onClick={() => removeApkInstallItem(item.id)}
-                        disabled={!canRemove}
-                        style={{ padding: '3px 8px', backgroundColor: 'transparent', border: '1px solid #454560', borderRadius: '6px', color: canRemove ? '#d1d5db' : '#6b7280', cursor: canRemove ? 'pointer' : 'not-allowed', fontSize: '12px' }}
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#9ca3af', fontSize: '11px', marginBottom: '5px' }}>
-                      <span>{item.status === 'installing' ? '正在推送并安装' : statusMeta.label}</span>
-                      <span>{`${Math.round(item.progress)}%`}</span>
-                    </div>
-                    <div style={{ height: '5px', backgroundColor: '#353550', borderRadius: '999px', overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          height: '100%',
-                          width: `${item.progress}%`,
-                          backgroundColor: item.status === 'failed' ? '#ef4444' : item.status === 'success' ? '#22c55e' : '#60a5fa',
-                          transition: 'width 260ms ease',
-                        }}
-                      />
-                    </div>
-                  </div>
-                  {(item.error || item.output) && (
-                    <div style={{ marginTop: '8px', color: item.error ? '#fca5a5' : '#86efac', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {item.error || item.output}
-                    </div>
-                  )}
-                </div>
+                <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', cursor: online && !isUnifiedInstalling ? 'pointer' : 'not-allowed', opacity: online ? 1 : 0.5 }}>
+                  <input type="checkbox" checked={installTargets.has(d.id)} disabled={!online || isUnifiedInstalling} onChange={() => toggleInstallTarget(d.id)} />
+                  <span style={{ fontSize: '13px', color: '#e5e7eb' }}>{getDeviceDisplayName(d)}</span>
+                  <span style={{ fontSize: '12px', color: d.connectionType === 'wifi' ? '#4ade80' : '#60a5fa' }}>{d.connectionType === 'wifi' ? 'WiFi' : 'USB'}</span>
+                  {!online && <span style={{ fontSize: '12px', color: '#9ca3af' }}>离线</span>}
+                </label>
               );
             })}
           </div>
-        )}
+        </div>
+
+        <button onClick={startUnifiedInstall} disabled={!canStart} style={{ alignSelf: 'flex-start', padding: '10px 24px', fontSize: '14px', fontWeight: 600, color: '#fff', backgroundColor: canStart ? '#4a90d9' : '#3a3a55', border: 'none', borderRadius: '8px', cursor: canStart ? 'pointer' : 'not-allowed' }}>
+          {isUnifiedInstalling ? '安装中…' : `安装到所选设备${selectedOnlineCount > 0 ? `（${selectedOnlineCount}）` : ''}`}
+        </button>
+
+        {activeDeviceIds.map((deviceId) => {
+          const device = devices.find((d) => d.id === deviceId);
+          const queue = apkInstallStates[deviceId]?.queue || [];
+          const finished = queue.filter((it) => it.status === 'success' || it.status === 'failed').length;
+          const hasFailed = queue.some((it) => it.status === 'failed');
+          const hasSuccess = queue.some((it) => it.status === 'success');
+          return (
+            <div key={deviceId} style={{ border: '1px solid #353550', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{device ? getDeviceDisplayName(device) : deviceId}</span>
+                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{finished}/{queue.length} 完成</span>
+                {hasFailed && <button onClick={() => retryDeviceInstall(deviceId)} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#93c5fd', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>重试失败</button>}
+                {hasSuccess && <button onClick={() => clearCompletedApkInstalls(deviceId)} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#60a5fa', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', marginLeft: 'auto' }}>清空成功项</button>}
+              </div>
+              {queue.map((item) => {
+                const statusMeta = getApkInstallStatusMeta(item.status);
+                const canRemove = item.status !== 'installing';
+                return (
+                  <div key={item.id} style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+                      <span style={{ color: '#fff', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.fileName}>{item.fileName}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                        <span style={{ color: statusMeta.color, backgroundColor: statusMeta.background, borderRadius: '999px', padding: '2px 8px', fontSize: '12px' }}>{statusMeta.label}</span>
+                        <button onClick={() => removeApkInstallItem(deviceId, item.id)} disabled={!canRemove} style={{ padding: '2px 8px', backgroundColor: 'transparent', border: '1px solid #454560', borderRadius: '6px', color: canRemove ? '#d1d5db' : '#6b7280', cursor: canRemove ? 'pointer' : 'not-allowed', fontSize: '12px' }}>删除</button>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#9ca3af', fontSize: '11px', marginBottom: '4px' }}>
+                        <span>{item.status === 'installing' ? '正在推送并安装' : statusMeta.label}</span>
+                        <span>{`${Math.round(item.progress)}%`}</span>
+                      </div>
+                      <div style={{ height: '5px', backgroundColor: '#353550', borderRadius: '999px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${item.progress}%`, backgroundColor: item.status === 'failed' ? '#ef4444' : item.status === 'success' ? '#22c55e' : '#60a5fa', transition: 'width 260ms ease' }} />
+                      </div>
+                    </div>
+                    {(item.error || item.output) && (
+                      <div style={{ marginTop: '6px', color: item.error ? '#fca5a5' : '#86efac', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.error || item.output}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
       </section>
     );
   };
@@ -1587,33 +1630,6 @@ function SimpleApp() {
     }}>
       <header style={{ height: '56px', backgroundColor: '#252540', borderBottom: '1px solid #353550', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between' }}>
         <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
-        <button 
-          onClick={loadDevices}
-          style={{ 
-            padding: '6px 12px', 
-            backgroundColor: '#353550', 
-            border: 'none', 
-            borderRadius: '6px', 
-            color: 'white', 
-            cursor: 'pointer',
-            fontSize: '14px'
-          }}
-        >{'\u5237\u65b0\u8bbe\u5907'}</button>
-        <button 
-          onClick={connectUSBDevice}
-          style={{ 
-            padding: '6px 12px', 
-            backgroundColor: '#353550', 
-            border: 'none', 
-            borderRadius: '6px', 
-            color: 'white', 
-            cursor: 'pointer',
-            fontSize: '14px',
-            marginLeft: '8px'
-          }}
-        >
-          USB
-        </button>
       </header>
       
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -1644,6 +1660,10 @@ function SimpleApp() {
           )}
 
           <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u8bbe\u5907\u5217\u8868'}</h2>
+          <div style={{ display: 'flex', gap: '8px', margin: '0 0 12px 0' }}>
+            <button onClick={loadDevices} style={{ flex: 1, padding: '6px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px' }}>刷新设备</button>
+            <button onClick={connectUSBDevice} style={{ flex: 1, padding: '6px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px' }}>连接 USB</button>
+          </div>
           
           {devices.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '32px 0', color: '#666' }}>
@@ -1696,22 +1716,22 @@ function SimpleApp() {
                       {pausedLogDeviceIds.has(device.id) ? '\u65e5\u5fd7\u5df2\u6682\u505c' : '\u65e5\u5fd7\u91c7\u96c6\u4e2d'}
                     </div>
                   )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      disconnectDevice(device);
-                    }}
-                    style={{ 
-                      marginTop: '8px', 
-                      padding: '4px 8px', 
-                      backgroundColor: '#555', 
-                      border: 'none', 
-                      borderRadius: '4px', 
-                      color: '#ff6b6b', 
-                      cursor: 'pointer',
-                      fontSize: '12px'
-                    }}
-                  >{'\u65ad\u5f00'}</button>
+                  <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleSleepDevice(device); }}
+                      disabled={Boolean(busyDeviceAction)}
+                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#d1d5db', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
+                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'sleep' ? '息屏中…' : '息屏'}</button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleRebootDevice(device); }}
+                      disabled={Boolean(busyDeviceAction)}
+                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
+                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'reboot' ? '重启中…' : '重启'}</button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); disconnectDevice(device); }}
+                      style={{ padding: '4px 8px', backgroundColor: '#555', border: 'none', borderRadius: '4px', color: '#ff6b6b', cursor: 'pointer', fontSize: '12px' }}
+                    >断开</button>
+                  </div>
                 </div>
               )})}
             </div>
@@ -1809,8 +1829,6 @@ function SimpleApp() {
                   { key: 'devices' as TabType, label: '\u8bbe\u5907' },
                   { key: 'logs' as TabType, label: '\u65e5\u5fd7' },
                   { key: 'performance' as TabType, label: '\u6027\u80fd' },
-                  { key: 'processes' as TabType, label: '\u8fdb\u7a0b' },
-                  { key: 'activity' as TabType, label: 'Activity \u6808' },
                   { key: 'network' as TabType, label: '\u7f51\u7edc' },
                   { key: 'mirror' as TabType, label: '\u6295\u5c4f' },
                 ].map(tab => (
@@ -1836,97 +1854,7 @@ function SimpleApp() {
               <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
                 {activeTab === 'devices' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(420px, 600px) minmax(420px, 1fr)', gap: '20px', alignItems: 'stretch' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <h2 style={{ fontSize: '20px', fontWeight: '600', margin: '0 0 16px 0' }}>{'\u8bbe\u5907\u8be6\u60c5'}</h2>
-                    <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', flex: 1, boxSizing: 'border-box' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-                        <div>
-                          <h3 style={{ fontSize: '16px', fontWeight: '600', margin: '0 0 4px 0' }}>{getDeviceDisplayName(selectedDevice)}</h3>
-                          {customDeviceNames[selectedDevice.id]?.trim() && (
-                            <p style={{ fontSize: '12px', color: '#888', margin: '0 0 4px 0' }}>{'\u539f\u59cb\u540d\u79f0'}: {selectedDevice.name || selectedDevice.model || '--'}</p>
-                          )}
-                          <p style={{ fontSize: '14px', color: '#888' }}>{selectedDevice.id}</p>
-                        </div>
-                      </div>
-                      <div style={{ marginBottom: '16px', display: 'flex', gap: '8px' }}>
-                        <input
-                          value={customDeviceNames[selectedDevice.id] || ''}
-                          onChange={(e) => updateCustomDeviceName(selectedDevice.id, e.target.value)}
-                          placeholder={'\u81ea\u5b9a\u4e49\u8bbe\u5907\u540d'}
-                          style={{ flex: 1, padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
-                        />
-                        <button
-                          onClick={() => updateCustomDeviceName(selectedDevice.id, '')}
-                          style={{ padding: '0 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: '#d1d5db', cursor: 'pointer', fontSize: '13px' }}
-                        >{'\u6062\u590d\u9ed8\u8ba4'}</button>
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
-                        <div style={{ backgroundColor: '#353550', borderRadius: '6px', padding: '12px' }}>
-                          <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>{'\u5382\u5546'}</div>
-                          <div style={{ fontSize: '14px' }}>{selectedDevice.manufacturer}</div>
-                        </div>
-                        <div style={{ backgroundColor: '#353550', borderRadius: '6px', padding: '12px' }}>
-                          <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>{'\u578b\u53f7'}</div>
-                          <div style={{ fontSize: '14px' }}>{selectedDevice.model}</div>
-                        </div>
-                        <div style={{ backgroundColor: '#353550', borderRadius: '6px', padding: '12px' }}>
-                          <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>{'Android \u7248\u672c'}</div>
-                          <div style={{ fontSize: '14px' }}>{selectedDevice.androidVersion}</div>
-                        </div>
-                        <div style={{ backgroundColor: '#353550', borderRadius: '6px', padding: '12px' }}>
-                          <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>{'API \u7b49\u7ea7'}</div>
-                          <div style={{ fontSize: '14px' }}>{selectedDevice.apiLevel}</div>
-                        </div>
-                      </div>
-                      <div style={{ marginTop: '16px', display: 'flex', gap: '8px', position: 'relative' }}>
-                        <button
-                          onClick={toggleLogcat}
-                          style={{
-                            flex: 1,
-                            padding: '10px',
-                            backgroundColor: isSelectedLogcatRunning ? '#ef4444' : '#4a90d9',
-                            border: 'none',
-                            borderRadius: '6px',
-                            color: 'white',
-                            fontSize: '14px',
-                            fontWeight: '500',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {isSelectedLogcatRunning ? '\u505c\u6b62\u65e5\u5fd7' : '\u5f00\u59cb\u65e5\u5fd7'}
-                        </button>
-                        <button
-                          onClick={() => setIsDeviceMoreMenuOpen(open => !open)}
-                          style={{
-                            padding: '10px 20px',
-                            backgroundColor: '#353550',
-                            border: 'none',
-                            borderRadius: '6px',
-                            color: 'white',
-                            fontSize: '14px',
-                            cursor: 'pointer'
-                          }}
-                        >更多</button>
-                        {isDeviceMoreMenuOpen && (
-                          <div style={{ position: 'absolute', right: 0, top: '44px', minWidth: '120px', backgroundColor: '#202038', border: '1px solid #454560', borderRadius: '8px', padding: '6px', zIndex: 5, boxShadow: '0 10px 24px rgba(0,0,0,0.28)' }}>
-                            <button
-                              onClick={sleepSelectedDevice}
-                              style={{ width: '100%', padding: '8px 10px', backgroundColor: 'transparent', border: 'none', borderRadius: '6px', color: '#d1d5db', textAlign: 'left', cursor: 'pointer', fontSize: '13px' }}
-                            >息屏</button>
-                            <button
-                              onClick={rebootSelectedDevice}
-                              style={{ width: '100%', padding: '8px 10px', backgroundColor: 'transparent', border: 'none', borderRadius: '6px', color: '#fca5a5', textAlign: 'left', cursor: 'pointer', fontSize: '13px' }}
-                            >重启</button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    </div>
-                    <div style={{ marginTop: '40px', display: 'flex' }}>
-                      {renderApkInstallPanel()}
-                    </div>
-                  </div>
+                    {renderUnifiedInstallPanel()}
 
                   <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '12px' }}>
@@ -1972,19 +1900,46 @@ function SimpleApp() {
                               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', gap: '12px' }}
                             >
                               <span style={{ fontSize: '13px', color: '#e5e7eb', fontFamily: 'monospace', wordBreak: 'break-all' }}>{pkg}</span>
-                              <button
-                                onClick={() => handleUninstallApp(pkg)}
-                                disabled={uninstallingPackage === pkg}
-                                style={{ flexShrink: 0, padding: '5px 14px', fontSize: '12px', color: '#fca5a5', backgroundColor: '#ef444422', border: '1px solid #ef444455', borderRadius: '6px', cursor: uninstallingPackage === pkg ? 'not-allowed' : 'pointer', opacity: uninstallingPackage === pkg ? 0.6 : 1 }}
-                              >
-                                {uninstallingPackage === pkg ? '卸载中…' : '卸载'}
-                              </button>
+                              {(() => {
+                                const isBusy = busyPackage === pkg;
+                                const busyStyle = (base: React.CSSProperties): React.CSSProperties => ({
+                                  ...base,
+                                  cursor: isBusy ? 'not-allowed' : 'pointer',
+                                  opacity: isBusy ? 0.5 : 1,
+                                });
+                                return (
+                                  <div style={{ flexShrink: 0, display: 'flex', gap: '6px' }}>
+                                    <button
+                                      onClick={() => handleLaunchApp(pkg)}
+                                      disabled={isBusy}
+                                      style={busyStyle({ padding: '5px 12px', fontSize: '12px', color: '#86efac', backgroundColor: '#22c55e22', border: '1px solid #22c55e55', borderRadius: '6px' })}
+                                    >
+                                      {isBusy && busyAction === 'launch' ? '启动中…' : '启动'}
+                                    </button>
+                                    <button
+                                      onClick={() => handleForceStopApp(pkg)}
+                                      disabled={isBusy}
+                                      style={busyStyle({ padding: '5px 12px', fontSize: '12px', color: '#fcd34d', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b55', borderRadius: '6px' })}
+                                    >
+                                      {isBusy && busyAction === 'stop' ? '关闭中…' : '关闭'}
+                                    </button>
+                                    <button
+                                      onClick={() => handleUninstallApp(pkg)}
+                                      disabled={isBusy}
+                                      style={busyStyle({ padding: '5px 12px', fontSize: '12px', color: '#fca5a5', backgroundColor: '#ef444422', border: '1px solid #ef444455', borderRadius: '6px' })}
+                                    >
+                                      {isBusy && busyAction === 'uninstall' ? '卸载中…' : '卸载'}
+                                    </button>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           ))}
                         </div>
                       );
                     })()}
                   </div>
+
                   </div>
                 )}
 
@@ -2005,92 +1960,6 @@ function SimpleApp() {
                     onStartRecording={startPerformanceRecording}
                     onExportSession={exportPerformanceSession}
                   />
-                )}
-
-                {activeTab === 'processes' && (
-                  <div style={{ backgroundColor: '#252540', borderRadius: '8px', overflow: 'hidden' }}>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead style={{ backgroundColor: '#353550' }}>
-                          <tr>
-                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: '#888' }}>PID</th>
-                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: '#888' }}>PPID</th>
-                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: '#888' }}>{'\u540d\u79f0'}</th>
-                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: '#888' }}>CPU</th>
-                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: '#888' }}>{'\u5185\u5b58'}</th>
-                            <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: '#888' }}>{'\u72b6\u6001'}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {processes.length === 0 ? (
-                            <tr>
-                              <td colSpan={6} style={{ padding: '32px', textAlign: 'center', color: '#666' }}>{'\u6682\u65e0\u8fdb\u7a0b\u6570\u636e'}</td>
-                            </tr>
-                          ) : (
-                            processes.slice(0, 50).map((proc) => (
-                              <tr key={proc.pid} style={{ borderBottom: '1px solid #353550' }}>
-                                <td style={{ padding: '10px 12px', fontSize: '14px', color: '#fff' }}>{proc.pid}</td>
-                                <td style={{ padding: '10px 12px', fontSize: '14px', color: '#888' }}>{proc.ppid}</td>
-                                <td style={{ padding: '10px 12px', fontSize: '14px', color: '#fff', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={proc.name}>{proc.name}</td>
-                                <td style={{ padding: '10px 12px', fontSize: '14px', color: '#3b82f6' }}>{proc.cpuUsage}%</td>
-                                <td style={{ padding: '10px 12px', fontSize: '14px', color: '#22c55e' }}>{proc.memoryUsage}%</td>
-                                <td style={{ padding: '10px 12px' }}>
-                                  <span style={{ 
-                                    padding: '2px 8px', 
-                                    borderRadius: '4px', 
-                                    fontSize: '12px',
-                                    backgroundColor: proc.status === 'running' ? '#22c55e22' : proc.status === 'sleeping' ? '#eab30822' : '#ef444422',
-                                    color: proc.status === 'running' ? '#22c55e' : proc.status === 'sleeping' ? '#eab308' : '#ef4444'
-                                  }}>
-                                    {proc.status}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {activeTab === 'activity' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <input
-                        type="text"
-                        placeholder={'\u5305\u540d\u8fc7\u6ee4\uff0c\u4f8b\u5982 com.example.app'}
-                        value={packageFilter}
-                        onChange={(e) => setPackageFilter(e.target.value)}
-                        style={{ flex: 1, padding: '8px 12px', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '6px', color: 'white', fontSize: '14px', outline: 'none' }}
-                      />
-                      <button onClick={loadActivityStack} style={{ padding: '8px 16px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer' }}>{'\u5237\u65b0'}</button>
-                    </div>
-                    <div style={{ backgroundColor: '#252540', borderRadius: '8px', overflow: 'hidden' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead style={{ backgroundColor: '#353550' }}>
-                          <tr>
-                            <th style={{ padding: '12px', textAlign: 'left', color: '#888' }}>{'\u4efb\u52a1'}</th>
-                            <th style={{ padding: '12px', textAlign: 'left', color: '#888' }}>{'\u5305\u540d'}</th>
-                            <th style={{ padding: '12px', textAlign: 'left', color: '#888' }}>Activity</th>
-                            <th style={{ padding: '12px', textAlign: 'left', color: '#888' }}>{'\u72b6\u6001'}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {activities.length === 0 ? (
-                            <tr><td colSpan={4} style={{ padding: '32px', textAlign: 'center', color: '#666' }}>{'\u6682\u65e0 Activity \u6808\u6570\u636e'}</td></tr>
-                          ) : activities.map(activity => (
-                            <tr key={activity.id} style={{ borderBottom: '1px solid #353550' }}>
-                              <td style={{ padding: '10px 12px', color: '#888' }}>{activity.taskId || '--'}</td>
-                              <td style={{ padding: '10px 12px', color: '#60a5fa' }}>{activity.packageName}</td>
-                              <td style={{ padding: '10px 12px', color: '#fff' }}>{activity.activityName}</td>
-                              <td style={{ padding: '10px 12px', color: '#22c55e' }}>{activity.state}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
                 )}
 
                 {activeTab === 'network' && (
@@ -2145,6 +2014,7 @@ function SimpleApp() {
           <button onClick={() => setError('')} style={{ cursor: 'pointer' }}>{'\u5173\u95ed'}</button>
         </div>
       )}
+
     </div>
   );
 }
