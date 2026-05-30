@@ -4,6 +4,8 @@ import type {
   ApkInstallResult,
   DeviceInfo,
   LogEntry,
+  MirrorSession,
+  MirrorStartOptions,
   NetworkRequest,
   PerformanceMetrics,
   PerformanceRecording,
@@ -42,6 +44,9 @@ export interface ElectronAPI {
   connectUSB: () => Promise<ElectronResult<DeviceInfo[]>>;
   getActivityStack: (deviceId: string, packageName?: string) => Promise<ElectronResult<ActivityStackEntry[]>>;
   getNetworkRequests: (deviceId: string, packageName?: string) => Promise<ElectronResult<NetworkRequest[]>>;
+  startMirror: (deviceId: string, options?: MirrorStartOptions) => Promise<ElectronResult<MirrorSession>>;
+  stopMirror: (deviceId: string) => Promise<ElectronResult<undefined>>;
+  onMirrorStatus: (callback: (session: MirrorSession) => void) => () => void;
   selectApkFiles: () => Promise<ElectronResult<string[]>>;
   installApk: (deviceId: string, apkPath: string) => Promise<ElectronResult<ApkInstallResult>>;
   sleepDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;

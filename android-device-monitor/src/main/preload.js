@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   connectUSB: () => ipcRenderer.invoke('adb:connect-usb'),
   getActivityStack: (deviceId, packageName) => ipcRenderer.invoke('adb:get-activity-stack', deviceId, packageName),
   getNetworkRequests: (deviceId, packageName) => ipcRenderer.invoke('adb:get-network-requests', deviceId, packageName),
+  startMirror: (deviceId, options) => ipcRenderer.invoke('mirror:start', deviceId, options),
+  stopMirror: (deviceId) => ipcRenderer.invoke('mirror:stop', deviceId),
+  onMirrorStatus: (callback) => {
+    const listener = (_, session) => callback(session);
+    ipcRenderer.on('mirror:status', listener);
+    return () => ipcRenderer.removeListener('mirror:status', listener);
+  },
   selectApkFiles: () => ipcRenderer.invoke('adb:select-apk-files'),
   installApk: (deviceId, apkPath) => ipcRenderer.invoke('adb:install-apk', deviceId, apkPath),
   sleepDevice: (deviceId) => ipcRenderer.invoke('adb:sleep-device', deviceId),

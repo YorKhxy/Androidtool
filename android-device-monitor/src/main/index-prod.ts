@@ -3,7 +3,8 @@ import * as path from 'path';
 import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
-import { LogEntry, PerformanceMetrics, PerformanceRecordingOptions, PerformanceSessionExportPayload } from '../shared/types';
+import { ScrcpyManager } from './scrcpy/scrcpyManager';
+import { LogEntry, MirrorStartOptions, PerformanceMetrics, PerformanceRecordingOptions, PerformanceSessionExportPayload } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
@@ -11,6 +12,7 @@ import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from
 
 let mainWindow: BrowserWindow | null = null;
 let adbManager: ADBManager;
+const scrcpyManager = new ScrcpyManager();
 let isCleanupComplete = false;
 let cleanupPromise: Promise<void> | null = null;
 
@@ -38,6 +40,7 @@ const cleanupBeforeQuit = async () => {
 
   cleanupPromise = (async () => {
     clearLogQueue();
+    scrcpyManager.stopAll();
     if (adbManager) {
       await adbManager.cleanup();
     }
@@ -375,6 +378,28 @@ const setupIpcHandlers = () => {
     } catch (error) {
       return toIpcErrorResponse(error, '导出性能采集报告失败');
     }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MIRROR_START, async (_event, deviceId: string, options?: MirrorStartOptions) => {
+    try {
+      const session = scrcpyManager.startMirror(deviceId, options ?? {});
+      return { success: true, data: session };
+    } catch (error) {
+      return toIpcErrorResponse(error, '启动投屏失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MIRROR_STOP, async (_event, deviceId: string) => {
+    try {
+      scrcpyManager.stopMirror(deviceId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '停止投屏失败');
+    }
+  });
+
+  scrcpyManager.onStatus((session) => {
+    mainWindow?.webContents.send(IPC_CHANNELS.MIRROR_STATUS, session);
   });
 
   adbManager.onAdbStatusChanged((status) => {
