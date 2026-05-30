@@ -73,7 +73,8 @@ try {
     Copy-Item -Path "$ProjectRoot\dist\main" -Destination "$appResources\app" -Recurse -Force
     Copy-Item -Path "$ProjectRoot\dist\renderer" -Destination "$appResources\app\renderer" -Recurse -Force
     Copy-Item -Path "$ProjectRoot\vendor\platform-tools" -Destination "$appResources\platform-tools" -Recurse -Force
-    
+    Copy-Item -Path "$ProjectRoot\vendor\scrcpy" -Destination "$appResources\scrcpy" -Recurse -Force
+
     $pkgJsonPath = "$appResources\app\package.json"
     Copy-Item -Path "$ProjectRoot\package.json" -Destination $pkgJsonPath -Force
     

@@ -28,6 +28,7 @@ describe('project smoke checks', () => {
     expect(ps1Source).toContain('npm run build:renderer');
     expect(ps1Source).toContain('ensure-electron-runtime.js');
     expect(ps1Source).toContain('vendor\\platform-tools');
+    expect(ps1Source).toContain('vendor\\scrcpy');
     expect(electronRuntimeSource).toContain('restoreFromTempElectronRuntime');
     expect(pkg.build.extraResources).toEqual(
       expect.arrayContaining([
