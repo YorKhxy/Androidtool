@@ -20,6 +20,8 @@ android-device-monitor/node_modules/.*-*/
 android-device-monitor/vendor/platform-tools/**
 !android-device-monitor/vendor/platform-tools/
 !android-device-monitor/vendor/platform-tools/README.md
+android-device-monitor/vendor/scrcpy/**
+!android-device-monitor/vendor/scrcpy/
 
 # Local tool/workflow state
 .claude/

@@ -30,6 +30,13 @@ try {
     }
     Write-Host "Bundled adb is ready" -ForegroundColor Green
 
+    Write-Host "[1/5] Preparing bundled scrcpy..." -ForegroundColor Yellow
+    npm run scrcpy:prepare
+    if ($LASTEXITCODE -ne 0) {
+        throw "Bundled scrcpy preparation failed"
+    }
+    Write-Host "Bundled scrcpy is ready" -ForegroundColor Green
+
     Write-Host "[2/5] Compiling main process..." -ForegroundColor Yellow
     npm run build:main
     if ($LASTEXITCODE -ne 0) {
