@@ -423,6 +423,37 @@ Phase 1 基础框架
 
 ---
 
+### Phase 9: 卸载应用
+
+**状态**：待开发
+
+**目标**：在设备页签展示设备所有第三方已安装应用，对指定应用经确认后通过 `adb uninstall <包名>` 卸载，绕开投屏/VR 界面的手动操作，手机与 Pico 通用。
+
+**交付清单**
+- [x] 主进程卸载能力：`ADBManager.uninstallApp(deviceId, packageName)` 执行 `adb -s <deviceId> uninstall <packageName>`，解析成功/失败输出，失败抛结构化错误
+- [x] 主进程已安装应用列表：`ADBManager.listInstalledPackages(deviceId)` 执行 `adb -s <deviceId> shell pm list packages -3`，解析 `package:` 前缀，返回排序去重后的包名数组
+- [x] IPC 打通：`channels.ts` 新增 `UNINSTALL_APP` / `LIST_INSTALLED_PACKAGES`；`index.ts`/`index-prod.ts` 注册 handler；`preload.js` 暴露 `uninstallApp` / `listInstalledPackages`；`electronApi.ts` 类型封装
+- [x] 设备页 UI：设备页签下方新增「已安装应用」面板，进入设备页自动加载，支持搜索过滤；每个应用带「卸载」按钮，点击经 `window.confirm` 二次确认后调用卸载，成功后从列表移除
+- [x] 进程页不再承载卸载入口（已撤销原「操作」列）
+
+**关键文件**
+| 文件路径 | 说明 |
+|----------|------|
+| `android-device-monitor/src/main/adb/ADBManager.ts` | `uninstallApp` / `listInstalledPackages` 方法 |
+| `android-device-monitor/src/main/index.ts` / `index-prod.ts` | 卸载与列表 IPC handler |
+| `android-device-monitor/src/main/preload.js` | `uninstallApp` / `listInstalledPackages` 桥接 |
+| `android-device-monitor/src/renderer/lib/electronApi.ts` | 卸载与列表 API 类型 |
+| `android-device-monitor/src/shared/ipc/channels.ts` | `UNINSTALL_APP` / `LIST_INSTALLED_PACKAGES` 通道 |
+| `android-device-monitor/src/renderer/SimpleApp.tsx` | 设备页「已安装应用」列表、搜索、卸载、确认、刷新 |
+
+**验收标准**
+- `npm run build` 通过；`npm test` 通过
+- 设备页签展示第三方已安装应用列表，可搜索过滤
+- 每个应用有「卸载」按钮，点击弹确认框
+- 确认后应用被卸载，列表移除该项；失败有明确错误提示
+
+---
+
 ## 4. 当前真实目录结构
 
 ```text
