@@ -182,6 +182,24 @@ export interface LogcatFilters {
   keyword?: string;
 }
 
+export type MirrorSessionStatus = 'starting' | 'running' | 'stopped' | 'failed';
+
+/**
+ * 投屏会话状态。第一版（Phase 7）只承载基础生命周期字段；
+ * Pico 单眼裁切 / 码率 / 分辨率等配置字段在 Phase 8 扩展。
+ */
+export interface MirrorSession {
+  deviceId: string;
+  status: MirrorSessionStatus;
+  startedAt?: string;
+  error?: string;
+}
+
+/** 启动投屏的可选参数。Phase 7 暂为空，Phase 8 补 maxSize / bitRate / crop。 */
+export interface MirrorStartOptions {
+  windowTitle?: string;
+}
+
 export type IpcChannel =
   | 'adb:get-status'
   | 'adb:get-devices'
@@ -204,6 +222,9 @@ export type IpcChannel =
   | 'adb:status-changed'
   | 'device:connected'
   | 'device:disconnected'
+  | 'mirror:start'
+  | 'mirror:stop'
+  | 'mirror:status'
   | 'log:export'
   | 'log:entry'
   | 'log:batch'
