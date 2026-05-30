@@ -21,6 +21,7 @@ android-device-monitor/vendor/platform-tools/**
 !android-device-monitor/vendor/platform-tools/README.md
 
 # Local tool/workflow state
+.claude/
 .codex/
 .trae/
 .tmp*/
