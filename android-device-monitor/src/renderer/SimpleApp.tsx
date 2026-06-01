@@ -1,10 +1,18 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
 import { FilesPanel } from './components/FilesPanel';
 import { ElectronResult, hasElectronAPI } from './lib/electronApi';
+import {
+  buildHistoryEntryFromDevice,
+  formatHistoryTime,
+  loadHistoryDevices,
+  removeHistoryDevice,
+  saveHistoryDevices,
+  upsertHistoryDevice,
+} from './lib/historyDeviceStore';
 import {
   BATCH_UPDATE_DELAY,
   BATCH_UPDATE_SIZE,
@@ -141,6 +149,17 @@ function SimpleApp() {
   const [selectedNetworkRequestId, setSelectedNetworkRequestId] = useState<string | null>(null);
   const [runningLogDeviceIds, setRunningLogDeviceIds] = useState<Set<string>>(() => new Set());
   const [wifiIp, setWifiIp] = useState('');
+  // 历史 WiFi 设备（快速重连）。初始从 localStorage 读取，已按最近连接时间倒序。
+  const [historyDevices, setHistoryDevices] = useState<HistoryDevice[]>(() => loadHistoryDevices());
+  // 正在快速连接的历史卡片 serialNo（连接中按钮禁用 + 即时反馈）。
+  const [quickConnectingSerial, setQuickConnectingSerial] = useState<string | null>(null);
+  // 快速连接失败（IP 变更）时，就地展开 IP 输入框的卡片 serialNo 及其输入值。
+  const [inlineEditSerial, setInlineEditSerial] = useState<string | null>(null);
+  const [inlineEditValue, setInlineEditValue] = useState('');
+  // 历史卡片的失败提示，按 serialNo 区分，避免污染顶部全局错误条。
+  const [historyErrorBySerial, setHistoryErrorBySerial] = useState<Record<string, string>>({});
+  // 移除历史的行内二次确认态（与设备卡片断开/重启确认同款交互）。
+  const [confirmRemoveSerial, setConfirmRemoveSerial] = useState<string | null>(null);
   const [showPairForm, setShowPairForm] = useState(false);
   const [pairAddress, setPairAddress] = useState('');
   const [pairCode, setPairCode] = useState('');
@@ -598,41 +617,134 @@ function SimpleApp() {
     }
   };
 
+  // \u4ec5 WiFi \u6210\u529f\u8fde\u63a5\u624d\u5199\u5386\u53f2\uff1a\u4ece DeviceInfo \u6784\u9020\u8bb0\u5f55\uff0c\u6309 serialNo \u53bb\u91cd upsert \u5e76\u6301\u4e45\u5316\u3002
+  // USB \u8bbe\u5907\uff08buildHistoryEntryFromDevice \u8fd4\u56de null\uff09\u548c\u65e0 serialNo \u7684\u8bbe\u5907\u4e0d\u5199\u5165\u3002
+  const persistHistoryFromDevice = useCallback((device: DeviceInfo) => {
+    const entry = buildHistoryEntryFromDevice(device, getDeviceDisplayName(device), Date.now());
+    if (!entry) return;
+    setHistoryDevices(prev => {
+      const next = upsertHistoryDevice(prev, entry);
+      saveHistoryDevices(next);
+      return next;
+    });
+  }, [getDeviceDisplayName]);
+
+  // WiFi \u8fde\u63a5\u6838\u5fc3\uff0c\u4f9b\u9876\u90e8\u8fde\u63a5\u6846\u4e0e\u5386\u53f2\u5361\u7247\u5feb\u901f\u8fde\u63a5/\u5c31\u5730\u91cd\u8fde\u590d\u7528\u3002
+  // \u6210\u529f\u65f6\u5199\u5386\u53f2\u5e76\u5237\u65b0\u8bbe\u5907\u5217\u8868\uff0c\u8fd4\u56de\u7ed3\u6784\u5316\u7ed3\u679c\u8ba9\u8c03\u7528\u65b9\u51b3\u5b9a\u63d0\u793a\u4f4d\u7f6e\uff08\u5168\u5c40\u9519\u8bef\u6761 / \u5361\u7247\u5185\uff09\u3002
+  const performWifiConnect = useCallback(
+    async (address: string): Promise<{ success: boolean; errorMessage?: string }> => {
+      if (!hasElectronAPI()) {
+        return { success: false, errorMessage: 'Electron \u63a5\u53e3\u4e0d\u53ef\u7528' };
+      }
+      try {
+        const result = await window.electronAPI!.connectWiFi(address);
+        if (result.success) {
+          if (result.data) persistHistoryFromDevice(result.data);
+          await loadAdbStatus();
+          await loadDevices();
+          return { success: true };
+        }
+        await loadAdbStatus();
+        return { success: false, errorMessage: formatOperationError(result, 'WiFi \u8fde\u63a5\u5931\u8d25') };
+      } catch (err) {
+        await loadAdbStatus();
+        return { success: false, errorMessage: 'WiFi \u8fde\u63a5\u5931\u8d25\uff1a' + (err as Error).message };
+      }
+    },
+    [persistHistoryFromDevice]
+  );
+
   const connectWiFiDevice = async () => {
-    console.log('connectWiFiDevice called');
-    console.log('wifiIp:', wifiIp);
-    console.log('hasElectronAPI:', hasElectronAPI());
-    console.log('electronAPI:', window.electronAPI);
-    
     if (!wifiIp.trim()) {
       setError('\u8bf7\u8f93\u5165\u8bbe\u5907 IP \u5730\u5740');
       return;
     }
-    
-    if (!hasElectronAPI()) {
-      setError('Electron \u63a5\u53e3\u4e0d\u53ef\u7528');
-      return;
-    }
-    
-    try {
-      setError('\u6b63\u5728\u8fde\u63a5...');
-      const result = await window.electronAPI!.connectWiFi(wifiIp);
-      console.log('connectWiFi result:', result);
-      if (result.success) {
-        setWifiIp('');
-        setError('');
-        await loadAdbStatus();
-        await loadDevices();
-      } else {
-        setError(formatOperationError(result, 'WiFi \u8fde\u63a5\u5931\u8d25'));
-        await loadAdbStatus();
-      }
-    } catch (err) {
-      console.error('connectWiFi error:', err);
-      setError('WiFi \u8fde\u63a5\u5931\u8d25\uff1a' + (err as Error).message);
-      await loadAdbStatus();
+    setError('\u6b63\u5728\u8fde\u63a5...');
+    const res = await performWifiConnect(wifiIp.trim());
+    if (res.success) {
+      setWifiIp('');
+      setError('');
+    } else {
+      setError(res.errorMessage || 'WiFi \u8fde\u63a5\u5931\u8d25');
     }
   };
+
+  const clearHistoryError = useCallback((serialNo: string) => {
+    setHistoryErrorBySerial(prev => {
+      if (!(serialNo in prev)) return prev;
+      const next = { ...prev };
+      delete next[serialNo];
+      return next;
+    });
+  }, []);
+
+  // \u5386\u53f2\u5361\u7247\u300c\u5feb\u901f\u8fde\u63a5\u300d\uff1a\u7528\u8bb0\u5f55\u7684 lastAddress \u76f4\u63a5\u8fde\u3002\u5931\u8d25\u591a\u534a\u662f\u8bbe\u5907 IP \u53d8\u4e86\uff0c
+  // \u5c31\u5730\u5c55\u5f00\u8f93\u5165\u6846\u5e76\u9884\u586b\u4e0a\u6b21\u5730\u5740\u4f9b\u7528\u6237\u4fee\u6539\u540e\u91cd\u8fde\uff0c\u4e0d\u5220\u9664\u5386\u53f2\u8bb0\u5f55\u3002
+  const handleQuickConnectHistory = async (item: HistoryDevice) => {
+    setQuickConnectingSerial(item.serialNo);
+    clearHistoryError(item.serialNo);
+    const res = await performWifiConnect(item.lastAddress.trim());
+    setQuickConnectingSerial(null);
+    if (res.success) {
+      setInlineEditSerial(null);
+      setInlineEditValue('');
+    } else {
+      setInlineEditSerial(item.serialNo);
+      setInlineEditValue(item.lastAddress);
+      setHistoryErrorBySerial(prev => ({
+        ...prev,
+        [item.serialNo]: res.errorMessage || '\u5feb\u901f\u8fde\u63a5\u5931\u8d25\uff0c\u8bbe\u5907 IP \u53ef\u80fd\u5df2\u53d8\uff0c\u8bf7\u4fee\u6539\u540e\u91cd\u8fde',
+      }));
+    }
+  };
+
+  // \u5c31\u5730\u8f93\u5165\u65b0 IP \u540e\u786e\u8ba4\u91cd\u8fde\uff1a\u6210\u529f\u7528\u65b0\u5730\u5740\u8986\u76d6\u5386\u53f2\uff08performWifiConnect \u5185\u5df2 upsert\uff09\uff0c
+  // \u5931\u8d25\u4fdd\u7559\u8f93\u5165\u6846\u4e0e\u5386\u53f2\u8bb0\u5f55\uff0c\u4ec5\u66f4\u65b0\u5361\u7247\u5185\u5931\u8d25\u63d0\u793a\u3002
+  const handleInlineReconnectHistory = async (item: HistoryDevice) => {
+    const address = inlineEditValue.trim();
+    if (!address) {
+      setHistoryErrorBySerial(prev => ({ ...prev, [item.serialNo]: '\u8bf7\u8f93\u5165 IP:\u7aef\u53e3' }));
+      return;
+    }
+    setQuickConnectingSerial(item.serialNo);
+    clearHistoryError(item.serialNo);
+    const res = await performWifiConnect(address);
+    setQuickConnectingSerial(null);
+    if (res.success) {
+      setInlineEditSerial(null);
+      setInlineEditValue('');
+    } else {
+      setHistoryErrorBySerial(prev => ({
+        ...prev,
+        [item.serialNo]: res.errorMessage || '\u91cd\u8fde\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5 IP:\u7aef\u53e3',
+      }));
+    }
+  };
+
+  // \u79fb\u9664\u5386\u53f2\uff1a\u4ec5\u5220\u672c\u5730\u5386\u53f2\u8bb0\u5fc6\uff0c\u4e0d\u5f71\u54cd\u5f53\u524d\u5df2\u5efa\u7acb\u7684\u8fde\u63a5\u3002
+  const handleRemoveHistory = (serialNo: string) => {
+    setHistoryDevices(prev => {
+      const next = removeHistoryDevice(prev, serialNo);
+      saveHistoryDevices(next);
+      return next;
+    });
+    setConfirmRemoveSerial(null);
+    clearHistoryError(serialNo);
+    if (inlineEditSerial === serialNo) {
+      setInlineEditSerial(null);
+      setInlineEditValue('');
+    }
+  };
+
+  // 历史卡片在线状态为运行时态，不持久化：用当前已连接设备列表按 serialNo 实时匹配计算。
+  const onlineHistorySerials = useMemo(() => {
+    const set = new Set<string>();
+    devices.forEach(device => {
+      const serialNo = device.serialNo?.trim();
+      if (serialNo && device.status === 'connected') set.add(serialNo);
+    });
+    return set;
+  }, [devices]);
 
   const pairWiFiDevice = async () => {
     if (!pairAddress.trim()) {
@@ -1846,17 +1958,17 @@ function SimpleApp() {
                   )}
                   <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleSleepDevice(device); }}
+                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);handleSleepDevice(device); }}
                       disabled={Boolean(busyDeviceAction)}
                       style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#d1d5db', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
                     >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'sleep' ? '息屏中…' : '息屏'}</button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleWakeDevice(device); }}
+                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);handleWakeDevice(device); }}
                       disabled={Boolean(busyDeviceAction)}
                       style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#86efac', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
                     >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'wake' ? '唤醒中…' : '唤醒'}</button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleUnlockDevice(device); }}
+                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);handleUnlockDevice(device); }}
                       disabled={Boolean(busyDeviceAction)}
                       title="唤醒并上滑解锁；有 PIN/密码/手势的设备请在设备上手动输入"
                       style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#93c5fd', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
@@ -1864,17 +1976,17 @@ function SimpleApp() {
                     {confirmRebootId === device.id ? (
                       <>
                         <button
-                          onClick={(e) => { e.stopPropagation(); setConfirmRebootId(null); handleRebootDevice(device); }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); handleRebootDevice(device); }}
                           style={{ padding: '4px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
                         >确认重启</button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); setConfirmRebootId(null); }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); }}
                           style={{ padding: '4px 8px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
                         >取消</button>
                       </>
                     ) : (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setConfirmDisconnectId(null); setConfirmRebootId(device.id); }}
+                        onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmDisconnectId(null); setConfirmRebootId(device.id); }}
                         disabled={Boolean(busyDeviceAction)}
                         style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
                       >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'reboot' ? '重启中…' : '重启'}</button>
@@ -1882,24 +1994,24 @@ function SimpleApp() {
                     {confirmDisconnectId === device.id ? (
                       <>
                         <button
-                          onClick={(e) => { e.stopPropagation(); setConfirmDisconnectId(null); disconnectDevice(device); }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmDisconnectId(null); disconnectDevice(device); }}
                           style={{ padding: '4px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
                         >确认断开</button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); setConfirmDisconnectId(null); }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmDisconnectId(null); }}
                           style={{ padding: '4px 8px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
                         >取消</button>
                       </>
                     ) : (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setConfirmRebootId(null); setConfirmDisconnectId(device.id); }}
+                        onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); setConfirmDisconnectId(device.id); }}
                         style={{ padding: '4px 8px', backgroundColor: '#555', border: 'none', borderRadius: '4px', color: '#ff6b6b', cursor: 'pointer', fontSize: '12px' }}
                       >断开设备</button>
                     )}
                   </div>
                   <div style={{ marginTop: '6px' }}>
                     <button
-                      onClick={(e) => { e.stopPropagation(); setFileBrowserDevice(device); }}
+                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setFileBrowserDevice(device); }}
                       title="浏览设备文件、下载到电脑、上传文件到设备"
                       style={{ width: '100%', padding: '6px 8px', backgroundColor: '#2a3550', border: '1px solid #3b4a6b', borderRadius: '4px', color: '#fcd34d', cursor: 'pointer', fontSize: '12px' }}
                     >📁 文件管理</button>
@@ -1981,6 +2093,94 @@ function SimpleApp() {
                     style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 16px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', cursor: pairing ? 'not-allowed' : 'pointer', fontSize: '13px', opacity: pairing ? 0.6 : 1 }}
                   >{pairing ? '\u914d\u5bf9\u4e2d\u2026' : '\u914d\u5bf9'}</button>
                 </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550' }}>
+            <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u5386\u53f2\u8bbe\u5907'}</h2>
+            {historyDevices.length === 0 ? (
+              <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
+                {'\u6682\u65e0\u5386\u53f2 WiFi \u8bbe\u5907\uff0c\u6210\u529f\u8fde\u63a5\u4e00\u6b21\u540e\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\uff0c\u4e0b\u6b21\u53ef\u4e00\u952e\u5feb\u901f\u91cd\u8fde\u3002'}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {historyDevices.map(item => {
+                  const online = onlineHistorySerials.has(item.serialNo);
+                  const connecting = quickConnectingSerial === item.serialNo;
+                  const editing = inlineEditSerial === item.serialNo;
+                  const cardError = historyErrorBySerial[item.serialNo];
+                  // 卡片标题用设备显示名，不用型号：优先当前自定义名（按上次地址匹配，重命名即时生效），
+                  // 回退写入时存的显示名，再回退型号。
+                  const displayName = customDeviceNames[item.lastAddress]?.trim() || item.name || item.model;
+                  return (
+                    <div key={item.serialNo} style={{ padding: '10px', backgroundColor: '#2a2a40', borderRadius: '8px', border: '1px solid #353550' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ color: '#fff', fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayName}>{displayName}</span>
+                        <span style={{ flexShrink: 0, fontSize: '11px', color: online ? '#22c55e' : '#9ca3af', backgroundColor: online ? '#22c55e22' : '#9ca3af22', padding: '2px 8px', borderRadius: '10px' }}>{online ? '\u5728\u7ebf' : '\u79bb\u7ebf'}</span>
+                      </div>
+                      <div style={{ marginTop: '6px', fontSize: '11px', color: '#9ca3af', lineHeight: 1.7 }}>
+                        <div style={{ wordBreak: 'break-all' }}>{'SN\uff1a'}{item.serialNo}</div>
+                        <div>{'\u4e0a\u6b21\u5730\u5740\uff1a'}{item.lastAddress}</div>
+                        <div>{'\u4e0a\u6b21\u8fde\u63a5\uff1a'}{formatHistoryTime(item.lastConnectedAt)}</div>
+                      </div>
+                      {editing && (
+                        <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
+                          <input
+                            type="text"
+                            placeholder={'\u8bbe\u5907 IP \u5730\u5740:\u7aef\u53e3'}
+                            value={inlineEditValue}
+                            onChange={(e) => setInlineEditValue(e.target.value)}
+                            onKeyPress={(e) => { if (e.key === 'Enter' && !connecting) { handleInlineReconnectHistory(item); } }}
+                            style={{ flex: 1, minWidth: 0, padding: '6px 8px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '12px', outline: 'none' }}
+                          />
+                          <button
+                            onClick={() => handleInlineReconnectHistory(item)}
+                            disabled={connecting}
+                            style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 12px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', cursor: connecting ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: connecting ? 0.6 : 1 }}
+                          >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : '\u91cd\u8fde'}</button>
+                        </div>
+                      )}
+                      {cardError && (
+                        <div style={{ marginTop: '6px', fontSize: '11px', color: '#fca5a5', lineHeight: 1.5 }}>{cardError}</div>
+                      )}
+                      <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {!editing && (
+                          <button
+                            onClick={() => handleQuickConnectHistory(item)}
+                            disabled={connecting || online}
+                            title={online ? '\u8be5\u8bbe\u5907\u5df2\u8fde\u63a5' : '\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5'}
+                            style={{ padding: '4px 10px', backgroundColor: '#2f6fb0', border: 'none', borderRadius: '4px', color: '#fff', cursor: (connecting || online) ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: (connecting || online) ? 0.6 : 1 }}
+                          >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : (online ? '\u5df2\u8fde\u63a5' : '\u5feb\u901f\u8fde\u63a5')}</button>
+                        )}
+                        {editing && (
+                          <button
+                            onClick={() => { setInlineEditSerial(null); setInlineEditValue(''); clearHistoryError(item.serialNo); }}
+                            style={{ padding: '4px 10px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                          >{'\u6536\u8d77'}</button>
+                        )}
+                        {confirmRemoveSerial === item.serialNo ? (
+                          <>
+                            <button
+                              onClick={() => handleRemoveHistory(item.serialNo)}
+                              style={{ padding: '4px 10px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+                            >{'\u786e\u8ba4\u79fb\u9664'}</button>
+                            <button
+                              onClick={() => setConfirmRemoveSerial(null)}
+                              style={{ padding: '4px 10px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                            >{'\u53d6\u6d88'}</button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmRemoveSerial(item.serialNo)}
+                            title="\u4ece\u5386\u53f2\u5217\u8868\u79fb\u9664\u8be5\u8bbe\u5907\uff08\u4e0d\u5f71\u54cd\u5f53\u524d\u5df2\u5efa\u7acb\u7684\u8fde\u63a5\uff09"
+                            style={{ padding: '4px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: 'pointer', fontSize: '12px' }}
+                          >{'\u79fb\u9664'}</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

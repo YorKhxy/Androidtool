@@ -13,6 +13,18 @@ export interface DeviceInfo {
   batteryLevel?: number;
 }
 
+// 仅保存通过 WiFi 成功连过的设备，用于「快速重连」历史卡片。
+// 以 serialNo 为唯一键去重：设备 IP 变了仍认得出是同一台，覆盖更新而非新增。
+// 在线状态不进持久化结构，由当前设备列表按 serialNo 实时匹配计算。
+// 持久化沿用渲染层 localStorage（物理上落在 Electron userData 目录下），不暴露宿主绝对路径。
+export interface HistoryDevice {
+  serialNo: string; // 设备序列号 SN，唯一标识
+  name: string; // 设备显示名（自定义名优先，回退设备名/型号），卡片标题展示
+  model: string; // 设备型号，显示名缺失时的兜底
+  lastAddress: string; // 最近一次连接的 IP:端口，快速重连默认值
+  lastConnectedAt: number; // 最近连接时间戳（毫秒），列表倒序排序用
+}
+
 export interface PairResult {
   message: string;
   device: DeviceInfo | null;
