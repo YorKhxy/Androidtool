@@ -1944,12 +1944,12 @@ function SimpleApp() {
                     value={pairCode}
                     onChange={(e) => setPairCode(e.target.value)}
                     onKeyPress={(e) => { if (e.key === 'Enter') { pairWiFiDevice(); } }}
-                    style={{ flex: 1, padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
+                    style={{ flex: 1, minWidth: 0, padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
                   />
                   <button
                     onClick={pairWiFiDevice}
                     disabled={pairing}
-                    style={{ padding: '0 16px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', cursor: pairing ? 'not-allowed' : 'pointer', fontSize: '13px', opacity: pairing ? 0.6 : 1 }}
+                    style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 16px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', cursor: pairing ? 'not-allowed' : 'pointer', fontSize: '13px', opacity: pairing ? 0.6 : 1 }}
                   >{pairing ? '\u914d\u5bf9\u4e2d\u2026' : '\u914d\u5bf9'}</button>
                 </div>
               </div>
