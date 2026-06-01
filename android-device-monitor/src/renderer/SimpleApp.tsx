@@ -504,8 +504,6 @@ function SimpleApp() {
       setInstalledPackages([]);
       setAppFilter('');
       loadInstalledPackages();
-      // 默认把当前设备加入安装目标（仅当尚未选择任何目标时）
-      setInstallTargets((prev) => (prev.size === 0 ? new Set([selectedDevice.id]) : prev));
     } else {
       setInstalledPackages([]);
       setAppFilter('');
