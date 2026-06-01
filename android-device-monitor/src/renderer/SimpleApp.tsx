@@ -169,6 +169,7 @@ function SimpleApp() {
   const [isUnifiedInstalling, setIsUnifiedInstalling] = useState(false);
   const [busyDeviceAction, setBusyDeviceAction] = useState<{ id: string; action: 'sleep' | 'wake' | 'unlock' | 'reboot' } | null>(null);
   const [fileBrowserDevice, setFileBrowserDevice] = useState<DeviceInfo | null>(null);
+  const [confirmDisconnectId, setConfirmDisconnectId] = useState<string | null>(null);
   
   const logStatesRef = useRef(new Map<string, DeviceLogState>());
   const logsContainerRef = useRef<HTMLDivElement>(null);
@@ -320,8 +321,16 @@ function SimpleApp() {
   }, []);
 
   const applyDeviceList = useCallback((nextDevices: DeviceInfo[]) => {
-    setDevices(nextDevices);
-    reconcileLogStatesWithDevices(nextDevices);
+    // 稳定排序：避免后端数据源（Map values / Promise.all resolve 顺序）变化导致卡片位置跳动。
+    // 规则：USB 在前、WiFi 在后，同类按设备 id 字典序。
+    const sortedDevices = [...nextDevices].sort((a, b) => {
+      if (a.connectionType !== b.connectionType) {
+        return a.connectionType === 'usb' ? -1 : 1;
+      }
+      return a.id.localeCompare(b.id);
+    });
+    setDevices(sortedDevices);
+    reconcileLogStatesWithDevices(sortedDevices);
     if (nextDevices.length > 0) {
       setSelectedDevice(currentSelectedDevice => {
         if (currentSelectedDevice && nextDevices.find(device => device.id === currentSelectedDevice.id)) {
@@ -1843,10 +1852,23 @@ function SimpleApp() {
                       disabled={Boolean(busyDeviceAction)}
                       style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
                     >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'reboot' ? '重启中…' : '重启'}</button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); disconnectDevice(device); }}
-                      style={{ padding: '4px 8px', backgroundColor: '#555', border: 'none', borderRadius: '4px', color: '#ff6b6b', cursor: 'pointer', fontSize: '12px' }}
-                    >断开设备</button>
+                    {confirmDisconnectId === device.id ? (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setConfirmDisconnectId(null); disconnectDevice(device); }}
+                          style={{ padding: '4px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+                        >确认断开</button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setConfirmDisconnectId(null); }}
+                          style={{ padding: '4px 8px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                        >取消</button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setConfirmDisconnectId(device.id); }}
+                        style={{ padding: '4px 8px', backgroundColor: '#555', border: 'none', borderRadius: '4px', color: '#ff6b6b', cursor: 'pointer', fontSize: '12px' }}
+                      >断开设备</button>
+                    )}
                   </div>
                   <div style={{ marginTop: '6px' }}>
                     <button
