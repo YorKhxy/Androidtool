@@ -170,6 +170,10 @@ function SimpleApp() {
   const [busyDeviceAction, setBusyDeviceAction] = useState<{ id: string; action: 'sleep' | 'wake' | 'unlock' | 'reboot' } | null>(null);
   const [fileBrowserDevice, setFileBrowserDevice] = useState<DeviceInfo | null>(null);
   const [confirmDisconnectId, setConfirmDisconnectId] = useState<string | null>(null);
+  // 重启是高风险操作，点击后进入行内二次确认态（与断开确认互斥，避免同卡片同时弹两个确认）
+  const [confirmRebootId, setConfirmRebootId] = useState<string | null>(null);
+  // 最近一次导出日志保存到 PC 的路径，用于「打开所在文件夹」快捷按钮
+  const [lastExportedLogPath, setLastExportedLogPath] = useState<string | null>(null);
   
   const logStatesRef = useRef(new Map<string, DeviceLogState>());
   const logsContainerRef = useRef<HTMLDivElement>(null);
@@ -1308,6 +1312,7 @@ function SimpleApp() {
     const result = await window.electronAPI!.exportLogs(logs);
     if (result.success) {
       setError('');
+      setLastExportedLogPath(result.data || null);
     } else if (result.error !== '\u53d6\u6d88\u5bfc\u51fa') {
       setError(result.error || '\u65e5\u5fd7\u5bfc\u51fa\u5931\u8d25');
     }
@@ -1637,6 +1642,17 @@ function SimpleApp() {
           style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: '#d1d5db', fontSize: '13px', cursor: 'pointer' }}
         >{'\u6e05\u7a7a'}</button>
         <button onClick={exportVisibleLogs} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa'}</button>
+        {lastExportedLogPath && (
+          <button
+            onClick={async () => {
+              if (!hasElectronAPI() || !lastExportedLogPath) return;
+              const r = await window.electronAPI!.showItemInFolder(lastExportedLogPath);
+              if (!r.success && r.error) setError(r.error);
+            }}
+            title={`\u6253\u5f00\u6700\u8fd1\u5bfc\u51fa\u7684\u65e5\u5fd7\u6240\u5728\u6587\u4ef6\u5939\uff1a${lastExportedLogPath}`}
+            style={{ padding: '8px 12px', backgroundColor: '#166534', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}
+          >{'\ud83d\udcc2 \u6253\u5f00\u4f4d\u7f6e'}</button>
+        )}
         <button onClick={showCrashAndAnrLogs} style={{ padding: '8px 12px', backgroundColor: '#7f1d1d', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5d29\u6e83/ANR'}</button>
         <button onClick={scrollToBottom} style={{ padding: '8px 12px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5230\u5e95\u90e8'}</button>
         <button onClick={() => setAutoScrollEnabled(!autoScrollEnabled)} style={{ padding: '8px 12px', backgroundColor: autoScrollEnabled ? '#166534' : '#4b5563', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>
@@ -1845,11 +1861,24 @@ function SimpleApp() {
                       title="唤醒并上滑解锁；有 PIN/密码/手势的设备请在设备上手动输入"
                       style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#93c5fd', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
                     >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'unlock' ? '解锁中…' : '解锁'}</button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleRebootDevice(device); }}
-                      disabled={Boolean(busyDeviceAction)}
-                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
-                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'reboot' ? '重启中…' : '重启'}</button>
+                    {confirmRebootId === device.id ? (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setConfirmRebootId(null); handleRebootDevice(device); }}
+                          style={{ padding: '4px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+                        >确认重启</button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setConfirmRebootId(null); }}
+                          style={{ padding: '4px 8px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                        >取消</button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setConfirmDisconnectId(null); setConfirmRebootId(device.id); }}
+                        disabled={Boolean(busyDeviceAction)}
+                        style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
+                      >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'reboot' ? '重启中…' : '重启'}</button>
+                    )}
                     {confirmDisconnectId === device.id ? (
                       <>
                         <button
@@ -1863,7 +1892,7 @@ function SimpleApp() {
                       </>
                     ) : (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setConfirmDisconnectId(device.id); }}
+                        onClick={(e) => { e.stopPropagation(); setConfirmRebootId(null); setConfirmDisconnectId(device.id); }}
                         style={{ padding: '4px 8px', backgroundColor: '#555', border: 'none', borderRadius: '4px', color: '#ff6b6b', cursor: 'pointer', fontSize: '12px' }}
                       >断开设备</button>
                     )}

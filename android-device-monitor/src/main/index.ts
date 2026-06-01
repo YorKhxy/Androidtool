@@ -570,7 +570,13 @@ const setupIpcHandlers = () => {
       }
 
       const content = logs
-        .map((log) => `${new Date(log.timestamp).toISOString()} ${log.deviceId} ${log.processId}/${log.threadId} ${log.level}/${log.tag}: ${log.message}`)
+        .map((log) => {
+          // 导出用本地时间（与界面显示一致），不能用 toISOString()——它输出 UTC 会比本地少 8 小时
+          const d = new Date(log.timestamp);
+          const pad = (n: number, len = 2) => String(n).padStart(len, '0');
+          const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+          return `${ts} ${log.deviceId} ${log.processId}/${log.threadId} ${log.level}/${log.tag}: ${log.message}`;
+        })
         .join('\n');
       await fs.writeFile(result.filePath, content, 'utf-8');
       return { success: true, data: result.filePath };
