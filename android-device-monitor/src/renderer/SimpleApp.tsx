@@ -1809,12 +1809,12 @@ function SimpleApp() {
                       {statusMeta.label}
                     </span>
                   </div>
-                  {customDeviceNames[device.id]?.trim() && (
-                    <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '2px' }}>
-                      {'\u539f\u59cb\u540d\u79f0'}: {device.name || device.model || '--'}
-                    </div>
+                  <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '2px' }}>
+                    {'SN'}: {device.serialNo || '--'}
+                  </div>
+                  {device.connectionType === 'wifi' && (
+                    <div style={{ fontSize: '12px', color: '#aaa' }}>{device.id}</div>
                   )}
-                  <div style={{ fontSize: '12px', color: '#aaa' }}>{device.id}</div>
                   <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                     {renderBatteryBadge(device)}
                     {wifiLatencyLabel && (
@@ -1978,6 +1978,10 @@ function SimpleApp() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                   <span>{'\u578b\u53f7'}</span>
                   <span style={{ color: '#fff' }}>{selectedDevice.model}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', gap: '12px' }}>
+                  <span style={{ flexShrink: 0 }}>{'\u8bbe\u5907\u5e8f\u5217\u53f7'}</span>
+                  <span style={{ color: '#fff', wordBreak: 'break-all', textAlign: 'right' }}>{selectedDevice.serialNo || '--'}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                   <span>{'\u5382\u5546'}</span>

@@ -1,6 +1,7 @@
 export interface DeviceInfo {
   id: string;
   name: string;
+  serialNo: string;
   model: string;
   manufacturer: string;
   androidVersion: string;

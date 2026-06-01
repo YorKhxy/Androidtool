@@ -779,7 +779,8 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('retryDeviceInstall');
     expect(simpleAppSource).toContain('应用安装');
     expect(simpleAppSource).toContain('目标设备');
-    // 单设备默认目标
-    expect(simpleAppSource).toContain('prev.size === 0 ? new Set([selectedDevice.id]) : prev');
+    // 安装目标默认不勾选，由用户手动选择或全选
+    expect(simpleAppSource).toContain("const [installTargets, setInstallTargets] = useState<Set<string>>(new Set())");
+    expect(simpleAppSource).not.toContain('prev.size === 0 ? new Set([selectedDevice.id]) : prev');
   });
 });

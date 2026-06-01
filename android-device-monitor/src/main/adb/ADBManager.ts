@@ -105,6 +105,7 @@ export class ADBManager extends EventEmitter {
         let device: DeviceInfo = {
           id: summary.id,
           name: 'Unknown',
+          serialNo: 'Unknown',
           model: 'Unknown',
           manufacturer: 'Unknown',
           androidVersion: 'Unknown',
@@ -112,10 +113,12 @@ export class ADBManager extends EventEmitter {
           connectionType: summary.connectionType,
           status: summary.status,
         };
-        
+
         try {
           const props = await this.getDeviceProperties(summary.id);
           device.name = props['ro.product.name'] || device.name;
+          // WiFi 设备的 id 是 IP:port，真实 SN 需从 ro.serialno 取；取不到时回退到 id
+          device.serialNo = props['ro.serialno'] || props['ro.boot.serialno'] || summary.id;
           device.model = props['ro.product.model'] || device.model;
           device.manufacturer = props['ro.product.manufacturer'] || device.manufacturer;
           device.androidVersion = props['ro.build.version.release'] || device.androidVersion;
