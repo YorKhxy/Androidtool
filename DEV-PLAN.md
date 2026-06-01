@@ -4,7 +4,7 @@
 
 基于 [Product-Spec.md](/G:/Androidtool/Product-Spec.md)，本项目是一个面向开发者的桌面端 Android 设备监控工具。
 
-本文件已按 2026-05-27 的仓库真实实现回填，不再只描述理想规划，而是同时反映：
+本文件已按 2026-06-01 的仓库真实实现持续回填，不再只描述理想规划，而是同时反映：
 - 已完成能力
 - 已落地但仍需补齐验收的能力
 - 下一阶段待继续开发的缺口
@@ -21,11 +21,15 @@
 
 **核心能力范围**
 - 设备连接（USB / WiFi）
-- 设备基础信息展示
+- 历史 WiFi 设备保存与一键快速重连（IP 变更就地输入重连、手动移除）【规划中，Phase 12】
+- 设备基础信息展示（含 SN 序列号）、卡片稳定排序、断开/重启二次确认
 - WiFi 设备链路延迟展示
-- Logcat 抓取、过滤、导出
-- Android / Pico 性能指标、性能快照、进程、Activity 栈查看
+- Logcat 抓取、过滤、导出（本地时间 + 打开导出位置）
+- Android / Pico 性能指标、性能快照、短时录制、进程、Activity 栈查看
 - 基础网络请求抓取
+- 投屏镜像与反向操控（scrcpy）
+- 第三方应用卸载与单 APK 批量安装
+- 设备文件管理（浏览 / 上传 / 下载 / 多选批量下载 / 删除 / 打开所在文件夹）
 - 构建、打包、基础测试
 
 ---
@@ -41,6 +45,10 @@ Phase 1 基础框架
           -> Phase 6 优化、测试与发布
     -> Phase 7 投屏镜像与操控（普通设备一键投屏）
       -> Phase 8 投屏参数配置 + Pico 单眼裁切 + 快捷键速查
+    -> Phase 9 卸载应用
+    -> Phase 10 批量安装
+    -> Phase 11 设备文件管理
+    -> Phase 12 历史设备保存与快速重连
 ```
 
 依赖关系说明：
@@ -48,6 +56,8 @@ Phase 1 基础框架
 - Phase 3 已经沉淀了多设备日志缓存、批量推送、虚拟滚动等基础能力，Phase 4/5 继续复用同一套主界面和 IPC 通道。
 - Phase 6 不是完全独立的新模块，而是对前面各 Phase 的质量补齐和可发布化收尾。
 - Phase 7/8 是新增的「投屏镜像与设备操控」模块（Product-Spec 2.5）。只依赖 Phase 2 的设备连接与内置 ADB 分发能力，与 Phase 4 的 Pico 检测能力复用同一套判定，不依赖 Phase 5/6。Phase 7 先打通普通 Android 的一键投屏与操控；Phase 8 在其上补参数配置、Pico 单眼裁切与快捷键速查。
+- Phase 9（卸载）、Phase 10（批量安装）、Phase 11（设备文件管理）都是设备运维类功能，只依赖 Phase 2 的设备连接与内置 ADB，彼此独立，复用同一套主界面页签和 IPC 通道模式，不依赖 Phase 4/5/6/7/8。
+- Phase 12（历史设备保存与快速重连）是对 Phase 2 设备连接体验的增量增强，只依赖 Phase 2 已有的 WiFi 连接（`CONNECT_WIFI`）能力与 `DeviceInfo.serialNo` 字段，不引入新的主进程 ADB 命令，几乎是纯渲染层 + 本地持久化，与 Phase 4/5/6/7/8/9/10/11 互不依赖。Phase 2 已标记完成不再改动，本能力以独立 Phase 落地。
 
 ---
 
@@ -105,6 +115,11 @@ Phase 1 基础框架
 - [x] 内置 `platform-tools` 分发，优先使用应用自带 ADB，缺失时回退系统 ADB
 - [x] Windows 真机验收完成（USB / WiFi / 无系统 ADB 环境）
 - [x] WiFi 设备卡片展示工具到设备的链路延迟（10 秒缓存，USB 不显示）
+- [x] 设备卡片展示 SN 序列号
+- [x] 设备卡片稳定排序，避免上下线时列表跳动
+- [x] 断开设备行内二次确认（确认断开 / 取消）
+- [x] 设备卡片「重启」行内二次确认（确认重启 / 取消），与断开确认互斥
+- [x] 配对按钮在窄空间下文字不换行修复
 
 **待补齐**
 - [ ] 非 Windows 平台的内置 ADB 分发与真机验收
@@ -147,6 +162,8 @@ Phase 1 基础框架
 - [x] 包名、TAG、级别、PID、关键词过滤
 - [x] 正则搜索
 - [x] 日志导出为文件
+- [x] 日志导出时间使用本地时间（修复原 `toISOString()` 输出 UTC 比本地少 8 小时），格式 `YYYY-MM-DD HH:mm:ss.SSS`
+- [x] 导出成功后在工具栏提供「📂 打开位置」按钮，一键定位到保存的日志文件
 - [x] 多设备日志分桶存储
 - [x] 主进程批量推送日志到渲染层
 - [x] 日志数量上限控制、待刷新缓冲区上限控制
@@ -488,6 +505,95 @@ Phase 1 基础框架
 
 ---
 
+### Phase 11: 设备文件管理
+
+**状态**：已落地（编译/类型检查通过，文件读写交互待真机回归）
+
+**目标**：在设备页提供「文件管理」入口，弹出设备文件浏览器，支持浏览设备公共存储目录、上传文件到设备、从设备下载文件到 PC（单个与多选批量）、删除设备文件，并提供常用目录快捷入口；免 root 访问 `/sdcard` 公共存储，受限目录给出明确提示。手机与 Pico 通用。
+
+**已完成**
+- [x] 后端目录列举：`ADBManager.listDeviceFiles(deviceId, dirPath)` 解析设备目录条目（名称、大小、修改时间、是否目录/符号链接）
+- [x] 后端下载：`ADBManager.pullDeviceFile(deviceId, remotePath, localPath)` 单文件/目录拉取到 PC
+- [x] 后端批量下载：多选文件并发拉取到 PC 同一文件夹，逐个回传 `PULL_DEVICE_FILE_PROGRESS` 进度（文件名、序号、总数、状态）
+- [x] 后端上传：`ADBManager.pushDeviceFile` 推送本地文件到设备目录，回传 `PUSH_DEVICE_FILE_PROGRESS` 进度
+- [x] 后端删除：`ADBManager.deleteDeviceFile(deviceId, remotePath, isDir)`
+- [x] 打开所在文件夹：`SHOW_ITEM_IN_FOLDER` 通过 `shell.showItemInFolder` 在系统文件管理器定位下载结果
+- [x] IPC 打通：`channels.ts` 新增 `LIST_DEVICE_FILES` / `PULL_DEVICE_FILE` / `PULL_DEVICE_FILES` / `PULL_DEVICE_FILE_PROGRESS` / `DELETE_DEVICE_FILE` / `PUSH_DEVICE_FILE` / `PUSH_DEVICE_FILE_PROGRESS` / `SELECT_UPLOAD_FILES` / `SHOW_ITEM_IN_FOLDER`；`index.ts`/`index-prod.ts` 注册 handler；`preload.js` 暴露；`electronApi.ts` 类型封装
+- [x] 共享类型：`PushProgress` / `PullProgress` / `PullFilesResult` / `DeviceFileEntry` / `DeviceFileList`
+- [x] 文件浏览器 UI：`components/FilesPanel.tsx` —— 目录列表、面包屑、上一级、当前目录文件名搜索、单文件下载/删除（行内二次确认）、上传（含拖拽上传）、多选批量下载 + 进度条
+- [x] 快捷入口：内部存储 / 相机 / 图片 / 影片 / 下载；点击不存在的目录（如 Pico 无 `/sdcard/DCIM/Camera`）时保留当前列表并给温和琥珀色提示，不弹全局红色报错
+- [x] 下载完成后提供「打开所在文件夹」快捷按钮，切换目录时清除旧的下载定位
+
+**待补齐**
+- [ ] 应用私有数据 `/data/data` 在有 root 的设备上的访问与受限提示打磨
+- [ ] 大文件/大目录批量传输的取消与失败重试
+- [ ] 目录批量下载（当前批量仅针对文件，目录用行内单独「下载」按钮）
+
+**关键文件**
+| 文件路径 | 说明 |
+|----------|------|
+| `android-device-monitor/src/main/adb/ADBManager.ts` | `listDeviceFiles` / `pullDeviceFile` / `pushDeviceFile` / `deleteDeviceFile` 等设备文件方法 |
+| `android-device-monitor/src/main/index.ts` / `index-prod.ts` | 文件列举/上传/下载/批量下载/删除/打开所在文件夹 IPC handler |
+| `android-device-monitor/src/main/preload.js` | `listDeviceFiles` / `pullDeviceFile(s)` / `pushDeviceFile` / `deleteDeviceFile` / `showItemInFolder` / `selectUploadFiles` 桥接 |
+| `android-device-monitor/src/renderer/lib/electronApi.ts` | 设备文件 API 类型化封装与进度订阅 |
+| `android-device-monitor/src/shared/ipc/channels.ts` | 设备文件相关通道常量 |
+| `android-device-monitor/src/shared/types/index.ts` | `DeviceFileEntry` / `DeviceFileList` / `PushProgress` / `PullProgress` / `PullFilesResult` |
+| `android-device-monitor/src/renderer/components/FilesPanel.tsx` | 设备文件浏览器 UI（浏览/搜索/上传/下载/批量下载/删除/快捷入口） |
+| `android-device-monitor/src/renderer/SimpleApp.tsx` | 设备卡片「📁 文件管理」入口，挂载 FilesPanel |
+
+**验收标准**
+- `npm run build` 通过；`npm test` 通过
+- 设备卡片点「文件管理」弹出文件浏览器，可浏览 `/sdcard` 目录、进入子目录、返回上一级
+- 单文件可下载到 PC，目录可整体下载；多选文件可批量下载到同一文件夹并显示进度
+- 可上传本地文件（含拖拽）到当前设备目录，显示上传进度
+- 可删除设备文件（行内二次确认）
+- 点击不存在的快捷目录不弹红色报错，仅温和提示并保留当前列表
+- 下载完成后「打开所在文件夹」可在系统文件管理器定位到文件
+
+---
+
+### Phase 12: 历史设备保存与快速重连
+
+**状态**：待开发
+
+**目标**：把通过 WiFi 成功连过的设备记下来，在设备连接区域以「历史设备卡片」列表呈现，下次一键快速重连；设备 IP 变更导致快速连接失败时，在卡片内就地输入新 IP 重连；支持手动移除历史卡片。对齐 Product-Spec 功能需求 2.1 / 2.1.1、用户流程 4.1、数据模型 5.1.1。USB 设备即插即识别，不进历史。
+
+**设计约束（复用现有实现，不另造轮子）**
+- 持久化沿用现有「自定义设备显示名」的渲染层 `localStorage` 方式（参考 `SimpleApp.tsx` 中 `DEVICE_NAME_STORAGE_KEY` / `loadStoredDeviceNames` / `setItem` 的写法），物理上落在 Electron userData 目录下，UI 不暴露宿主绝对路径。
+- 快速重连复用现有 `CONNECT_WIFI` IPC（`channels.ts` 的 `CONNECT_WIFI: 'adb:connect-wifi'`，渲染层经 `electronApi.ts` 调用），传入历史记录的 `lastAddress`（`ip:端口`）。**不新增主进程 ADB 命令，不新增 IPC 通道。**
+- WiFi 设备的 `DeviceInfo.id` 即 `ip:端口`，`serialNo` 为设备序列号；历史去重以 `serialNo` 为唯一键。
+- 在线状态不持久化，由当前 `devices` 列表按 `serialNo` 匹配实时计算（匹配到且 `status==='connected'` 即在线）。
+
+**交付清单**
+- [ ] 共享类型：在 `src/shared/types/index.ts` 新增 `HistoryDevice`（`serialNo: string`、`model: string`、`lastAddress: string`、`lastConnectedAt: number`），与 Product-Spec 5.1.1 对齐
+- [ ] 历史存储工具：在 `src/renderer/lib/` 新增 `historyDeviceStore.ts`，提供 `loadHistoryDevices(): HistoryDevice[]`、`saveHistoryDevices(list)`、`upsertHistoryDevice(device)`（按 `serialNo` 去重更新 `lastAddress`/`lastConnectedAt`）、`removeHistoryDevice(serialNo)`；用独立 `localStorage` key（如 `adm.historyDevices.v1`），解析失败时容错返回空数组（参照 `SimpleApp.tsx` 现有 `loadStoredDeviceNames` 的 try/catch 兜底写法）
+- [ ] 写入时机：在 `SimpleApp.tsx` 的 WiFi 连接成功路径里，连接成功后用返回/刷新得到的设备信息（`connectionType==='wifi'`）调用 `upsertHistoryDevice`，记录 `serialNo`/`model`/`lastAddress`(=`ip:端口`)/`lastConnectedAt`(=当前时间戳)；USB 连接路径不写入
+- [ ] 历史卡片列表 UI：在设备连接区域新增「历史设备」列表区，按 `lastConnectedAt` 倒序渲染，每张卡片展示：设备型号、`serialNo`、上次 `ip:端口`、上次连接时间（本地时间格式，复用项目已有的本地时间格式化习惯）、在线/离线状态徽标
+- [ ] 快速连接：卡片上「快速连接」按钮，调用现有 WiFi 连接逻辑并传入 `lastAddress`；连接进行中按钮禁用并显示「连接中…」即时反馈；成功后刷新该卡片状态为在线并以最新 `ip:端口`/时间 `upsert` 覆盖
+- [ ] 失败就地重连：快速连接失败时，卡片就地展开 IP 输入框（预填 `lastAddress` 便于改端口/IP），用户确认后用新地址再次发起 `CONNECT_WIFI`；成功则用新地址 `upsert` 覆盖历史；仍失败则在卡片内显示失败文案并保留输入框，不删除历史记录
+- [ ] 手动移除：每张卡片「移除」入口，点击弹行内二次确认（确认移除 / 取消，复用项目现有行内二次确认交互模式，如断开/删除文件的二次确认），确认后调用 `removeHistoryDevice` 并从列表移除；仅删历史记忆，不影响当前已建立的连接
+- [ ] 空状态：无历史设备时，历史区显示温和的空状态提示（如「暂无历史 WiFi 设备，成功连接一次后会自动出现在这里」），不显示空白
+
+**关键文件**
+| 文件路径 | 说明 |
+|----------|------|
+| `android-device-monitor/src/shared/types/index.ts` | 新增 `HistoryDevice` 类型 |
+| `android-device-monitor/src/renderer/lib/historyDeviceStore.ts` | 历史设备 localStorage 读写、按 `serialNo` 去重 upsert、移除、容错解析 |
+| `android-device-monitor/src/renderer/SimpleApp.tsx` | WiFi 连接成功写入历史；历史卡片列表区（倒序/在线状态/快速连接/失败就地输入重连/移除二次确认/空状态）；复用现有 `CONNECT_WIFI` 调用与本地时间格式化 |
+| `android-device-monitor/src/renderer/lib/electronApi.ts` | 复用：现有 WiFi 连接 API（快速连接传入历史 `lastAddress`），无需新增通道 |
+
+**验收标准**
+- `npm run build` 通过；`npm test` 通过
+- 通过 WiFi 成功连接一台设备后，设备连接区域出现对应历史卡片；USB 连接的设备不出现在历史中
+- 历史卡片按最近连接时间倒序排列，展示型号、SN、上次 IP:端口、上次连接时间与在线/离线状态
+- 点「快速连接」用记录的 IP:端口直接发起连接，连接中按钮有即时禁用/加载反馈，成功后卡片变为在线并刷新时间
+- 设备 IP 变更导致快速连接失败时，卡片就地出现预填上次 IP 的输入框，改成新 IP 确认后可重连成功，并用新地址覆盖历史
+- 重连仍失败时卡片显示失败提示且保留输入框与历史记录，不被删除
+- 点「移除」经二次确认后该历史卡片消失，且不影响当前已连接设备；刷新/重启应用后历史保持（localStorage 持久化）
+- 无历史设备时显示空状态提示，不是空白区域
+
+---
+
 ## 4. 当前真实目录结构
 
 ```text
@@ -499,20 +605,30 @@ android-device-monitor/
 │   │   │   ├── adbBinary.ts
 │   │   │   ├── adbError.ts
 │   │   │   ├── adbkit.d.ts
+│   │   │   ├── performanceRecording.ts
 │   │   │   ├── picoMetrics.ts
 │   │   │   ├── runtimeInspector.ts
+│   │   │   ├── screenshotCapture.ts
 │   │   │   └── types.ts
+│   │   ├── scrcpy/
+│   │   │   ├── scrcpyBinary.ts
+│   │   │   └── scrcpyManager.ts
 │   │   ├── index.ts
 │   │   ├── index-prod.ts
 │   │   ├── logger.ts
 │   │   ├── performanceSnapshots.ts
+│   │   ├── performanceSessionExport.ts
+│   │   ├── performanceMedia.ts
 │   │   └── preload.js
 │   ├── renderer/
 │   │   ├── components/
+│   │   │   ├── FilesPanel.tsx
+│   │   │   ├── MirrorPanel.tsx
 │   │   │   ├── NetworkPanel.tsx
 │   │   │   └── PerformancePanel.tsx
 │   │   ├── lib/
 │   │   │   ├── electronApi.ts
+│   │   │   ├── historyDeviceStore.ts   （Phase 12 规划新增）
 │   │   │   └── logStore.ts
 │   │   ├── index.tsx
 │   │   ├── index.css
@@ -640,12 +756,16 @@ android-device-monitor/
 | Phase 4: 性能监控 | 主链路完成，继续校准 | Android / Pico 指标、前台 FPS、手动性能快照、本地 PNG 指标烙印已落地；实时预览、自动取证、趋势图仍待做 |
 | Phase 5: 网络监控 | 开发中 | HTTP 请求详情首版已落地，仍待补抓包前检查与 HTTPS 范围决策 |
 | Phase 6: 优化测试 | 持续推进中 | 虚拟滚动、构建、打包、Electron 运行时恢复、内置 ADB 分发、Windows 发布验收已完成，质量体系仍待补齐 |
-| Phase 7: 投屏镜像与操控 | 待开发 | 打包 scrcpy、主进程 spawn 调起独立窗口、普通 Android 一键投屏与触屏/文字/物理键操控、子进程生命周期回收 |
+| Phase 7: 投屏镜像与操控 | 已落地待真机验收 | 打包 scrcpy、主进程 spawn 调起独立窗口、普通 Android 一键投屏与触屏/文字/物理键操控、子进程生命周期回收已落地，投屏交互待真机验收 |
 | Phase 8: 投屏参数 + Pico 单眼 + 快捷键速查 | 待开发 | 启动参数配置、Pico 自动 `--crop` 单眼裁切、物理键快捷键速查表与能力边界提示 |
+| Phase 9: 卸载应用 | 已落地 | 第三方应用列表、搜索、`adb uninstall` 卸载与二次确认已落地 |
+| Phase 10: 批量安装 | 已落地 | 单 APK 多设备并发安装、并发限流、逐台状态与重试已落地（已整合进设备页安装面板） |
+| Phase 11: 设备文件管理 | 已落地待真机回归 | 设备文件浏览/上传/下载/多选批量下载/删除/打开所在文件夹/快捷入口容错已落地 |
+| Phase 12: 历史设备保存与快速重连 | 待开发 | WiFi 历史设备卡片、一键快速重连、IP 变更就地输入重连、移除二次确认；复用现有 `CONNECT_WIFI` 与 localStorage 持久化，无新增 IPC |
 
 **当前阶段判断**
 - 项目已经越过“脚手架阶段”
-- 当前最准确的说法是：`Phase 2 / 3 完成，Phase 4 主链路完成但仍需校准和增强，Phase 5 首版已接入，Phase 6 持续收口中，Phase 7 / 8 投屏镜像模块为新增待开发`
+- 当前最准确的说法是：`Phase 2 / 3 完成，Phase 4 主链路完成但仍需校准和增强，Phase 5 首版已接入，Phase 6 持续收口中，Phase 7 投屏已落地待真机验收、Phase 8 待开发，Phase 9 卸载 / Phase 10 批量安装 / Phase 11 设备文件管理均已落地`
 
 ---
 
