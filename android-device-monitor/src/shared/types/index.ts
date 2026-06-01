@@ -43,6 +43,21 @@ export interface PushProgress {
   error?: string;
 }
 
+export interface PullProgress {
+  pullId: string;
+  fileName: string;
+  index: number;       // 当前是第几个文件（从 0 起）
+  total: number;       // 本批共多少个文件
+  status: 'downloading' | 'done' | 'error';
+  error?: string;
+}
+
+export interface PullFilesResult {
+  savedDir: string;    // 保存到的 PC 文件夹
+  succeeded: number;   // 成功下载的文件数
+  failed: number;      // 失败的文件数
+}
+
 export interface ProcessInfo {
   pid: number;
   ppid: number;
@@ -255,7 +270,10 @@ export type IpcChannel =
   | 'adb:install-apk'
   | 'adb:list-device-files'
   | 'adb:pull-device-file'
+  | 'adb:pull-device-files'
+  | 'adb:pull-device-file-progress'
   | 'adb:delete-device-file'
+  | 'app:show-item-in-folder'
   | 'adb:push-device-file'
   | 'adb:push-device-file-progress'
   | 'adb:select-upload-files'

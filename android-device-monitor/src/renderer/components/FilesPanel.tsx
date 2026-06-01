@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { DeviceInfo, DeviceFileEntry, PushProgress } from '@/shared/types';
+import { DeviceInfo, DeviceFileEntry, PushProgress, PullProgress } from '@/shared/types';
 import { hasElectronAPI } from '@/renderer/lib/electronApi';
 
 interface FilesPanelProps {
@@ -52,6 +52,16 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
   const [confirmDeletePath, setConfirmDeletePath] = useState<string | null>(null);
   const [deletingPath, setDeletingPath] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
+  // 内联提示的语气：success 绿色（操作成功），warn 琥珀色（目录不存在/访问受限等温和提醒）
+  const [noticeKind, setNoticeKind] = useState<'success' | 'warn'>('success');
+  // 最近一次下载到 PC 的本地路径，用于「打开所在文件夹」快捷按钮
+  const [lastDownloadPath, setLastDownloadPath] = useState<string | null>(null);
+  // 当前目录内的文件名搜索关键词（仅过滤当前已加载的列表，不重新请求设备）
+  const [search, setSearch] = useState('');
+  // 多选下载：选中的文件路径集合 + 批量下载进度
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [pull, setPull] = useState<PullProgress | null>(null);
+  const activePullIdRef = useRef<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [upload, setUpload] = useState<PushProgress | null>(null);
   const uploadDirRef = useRef<string>(ROOT_PATH);
@@ -66,14 +76,20 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       if (!deviceId || !hasElectronAPI()) return;
       setLoading(true);
       setNotice('');
+      // 切换目录后「打开所在文件夹」按钮指向的是旧的下载结果，已无意义，清掉避免挂在新提示上
+      setLastDownloadPath(null);
       try {
         const result = await window.electronAPI!.listDeviceFiles(deviceId, path);
         if (result.success && result.data) {
           setEntries(result.data.entries);
           setCurrentPath(result.data.path);
+          setSearch('');
+          setSelectedPaths(new Set());
         } else {
-          setEntries([]);
-          onError(result.error || '列出设备文件失败');
+          // 目录不存在 / 访问受限等：保留当前列表不动，仅给温和内联提示，不弹全局红色报错。
+          // 例如 Pico 等 VR 设备没有 /sdcard/DCIM/Camera，点击「相机」快捷入口时不再惊扰用户。
+          setNotice(result.error || '该目录不存在或无法访问');
+          setNoticeKind('warn');
         }
       } catch (err) {
         setEntries([]);
@@ -106,10 +122,13 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
     if (!deviceId || !hasElectronAPI()) return;
     setDownloadingPath(entry.path);
     setNotice('');
+    setLastDownloadPath(null);
     try {
       const result = await window.electronAPI!.pullDeviceFile(deviceId, entry.path, entry.name, entry.isDir);
       if (result.success && result.data) {
         setNotice(`已下载到：${result.data}`);
+        setNoticeKind('success');
+        setLastDownloadPath(result.data);
       } else if (result.error && result.error !== '取消下载') {
         onError(result.error);
       }
@@ -130,6 +149,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       const result = await window.electronAPI!.deleteDeviceFile(deviceId, entry.path, entry.isDir);
       if (result.success) {
         setNotice(`已删除：${entry.name}`);
+        setNoticeKind('success');
         loadDir(currentPath);
       } else {
         onError(result.error || '删除失败');
@@ -141,10 +161,65 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
     }
   };
 
+  const toggleSelect = (path: string) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  // 批量下载选中的文件到 PC 同一个文件夹
+  const downloadSelected = async () => {
+    if (!deviceId || !hasElectronAPI() || selectedPaths.size === 0) return;
+    // 只下载文件，忽略目录（目录批量下载交互复杂，单独「下载」按钮已支持单个目录）
+    const items = entries
+      .filter((e) => selectedPaths.has(e.path) && !e.isDir)
+      .map((e) => ({ path: e.path, name: e.name }));
+    if (items.length === 0) {
+      onError('选中项中没有可下载的文件（目录请用行内「下载」按钮）');
+      return;
+    }
+    const pullId = `pull-${Date.now()}-${items.length}`;
+    activePullIdRef.current = pullId;
+    setNotice('');
+    setLastDownloadPath(null);
+    setPull({ pullId, fileName: '', index: 0, total: items.length, status: 'downloading' });
+    try {
+      const result = await window.electronAPI!.pullDeviceFiles(deviceId, items, pullId);
+      activePullIdRef.current = null;
+      setPull(null);
+      if (result.success && result.data) {
+        const { savedDir, succeeded, failed } = result.data;
+        setNotice(`已下载 ${succeeded} 个文件到 ${savedDir}${failed > 0 ? `，${failed} 个失败` : ''}`);
+        setNoticeKind('success');
+        setLastDownloadPath(savedDir);
+        setSelectedPaths(new Set());
+      } else if (result.error && result.error !== '取消下载') {
+        onError(result.error);
+      }
+    } catch (err) {
+      activePullIdRef.current = null;
+      setPull(null);
+      onError('批量下载失败：' + (err as Error).message);
+    }
+  };
+
   // 始终用最新目录作为上传目标（拖拽/上传都进当前目录）
   useEffect(() => {
     uploadDirRef.current = currentPath;
   }, [currentPath]);
+
+  // 订阅主进程推送的批量下载进度
+  useEffect(() => {
+    if (!hasElectronAPI() || !window.electronAPI?.onPullProgress) return;
+    const unsubscribe = window.electronAPI.onPullProgress((progress) => {
+      if (progress.pullId !== activePullIdRef.current) return;
+      setPull(progress);
+    });
+    return unsubscribe;
+  }, []);
 
   // 订阅主进程推送的上传进度
   useEffect(() => {
@@ -171,6 +246,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       setUpload(null);
       if (result.success) {
         setNotice(`已上传 ${result.data} 个文件到 ${targetDir}`);
+        setNoticeKind('success');
         loadDir(targetDir);
       } else if (result.error && result.error !== '取消选择') {
         onError(result.error);
@@ -214,10 +290,14 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
 
   const crumbs = buildBreadcrumbs(currentPath);
   const canGoUp = currentPath !== '/';
+  const keyword = search.trim().toLowerCase();
+  const visibleEntries = keyword
+    ? entries.filter((entry) => entry.name.toLowerCase().includes(keyword))
+    : entries;
 
   return (
     <div
-      style={{ padding: '16px', color: '#e2e8f0', position: 'relative' }}
+      style={{ padding: '16px', color: '#e2e8f0', position: 'relative', display: 'flex', flexDirection: 'column', maxHeight: '100%', minHeight: 0, boxSizing: 'border-box', width: '100%' }}
       onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
       onDragLeave={(e) => { e.preventDefault(); if (e.currentTarget === e.target) setDragOver(false); }}
       onDrop={handleDrop}
@@ -304,14 +384,89 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       )}
 
       {notice && (
-        <div style={{ marginBottom: '12px', padding: '8px 12px', backgroundColor: '#14532d', color: '#86efac', borderRadius: '6px', fontSize: '13px', wordBreak: 'break-all' }}>
-          {notice}
+        <div style={{ marginBottom: '12px', padding: '8px 12px', backgroundColor: noticeKind === 'warn' ? '#422006' : '#14532d', color: noticeKind === 'warn' ? '#fcd34d' : '#86efac', borderRadius: '6px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+          <span style={{ wordBreak: 'break-all' }}>{notice}</span>
+          {lastDownloadPath && (
+            <button
+              onClick={async () => {
+                if (!hasElectronAPI()) return;
+                const result = await window.electronAPI!.showItemInFolder(lastDownloadPath);
+                if (!result.success && result.error) onError(result.error);
+              }}
+              style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '4px 12px', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+            >📂 打开所在文件夹</button>
+          )}
         </div>
       )}
 
-      {/* 文件列表 */}
-      <div style={{ border: '1px solid #1f2937', borderRadius: '8px', overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 115px 200px', backgroundColor: '#1f2937', color: '#94a3b8', fontSize: '12px', fontWeight: 700, padding: '8px 12px' }}>
+      {/* 文件名搜索 */}
+      <div style={{ marginBottom: '12px', position: 'relative' }}>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={'搜索当前目录文件名…'}
+          style={{ width: '100%', boxSizing: 'border-box', padding: '8px 32px 8px 12px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', color: '#e5e7eb', fontSize: '13px', outline: 'none' }}
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '14px', lineHeight: 1 }}
+          >×</button>
+        )}
+      </div>
+
+      {/* 批量下载操作栏：选中文件后出现 */}
+      {selectedPaths.size > 0 && (
+        <div style={{ marginBottom: '12px', padding: '8px 12px', backgroundColor: '#1e293b', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+          <span style={{ fontSize: '13px', color: '#cbd5e1' }}>已选中 {selectedPaths.size} 个文件</span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => setSelectedPaths(new Set())}
+              disabled={Boolean(pull)}
+              style={{ padding: '4px 12px', backgroundColor: '#475569', border: 'none', borderRadius: '6px', color: '#e2e8f0', cursor: pull ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: pull ? 0.6 : 1 }}
+            >清空</button>
+            <button
+              onClick={downloadSelected}
+              disabled={Boolean(pull)}
+              style={{ padding: '4px 12px', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: pull ? 'not-allowed' : 'pointer', fontSize: '12px', whiteSpace: 'nowrap', opacity: pull ? 0.6 : 1 }}
+            >⬇ 下载选中 ({selectedPaths.size})</button>
+          </div>
+        </div>
+      )}
+
+      {/* 批量下载进度条 */}
+      {pull && (
+        <div style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
+              {pull.status === 'error' ? '下载失败：' : '下载中：'}{pull.fileName || '准备中…'} ({pull.index + 1}/{pull.total})
+            </span>
+            <span>{Math.round(((pull.index + (pull.status === 'done' ? 1 : 0)) / pull.total) * 100)}%</span>
+          </div>
+          <div style={{ height: '6px', backgroundColor: '#334155', borderRadius: '3px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${Math.round(((pull.index + (pull.status === 'done' ? 1 : 0)) / pull.total) * 100)}%`, backgroundColor: '#16a34a', transition: 'width 240ms ease' }} />
+          </div>
+        </div>
+      )}
+
+      {/* 文件列表（内容超高时仅此区域滚动，上方工具区固定；内容少时按内容高度贴合） */}
+      <div style={{ border: '1px solid #1f2937', borderRadius: '8px', overflow: 'auto', flex: '0 1 auto', minHeight: 0 }}>
+        <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'grid', gridTemplateColumns: '32px 1fr 80px 115px 200px', backgroundColor: '#1f2937', color: '#94a3b8', fontSize: '12px', fontWeight: 700, padding: '8px 12px', alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            title="全选/取消当前列表中的文件"
+            checked={visibleEntries.filter((e) => !e.isDir).length > 0 && visibleEntries.filter((e) => !e.isDir).every((e) => selectedPaths.has(e.path))}
+            onChange={(e) => {
+              const fileEntries = visibleEntries.filter((en) => !en.isDir);
+              setSelectedPaths((prev) => {
+                const next = new Set(prev);
+                if (e.target.checked) fileEntries.forEach((en) => next.add(en.path));
+                else fileEntries.forEach((en) => next.delete(en.path));
+                return next;
+              });
+            }}
+          />
           <span>名称</span>
           <span style={{ textAlign: 'right' }}>大小</span>
           <span style={{ textAlign: 'right' }}>修改时间</span>
@@ -322,19 +477,30 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
           <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>加载中…</div>
         ) : entries.length === 0 ? (
           <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>此目录为空</div>
+        ) : visibleEntries.length === 0 ? (
+          <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>没有匹配「{search.trim()}」的文件</div>
         ) : (
-          entries.map((entry) => (
+          visibleEntries.map((entry) => (
             <div
               key={entry.path}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '1fr 80px 115px 200px',
+                gridTemplateColumns: '32px 1fr 80px 115px 200px',
                 alignItems: 'center',
                 padding: '8px 12px',
                 borderTop: '1px solid #1f2937',
                 fontSize: '13px',
               }}
             >
+              <span style={{ display: 'flex', alignItems: 'center' }}>
+                {!entry.isDir && (
+                  <input
+                    type="checkbox"
+                    checked={selectedPaths.has(entry.path)}
+                    onChange={() => toggleSelect(entry.path)}
+                  />
+                )}
+              </span>
               <span
                 onClick={() => handleEntryClick(entry)}
                 style={{
@@ -392,7 +558,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         )}
       </div>
 
-      <div style={{ marginTop: '10px', fontSize: '11px', color: '#64748b' }}>
+      <div style={{ marginTop: '10px', fontSize: '11px', color: '#64748b', flexShrink: 0 }}>
         提示：照片/录像/下载等公共存储免 root 可访问；应用私有数据（/data/data）需要 root，访问受限时会提示。
       </div>
     </div>

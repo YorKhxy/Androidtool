@@ -2199,7 +2199,7 @@ function SimpleApp() {
                 style={{ width: '28px', height: '28px', background: '#1f2937', border: 'none', borderRadius: '6px', color: '#cbd5e1', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}
               >×</button>
             </div>
-            <div style={{ overflow: 'auto', flex: 1 }}>
+            <div style={{ overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex' }}>
               <FilesPanel selectedDevice={fileBrowserDevice} onError={setError} />
             </div>
           </div>

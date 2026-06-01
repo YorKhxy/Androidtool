@@ -15,6 +15,8 @@ import type {
   PairResult,
   DeviceFileList,
   PushProgress,
+  PullProgress,
+  PullFilesResult,
   ProcessInfo,
 } from '../../shared/types';
 
@@ -58,6 +60,9 @@ export interface ElectronAPI {
   listDeviceFiles: (deviceId: string, dirPath: string) => Promise<ElectronResult<DeviceFileList>>;
   pullDeviceFile: (deviceId: string, remotePath: string, name: string, isDir: boolean) => Promise<ElectronResult<string>>;
   deleteDeviceFile: (deviceId: string, remotePath: string, isDir: boolean) => Promise<ElectronResult<undefined>>;
+  showItemInFolder: (localPath: string) => Promise<ElectronResult<undefined>>;
+  pullDeviceFiles: (deviceId: string, items: { path: string; name: string }[], pullId: string) => Promise<ElectronResult<PullFilesResult>>;
+  onPullProgress: (callback: (progress: PullProgress) => void) => () => void;
   selectUploadFiles: () => Promise<ElectronResult<string[]>>;
   pushDeviceFile: (deviceId: string, remoteDir: string, localPaths: string[], uploadId: string) => Promise<ElectronResult<number>>;
   onPushProgress: (callback: (progress: PushProgress) => void) => () => void;

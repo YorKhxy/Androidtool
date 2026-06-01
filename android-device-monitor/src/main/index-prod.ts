@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import * as path from 'path';
 import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
@@ -357,6 +357,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.SHOW_ITEM_IN_FOLDER, async (_event, localPath: string) => {
+    try {
+      shell.showItemInFolder(localPath);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '打开文件位置失败');
+    }
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.PULL_DEVICE_FILE,
     async (_event, deviceId: string, remotePath: string, name: string, isDir: boolean) => {
@@ -385,6 +394,47 @@ const setupIpcHandlers = () => {
         return { success: true, data: localPath };
       } catch (error) {
         return toIpcErrorResponse(error, '下载设备文件失败');
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PULL_DEVICE_FILES,
+    async (_event, deviceId: string, items: { path: string; name: string }[], pullId: string) => {
+      try {
+        const dirResult = await dialog.showOpenDialog(mainWindow!, {
+          title: '选择保存到电脑的文件夹',
+          properties: ['openDirectory', 'createDirectory'],
+        });
+        if (dirResult.canceled || dirResult.filePaths.length === 0) {
+          return { success: false, error: '取消下载' };
+        }
+        const savedDir = dirResult.filePaths[0];
+        const total = items.length;
+        let succeeded = 0;
+        let failed = 0;
+
+        for (let index = 0; index < total; index++) {
+          const item = items[index];
+          mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
+            pullId, fileName: item.name, index, total, status: 'downloading',
+          });
+          try {
+            await adbManager.pullDeviceFile(deviceId, item.path, path.join(savedDir, item.name));
+            succeeded++;
+            mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
+              pullId, fileName: item.name, index, total, status: 'done',
+            });
+          } catch (err) {
+            failed++;
+            mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
+              pullId, fileName: item.name, index, total, status: 'error', error: (err as Error).message,
+            });
+          }
+        }
+        return { success: true, data: { savedDir, succeeded, failed } };
+      } catch (error) {
+        return toIpcErrorResponse(error, '批量下载失败');
       }
     }
   );
