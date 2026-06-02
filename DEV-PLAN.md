@@ -516,7 +516,8 @@ Phase 1 基础框架
 - [x] 后端下载：`ADBManager.pullDeviceFile(deviceId, remotePath, localPath)` 单文件/目录拉取到 PC
 - [x] 后端批量下载：多选文件并发拉取到 PC 同一文件夹，逐个回传 `PULL_DEVICE_FILE_PROGRESS` 进度（文件名、序号、总数、状态）
 - [x] 后端上传：`ADBManager.pushDeviceFile` 推送本地文件到设备目录，回传 `PUSH_DEVICE_FILE_PROGRESS` 进度
-- [x] 后端删除：`ADBManager.deleteDeviceFile(deviceId, remotePath, isDir)`
+- [x] 后端删除：`ADBManager.deleteDeviceFile(deviceId, remotePath, isDir)`（目录走 `rm -rf`，可删空/非空文件夹）
+- [x] 后端新建文件夹：`ADBManager.createDeviceFolder(deviceId, dirPath, name)` 执行 `shell mkdir`，名称校验（非空、禁含 `/ \`），同名/无权限给明确错误；`CREATE_DEVICE_FOLDER` 通道，UI 工具栏「📁+ 新建文件夹」行内输入名称后创建并刷新当前目录
 - [x] 打开所在文件夹：`SHOW_ITEM_IN_FOLDER` 通过 `shell.showItemInFolder` 在系统文件管理器定位下载结果
 - [x] IPC 打通：`channels.ts` 新增 `LIST_DEVICE_FILES` / `PULL_DEVICE_FILE` / `PULL_DEVICE_FILES` / `PULL_DEVICE_FILE_PROGRESS` / `DELETE_DEVICE_FILE` / `PUSH_DEVICE_FILE` / `PUSH_DEVICE_FILE_PROGRESS` / `SELECT_UPLOAD_FILES` / `SHOW_ITEM_IN_FOLDER`；`index.ts`/`index-prod.ts` 注册 handler；`preload.js` 暴露；`electronApi.ts` 类型封装
 - [x] 共享类型：`PushProgress` / `PullProgress` / `PullFilesResult` / `DeviceFileEntry` / `DeviceFileList`
