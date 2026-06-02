@@ -1947,8 +1947,9 @@ function SimpleApp() {
         ) : displayedLogCount === 0 ? (
           <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280' }}>{'\u6ca1\u6709\u5339\u914d\u7684\u65e5\u5fd7'}</div>
         ) : (
-          <div style={{ minHeight: totalLogHeight }}>
-            <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'grid', gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, 1fr)', backgroundColor: '#1f2937', color: '#9ca3af', fontWeight: 700 }}>
+          // width:max-content + minWidth:100% 让内容随最长日志行增宽，超出容器时出现横向滚动条；行与表头同宽对齐。
+          <div style={{ minHeight: totalLogHeight, width: 'max-content', minWidth: '100%' }}>
+            <div style={{ position: 'sticky', top: 0, zIndex: 1, width: '100%', display: 'grid', gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, max-content)', backgroundColor: '#1f2937', color: '#9ca3af', fontWeight: 700 }}>
               <div style={{ padding: '8px' }}>{'\u65f6\u95f4'}</div>
               <div style={{ padding: '8px' }}>Level</div>
               <div style={{ padding: '8px' }}>PID</div>
@@ -1963,7 +1964,8 @@ function SimpleApp() {
                 onClick={() => setSelectedLogEntry(log)}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, 1fr)',
+                  gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, max-content)',
+                  width: '100%',
                   height: `${getLogRowHeight(log)}px`,
                   lineHeight: `${LOG_LINE_HEIGHT}px`,
                   padding: '4px 0',
@@ -1979,9 +1981,9 @@ function SimpleApp() {
                 <div style={{ padding: '0 8px', color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden' }}>{log.processId || '--'}</div>
                 <div style={{ padding: '0 8px', color: '#60a5fa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.packageName || '--'}</div>
                 <div style={{ padding: '0 8px', color: '#93c5fd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.tag}</div>
-                {/* 整条铺开多行：white-space:pre 保留换行、每个逻辑行不自动换行（高度=行数×LOG_LINE_HEIGHT 可预测），
-                    过长单行横向裁切，完整内容点开看底部详情面板。 */}
-                <div style={{ padding: '0 8px', color: '#e5e7eb', overflow: 'hidden', whiteSpace: 'pre' }}>{log.message}</div>
+                {/* 整条铺开多行：white-space:pre 保留换行、每个逻辑行不自动换行（高度=行数×LOG_LINE_HEIGHT 可预测）。
+                    不裁切，过长单行靠日志窗口横向滚动条拖动查看；完整内容也可点开看底部详情面板。 */}
+                <div style={{ padding: '0 8px', color: '#e5e7eb', whiteSpace: 'pre' }}>{log.message}</div>
               </div>
             ))}
             <div style={{ height: virtualBottomPadding }} />
