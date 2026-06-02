@@ -30,6 +30,13 @@ try {
     }
     Write-Host "Bundled adb is ready" -ForegroundColor Green
 
+    Write-Host "[1/5] Preparing bundled scrcpy..." -ForegroundColor Yellow
+    npm run scrcpy:prepare
+    if ($LASTEXITCODE -ne 0) {
+        throw "Bundled scrcpy preparation failed"
+    }
+    Write-Host "Bundled scrcpy is ready" -ForegroundColor Green
+
     Write-Host "[2/5] Compiling main process..." -ForegroundColor Yellow
     npm run build:main
     if ($LASTEXITCODE -ne 0) {
@@ -66,7 +73,8 @@ try {
     Copy-Item -Path "$ProjectRoot\dist\main" -Destination "$appResources\app" -Recurse -Force
     Copy-Item -Path "$ProjectRoot\dist\renderer" -Destination "$appResources\app\renderer" -Recurse -Force
     Copy-Item -Path "$ProjectRoot\vendor\platform-tools" -Destination "$appResources\platform-tools" -Recurse -Force
-    
+    Copy-Item -Path "$ProjectRoot\vendor\scrcpy" -Destination "$appResources\scrcpy" -Recurse -Force
+
     $pkgJsonPath = "$appResources\app\package.json"
     Copy-Item -Path "$ProjectRoot\package.json" -Destination $pkgJsonPath -Force
     

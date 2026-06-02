@@ -28,6 +28,7 @@ describe('project smoke checks', () => {
     expect(ps1Source).toContain('npm run build:renderer');
     expect(ps1Source).toContain('ensure-electron-runtime.js');
     expect(ps1Source).toContain('vendor\\platform-tools');
+    expect(ps1Source).toContain('vendor\\scrcpy');
     expect(electronRuntimeSource).toContain('restoreFromTempElectronRuntime');
     expect(pkg.build.extraResources).toEqual(
       expect.arrayContaining([
@@ -423,11 +424,13 @@ describe('project smoke checks', () => {
     expect(typeSource).toContain('screenshotPath?: string');
     expect(typeSource).not.toContain('screenshotSkippedReason?: string');
     expect(typeSource).not.toContain('networkSpeed: number');
-    expect(rendererSource).toContain('抓取性能快照');
+    expect(rendererSource).toContain('抓取快照');
     expect(rendererSource).toContain('性能快照');
-    expect(simpleAppSource).toContain('performanceByDeviceId[selectedDevice.id]');
-    expect(simpleAppSource).toContain('请先开启当前设备的性能采集，再抓取性能快照。');
-    expect(simpleAppSource).toContain('capturePerformanceSnapshot(selectedDevice.id, currentPerformance)');
+    expect(simpleAppSource).toContain('const deviceId = selectedDevice.id');
+    expect(simpleAppSource).toContain('const currentPerformance = performanceByDeviceId[deviceId]');
+    expect(simpleAppSource).not.toContain('请先开启当前设备的性能采集，再抓取性能快照。');
+    expect(simpleAppSource).toContain('capturePerformanceSnapshot(deviceId, currentPerformance)');
+    expect(simpleAppSource).toContain("id: `${deviceId}-${new Date(result.data!.capturedAt).getTime()}-snapshot`");
     expect(rendererSource).toContain('开启采集');
     expect(rendererSource).toContain('关闭采集');
     expect(rendererSource).toContain('本次采集报告');
@@ -497,10 +500,287 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('setPerformanceSnapshots');
   });
 
+  test('performance recording uses provider-specific screenrecord flow and surfaces recordings in renderer', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const recordingSource = fs.readFileSync(path.join(root, 'src/main/adb/performanceRecording.ts'), 'utf-8');
+    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/components/PerformancePanel.tsx'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+    const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const typeSource = fs.readFileSync(path.join(root, 'src/shared/types/index.ts'), 'utf-8');
+    const mediaSource = fs.readFileSync(path.join(root, 'src/main/performanceMedia.ts'), 'utf-8');
+    const packageSource = fs.readFileSync(path.join(root, 'package.json'), 'utf-8');
+
+    expect(typeSource).toContain("export type PerformanceRecordingProvider = 'android-screenrecord' | 'pico-screenrecord' | 'pico-sdk'");
+    expect(typeSource).toContain('export interface PerformanceRecordingOptions');
+    expect(typeSource).toContain('export interface PerformanceRecording');
+    expect(typeSource).toContain('videoRelativePath?: string');
+    expect(typeSource).toContain('manifestRelativePath?: string');
+    expect(typeSource).not.toContain('processedVideo: boolean');
+    expect(typeSource).not.toContain('metricsBurnedIn: boolean');
+    expect(typeSource).toContain('singleEyeVideo?: boolean');
+    expect(typeSource).not.toContain('videoPath?: string');
+    expect(typeSource).not.toContain('manifestPath?: string');
+    expect(packageSource).not.toContain('"ffmpeg-static"');
+    expect(packageSource).not.toContain('"to": "ffmpeg-static"');
+    expect(channelSource).toContain("START_PERFORMANCE_RECORDING: 'adb:start-performance-recording'");
+    expect(preloadSource).toContain('startPerformanceRecording');
+    expect(electronApiSource).toContain('startPerformanceRecording: (deviceId: string, options: PerformanceRecordingOptions)');
+    expect(indexSource).toContain('IPC_CHANNELS.START_PERFORMANCE_RECORDING');
+    expect(indexSource).toContain('startPerformanceRecording(deviceId, resolveRuntimeAppRoot(app), options)');
+    expect(indexSource).toContain('registerPerformanceMediaScheme();');
+    expect(indexSource).toContain('registerPerformanceMediaProtocol(() => resolveRuntimeAppRoot(app))');
+    expect(prodSource).toContain('IPC_CHANNELS.START_PERFORMANCE_RECORDING');
+    expect(prodSource).toContain('registerPerformanceMediaScheme();');
+    expect(prodSource).toContain('registerPerformanceMediaProtocol(() => resolveRuntimeAppRoot(app))');
+    expect(mediaSource).toContain("export const PERFORMANCE_MEDIA_SCHEME = 'adm-media'");
+    expect(mediaSource).toContain('registerPerformanceMediaScheme');
+    expect(mediaSource).toContain('registerPerformanceMediaProtocol');
+    expect(mediaSource).toContain("relativePath.startsWith('performance-recordings/')");
+    expect(mediaSource).toContain('path.relative(recordingsRoot, resolvedPath)');
+    expect(managerSource).toContain('PerformanceRecordingManager');
+    expect(managerSource).toContain('isPico: this.isLikelyPicoDevice(deviceId)');
+    expect(recordingSource).toContain("'screenrecord'");
+    expect(recordingSource).toContain("'--time-limit'");
+    expect(recordingSource).toContain("'--bit-rate'");
+    expect(recordingSource).toContain("'pull'");
+    expect(recordingSource).toContain("'performance-recordings'");
+    expect(recordingSource).toContain("'pico-screenrecord'");
+    expect(recordingSource).toContain("'android-screenrecord'");
+    expect(recordingSource).toContain('writeManifest');
+    expect(recordingSource).toContain('collectSamples');
+    expect(recordingSource).toContain('signal.cancelled = true');
+    expect(recordingSource).toContain('toPortablePath');
+    expect(recordingSource).toContain('videoRelativePath,');
+    expect(recordingSource).toContain('manifestRelativePath,');
+    expect(recordingSource).toContain("['-s', input.deviceId, 'pull', remotePath, videoPath]");
+    expect(recordingSource).not.toContain('processPerformanceRecordingVideo');
+    expect(recordingSource).not.toContain('rawVideoFileName');
+    expect(recordingSource).not.toContain('subtitleFileName');
+    expect(recordingSource).not.toContain('cropToSingleEye: input.isPico');
+    expect(recordingSource).not.toContain('metricsBurnedIn: true');
+    expect(recordingSource).not.toContain('singleEyeVideo: input.isPico');
+    expect(recordingSource).toContain('cleanupRemoteRecording');
+    expect(recordingSource).toContain("'pkill', '-2', 'screenrecord'");
+    expect(recordingSource).toContain("'killall', '-2', 'screenrecord'");
+    expect(simpleAppSource).toContain('performanceRecordings');
+    expect(simpleAppSource).toContain('recordingDeviceIds');
+    expect(simpleAppSource).toContain('startPerformanceRecording');
+    expect(simpleAppSource).toContain('bitRateMbps: 8');
+    expect(simpleAppSource).not.toContain('请先开启当前设备的性能采集，再抓取性能快照。');
+    expect(simpleAppSource).toContain('capturePerformanceSnapshot(deviceId, currentPerformance)');
+    expect(simpleAppSource).toContain("id: `${deviceId}-${new Date(result.data!.capturedAt).getTime()}-snapshot`");
+    expect(rendererSource).toContain('onStartRecording');
+    expect(rendererSource).toContain('recordings');
+    expect(rendererSource).toContain('Pico SDK');
+    expect(rendererSource).toContain('Pico screenrecord');
+    expect(rendererSource).toContain('Android screenrecord');
+    expect(rendererSource).toContain('buildRecordingMediaUrl');
+    expect(rendererSource).toContain('adm-media://');
+    expect(rendererSource).toContain('videoRelativePath');
+    expect(rendererSource).toContain('manifestRelativePath');
+    expect(rendererSource).toContain('previewRecording');
+    expect(rendererSource).toContain('recordingPlaybackTime');
+    expect(rendererSource).toContain('findRecordingSampleAt');
+    expect(rendererSource).toContain('renderRecordingMetricOverlay');
+    expect(rendererSource).toContain('onTimeUpdate');
+    expect(rendererSource).toContain('setPreviewRecording(recording)');
+    expect(rendererSource).toContain('shouldCropRecordingInTool');
+    expect(rendererSource).not.toContain('shouldOverlayRecordingMetricsInTool');
+    expect(rendererSource).toContain("return isPicoRecording(recording) && !recording.singleEyeVideo");
+    expect(rendererSource).not.toContain('recording.metricsBurnedIn');
+    expect(rendererSource).toContain("style={getRecordingVideoStyle(shouldCropVideo, 'cover')}");
+    expect(rendererSource).toContain("getRecordingVideoStyle(false, 'contain')");
+    expect(rendererSource).toContain('{renderRecordingMetricOverlay(firstSample, true)}');
+    expect(rendererSource).toContain('{renderRecordingMetricOverlay(previewRecordingSample)}');
+    expect(rendererSource).toContain('disabled={isCapturingSnapshot}');
+    expect(rendererSource).not.toContain('disabled={isCapturingSnapshot || !performance}');
+    expect(rendererSource).toContain('性能录制播放预览');
+    expect(rendererSource).toContain('关闭录制播放');
+    expect(rendererSource).not.toContain('recording.videoPath &&');
+    expect(rendererSource).not.toContain('recording.manifestPath &&');
+    const snapshotSectionIndex = rendererSource.indexOf('>性能快照</div>');
+    const recordingSectionIndex = rendererSource.indexOf('>性能录制</div>');
+    expect(snapshotSectionIndex).toBeGreaterThanOrEqual(0);
+    expect(recordingSectionIndex).toBeGreaterThanOrEqual(0);
+    expect(snapshotSectionIndex).toBeLessThan(recordingSectionIndex);
+  });
+
   test('network tab does not auto-trigger capture or show loading as an error toast', () => {
     const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
 
     expect(rendererSource).not.toContain("if (selectedDevice && activeTab === 'network') {\r\n      loadNetworkRequests();");
     expect(rendererSource).not.toContain("\\u6b63\\u5728\\u6293\\u53d6 HTTP \\u8bf7\\u6c42...");
+  });
+
+  test('mirror feature bundles scrcpy, spawns it with bundled adb, and reclaims child processes', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
+    const prepareSource = fs.readFileSync(path.join(root, 'scripts/prepare-scrcpy.js'), 'utf-8');
+    const binarySource = fs.readFileSync(path.join(root, 'src/main/scrcpy/scrcpyBinary.ts'), 'utf-8');
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/scrcpy/scrcpyManager.ts'), 'utf-8');
+    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const mirrorPanelSource = fs.readFileSync(path.join(root, 'src/renderer/components/MirrorPanel.tsx'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    // 打包接线
+    expect(pkg.scripts['scrcpy:prepare']).toContain('prepare-scrcpy.js');
+    expect(pkg.scripts.pack).toContain('scrcpy:prepare');
+    expect(pkg.scripts.dist).toContain('scrcpy:prepare');
+    expect(pkg.build.extraResources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ from: 'vendor/scrcpy', to: 'scrcpy' }),
+      ])
+    );
+    expect(prepareSource).toContain('scrcpy-win64');
+    expect(binarySource).toContain('resolveBundledScrcpyBinaryPath');
+
+    // scrcpy 复用内置 adb + 进程生命周期
+    expect(managerSource).toContain('resolveBundledScrcpyBinaryPath');
+    expect(managerSource).toContain('resolveBundledAdbBinaryPath');
+    expect(managerSource).toContain('ADB: adbPath');
+    expect(managerSource).toContain("['-s', deviceId, '--window-title', windowTitle, '--no-mouse-hover']");
+    expect(managerSource).toContain('stopAll');
+    expect(managerSource).toContain("child.on('exit'");
+
+    // IPC 链路 + 退出回收
+    expect(channelSource).toContain("MIRROR_START: 'mirror:start'");
+    expect(channelSource).toContain("MIRROR_STATUS: 'mirror:status'");
+    expect(preloadSource).toContain('startMirror');
+    expect(preloadSource).toContain("ipcRenderer.on('mirror:status'");
+    expect(electronApiSource).toContain('startMirror');
+    expect(electronApiSource).toContain('onMirrorStatus');
+    for (const source of [indexSource, prodSource]) {
+      expect(source).toContain('IPC_CHANNELS.MIRROR_START');
+      expect(source).toContain('scrcpyManager.stopAll()');
+      expect(source).toContain('scrcpyManager.onStatus');
+    }
+
+    // 渲染层入口
+    expect(mirrorPanelSource).toContain('开始投屏');
+    expect(mirrorPanelSource).toContain('停止投屏');
+    expect(simpleAppSource).toContain('handleStartMirror');
+    expect(simpleAppSource).toContain('onMirrorStatus');
+    expect(simpleAppSource).toContain("{ key: 'mirror' as TabType");
+  });
+
+  test('mirror supports launch params, Pico single-eye crop and shortcut cheatsheet', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/scrcpy/scrcpyManager.ts'), 'utf-8');
+    const typeSource = fs.readFileSync(path.join(root, 'src/shared/types/index.ts'), 'utf-8');
+    const mirrorPanelSource = fs.readFileSync(path.join(root, 'src/renderer/components/MirrorPanel.tsx'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    // 启动参数拼装 + Pico 单眼裁切
+    expect(managerSource).toContain("'--max-size'");
+    expect(managerSource).toContain("'--video-bit-rate'");
+    expect(managerSource).toContain("'--crop'");
+    expect(managerSource).toContain('computePicoSingleEyeCrop');
+    expect(managerSource).toContain('--no-mouse-hover');
+    expect(managerSource).toContain("'shell', 'wm', 'size'");
+    expect(managerSource).toContain('options.isPico');
+    expect(managerSource).toContain('${halfWidth}:${height}:0:0');
+
+    // 类型扩展
+    expect(typeSource).toContain('isPico?: boolean');
+    expect(typeSource).toContain('crop?: string');
+    expect(typeSource).toContain('maxSize?: number');
+    expect(typeSource).toContain('bitRate?: string');
+
+    // 参数 UI + 快捷键速查 + Pico 边界提示
+    expect(mirrorPanelSource).toContain('分辨率上限');
+    expect(mirrorPanelSource).toContain('码率');
+    expect(mirrorPanelSource).toContain('快捷键速查');
+    expect(mirrorPanelSource).toContain('Alt + h');
+    expect(mirrorPanelSource).toContain('6DoF 手柄无法操控');
+    expect(mirrorPanelSource).toContain('单眼显示');
+
+    // 渲染层 Pico 检测与传参
+    expect(simpleAppSource).toContain('isLikelyPicoDevice');
+    expect(simpleAppSource).toContain('isPico: isLikelyPicoDevice(selectedDevice)');
+  });
+
+  test('uninstall app flow goes through adb uninstall with confirm and process refresh', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    expect(managerSource).toContain('async uninstallApp(deviceId: string, packageName: string)');
+    expect(managerSource).toContain("['-s', deviceId, 'uninstall', cleanedPackage]");
+    expect(managerSource).toContain('async listInstalledPackages(deviceId: string)');
+    expect(managerSource).toContain("['-s', deviceId, 'shell', 'pm', 'list', 'packages', '-3']");
+    expect(managerSource).toContain('async launchApp(deviceId: string, packageName: string)');
+    expect(managerSource).toContain("'monkey', '-p', cleanedPackage");
+    expect(managerSource).toContain('async forceStopApp(deviceId: string, packageName: string)');
+    expect(managerSource).toContain("['-s', deviceId, 'shell', 'am', 'force-stop', cleanedPackage]");
+    expect(channelSource).toContain("LAUNCH_APP: 'adb:launch-app'");
+    expect(channelSource).toContain("FORCE_STOP_APP: 'adb:force-stop-app'");
+    expect(preloadSource).toContain('launchApp');
+    expect(preloadSource).toContain('forceStopApp');
+    expect(electronApiSource).toContain('launchApp');
+    expect(electronApiSource).toContain('forceStopApp');
+    for (const source of [indexSource, prodSource]) {
+      expect(source).toContain('IPC_CHANNELS.LAUNCH_APP');
+      expect(source).toContain('IPC_CHANNELS.FORCE_STOP_APP');
+      expect(source).toContain('adbManager.launchApp(deviceId, packageName)');
+      expect(source).toContain('adbManager.forceStopApp(deviceId, packageName)');
+    }
+    expect(simpleAppSource).toContain('handleLaunchApp');
+    expect(simpleAppSource).toContain('handleForceStopApp');
+    expect(channelSource).toContain("UNINSTALL_APP: 'adb:uninstall-app'");
+    expect(channelSource).toContain("LIST_INSTALLED_PACKAGES: 'adb:list-installed-packages'");
+    expect(preloadSource).toContain('uninstallApp');
+    expect(preloadSource).toContain('listInstalledPackages');
+    expect(electronApiSource).toContain('uninstallApp');
+    expect(electronApiSource).toContain('listInstalledPackages');
+    for (const source of [indexSource, prodSource]) {
+      expect(source).toContain('IPC_CHANNELS.UNINSTALL_APP');
+      expect(source).toContain('adbManager.uninstallApp(deviceId, packageName)');
+      expect(source).toContain('IPC_CHANNELS.LIST_INSTALLED_PACKAGES');
+      expect(source).toContain('adbManager.listInstalledPackages(deviceId)');
+    }
+    expect(simpleAppSource).toContain('handleUninstallApp');
+    expect(simpleAppSource).toContain('window.confirm');
+    expect(simpleAppSource).toContain('uninstallApp(selectedDevice.id, packageName)');
+    expect(simpleAppSource).toContain('loadInstalledPackages');
+    expect(simpleAppSource).toContain('已安装应用');
+  });
+
+  test('unified install panel installs to one or many devices with per-device progress and concurrency', () => {
+    expect(fs.existsSync(path.join(root, 'src/renderer/components/BatchInstallPanel.tsx'))).toBe(false);
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    // 安装模式（-r / -r -d）
+    expect(managerSource).toContain("options?.allowDowngrade ? ['-r', '-d'] : ['-r']");
+    expect(managerSource).toContain('async installApk(deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean })');
+    expect(preloadSource).toContain('installApk: (deviceId, apkPath, options)');
+    expect(electronApiSource).toContain('options?: { allowDowngrade?: boolean }');
+
+    // 统一安装面板：单/多设备 + 并发 + 每台队列进度条
+    expect(simpleAppSource).toContain('renderUnifiedInstallPanel');
+    expect(simpleAppSource).toContain('startUnifiedInstall');
+    expect(simpleAppSource).toContain('installItemsOnDevice');
+    expect(simpleAppSource).toContain('const limit = installConcurrency > 0 ? installConcurrency : targetIds.length');
+    expect(simpleAppSource).toContain('installApk(deviceId, item.path, { allowDowngrade: installAllowDowngrade })');
+    expect(simpleAppSource).toContain('pendingApks');
+    expect(simpleAppSource).toContain('installTargets');
+    expect(simpleAppSource).toContain('retryDeviceInstall');
+    expect(simpleAppSource).toContain('应用安装');
+    expect(simpleAppSource).toContain('目标设备');
+    // 安装目标默认不勾选，由用户手动选择或全选
+    expect(simpleAppSource).toContain("const [installTargets, setInstallTargets] = useState<Set<string>>(new Set())");
+    expect(simpleAppSource).not.toContain('prev.size === 0 ? new Set([selectedDevice.id]) : prev');
   });
 });

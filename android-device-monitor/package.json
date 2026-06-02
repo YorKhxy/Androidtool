@@ -1,24 +1,30 @@
 {
   "name": "android-device-monitor",
   "version": "1.0.0",
-  "description": "\u5b89\u5353\u8bbe\u5907\u76d1\u63a7 - \u8bbe\u5907\u76d1\u63a7\u5de5\u5177",
+  "description": "安卓设备监控 - 设备监控工具",
   "main": "./dist/main/main/index.js",
   "scripts": {
     "dev": "npm run build:main && concurrently -k -n main,renderer,electron \"npm run dev:main\" \"npm run dev:renderer\" \"node ./scripts/start-dev-electron.js\"",
     "dev:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput",
     "dev:renderer": "webpack serve --mode development",
     "adb:prepare": "node ./scripts/prepare-platform-tools.js",
+    "scrcpy:prepare": "node ./scripts/prepare-scrcpy.js",
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json && node ./scripts/copy-preload.js",
     "build:renderer": "webpack --mode production",
     "start": "electron .",
-    "pack": "npm run adb:prepare && electron-builder --dir",
-    "dist": "npm run adb:prepare && electron-builder",
+    "pack": "npm run adb:prepare && npm run scrcpy:prepare && electron-builder --dir",
+    "dist": "npm run adb:prepare && npm run scrcpy:prepare && electron-builder",
     "release": "powershell -ExecutionPolicy Bypass -File ./scripts/build-and-package.ps1",
     "release-bat": "scripts\\build-and-package.bat",
     "test": "jest"
   },
-  "keywords": ["android", "adb", "monitor", "debug"],
+  "keywords": [
+    "android",
+    "adb",
+    "monitor",
+    "debug"
+  ],
   "author": "Developer",
   "license": "MIT",
   "devDependencies": {
@@ -40,14 +46,14 @@
     "webpack-dev-server": "^4.0.0"
   },
   "dependencies": {
+    "adbkit": "^2.11.1",
     "lucide-react": "^0.290.0",
     "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "adbkit": "^2.11.1"
+    "react-dom": "^18.0.0"
   },
   "build": {
     "appId": "com.example.androiddevicemonitor",
-    "productName": "\u5b89\u5353\u8bbe\u5907\u76d1\u63a7",
+    "productName": "安卓设备监控",
     "directories": {
       "output": "dist"
     },
@@ -60,6 +66,13 @@
       {
         "from": "vendor/platform-tools",
         "to": "platform-tools",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "vendor/scrcpy",
+        "to": "scrcpy",
         "filter": [
           "**/*"
         ]

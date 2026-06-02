@@ -1,21 +1,26 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import * as path from 'path';
 import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
-import { LogEntry, PerformanceMetrics, PerformanceSessionExportPayload } from '../shared/types';
+import { ScrcpyManager } from './scrcpy/scrcpyManager';
+import { LogEntry, MirrorStartOptions, PerformanceMetrics, PerformanceRecordingOptions, PerformanceSessionExportPayload } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
+import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
 
 let mainWindow: BrowserWindow | null = null;
 let adbManager: ADBManager;
+const scrcpyManager = new ScrcpyManager();
 let isCleanupComplete = false;
 let cleanupPromise: Promise<void> | null = null;
 
 const LOG_BATCH_INTERVAL_MS = 250;
 const LOG_BATCH_MAX_SIZE = 200;
 const LOG_QUEUE_MAX_SIZE = 1000;
+
+registerPerformanceMediaScheme();
 
 let logQueue: LogEntry[] = [];
 let logFlushTimer: NodeJS.Timeout | null = null;
@@ -35,6 +40,7 @@ const cleanupBeforeQuit = async () => {
 
   cleanupPromise = (async () => {
     clearLogQueue();
+    scrcpyManager.stopAll();
     if (adbManager) {
       await adbManager.cleanup();
     }
@@ -182,6 +188,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.PAIR_WIFI, async (_event, target: string, pairingCode: string) => {
+    try {
+      const result = await adbManager.pairDevice(target, pairingCode);
+      return { success: true, data: result };
+    } catch (error) {
+      return toIpcErrorResponse(error, 'WiFi 配对失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.CONNECT_USB, async () => {
     try {
       const devices = await adbManager.connectUSB();
@@ -243,6 +258,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.START_PERFORMANCE_RECORDING, async (_event, deviceId: string, options: PerformanceRecordingOptions) => {
+    try {
+      const recording = await adbManager.startPerformanceRecording(deviceId, resolveRuntimeAppRoot(app), options);
+      return { success: true, data: recording };
+    } catch (error) {
+      return toIpcErrorResponse(error, '性能录制失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.READ_SNAPSHOT_IMAGE, async (_event, screenshotPath: string) => {
     try {
       const dataUrl = await readSnapshotImageAsDataUrl(screenshotPath);
@@ -297,12 +321,195 @@ const setupIpcHandlers = () => {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.INSTALL_APK, async (_event, deviceId: string, apkPath: string) => {
+  ipcMain.handle(IPC_CHANNELS.INSTALL_APK, async (_event, deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean }) => {
     try {
-      const output = await adbManager.installApk(deviceId, apkPath);
+      const output = await adbManager.installApk(deviceId, apkPath, options);
       return { success: true, data: { apkPath, output } };
     } catch (error) {
       return toIpcErrorResponse(error, '安装 APK 失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LIST_INSTALLED_PACKAGES, async (_event, deviceId: string) => {
+    try {
+      const packages = await adbManager.listInstalledPackages(deviceId);
+      return { success: true, data: packages };
+    } catch (error) {
+      return toIpcErrorResponse(error, '获取已安装应用失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LIST_DEVICE_FILES, async (_event, deviceId: string, dirPath: string) => {
+    try {
+      const list = await adbManager.listDeviceFiles(deviceId, dirPath);
+      return { success: true, data: list };
+    } catch (error) {
+      return toIpcErrorResponse(error, '列出设备文件失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.DELETE_DEVICE_FILE, async (_event, deviceId: string, remotePath: string, isDir: boolean) => {
+    try {
+      await adbManager.deleteDeviceFile(deviceId, remotePath, isDir);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '删除设备文件失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SHOW_ITEM_IN_FOLDER, async (_event, localPath: string) => {
+    try {
+      shell.showItemInFolder(localPath);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '打开文件位置失败');
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.PULL_DEVICE_FILE,
+    async (_event, deviceId: string, remotePath: string, name: string, isDir: boolean) => {
+      try {
+        let localPath: string;
+        if (isDir) {
+          const result = await dialog.showOpenDialog(mainWindow!, {
+            title: '选择保存到电脑的文件夹',
+            properties: ['openDirectory', 'createDirectory'],
+          });
+          if (result.canceled || result.filePaths.length === 0) {
+            return { success: false, error: '取消下载' };
+          }
+          localPath = path.join(result.filePaths[0], name);
+        } else {
+          const result = await dialog.showSaveDialog(mainWindow!, {
+            title: '保存到电脑',
+            defaultPath: name,
+          });
+          if (result.canceled || !result.filePath) {
+            return { success: false, error: '取消下载' };
+          }
+          localPath = result.filePath;
+        }
+        await adbManager.pullDeviceFile(deviceId, remotePath, localPath);
+        return { success: true, data: localPath };
+      } catch (error) {
+        return toIpcErrorResponse(error, '下载设备文件失败');
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PULL_DEVICE_FILES,
+    async (_event, deviceId: string, items: { path: string; name: string }[], pullId: string) => {
+      try {
+        const dirResult = await dialog.showOpenDialog(mainWindow!, {
+          title: '选择保存到电脑的文件夹',
+          properties: ['openDirectory', 'createDirectory'],
+        });
+        if (dirResult.canceled || dirResult.filePaths.length === 0) {
+          return { success: false, error: '取消下载' };
+        }
+        const savedDir = dirResult.filePaths[0];
+        const total = items.length;
+        let succeeded = 0;
+        let failed = 0;
+
+        for (let index = 0; index < total; index++) {
+          const item = items[index];
+          mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
+            pullId, fileName: item.name, index, total, status: 'downloading',
+          });
+          try {
+            await adbManager.pullDeviceFile(deviceId, item.path, path.join(savedDir, item.name));
+            succeeded++;
+            mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
+              pullId, fileName: item.name, index, total, status: 'done',
+            });
+          } catch (err) {
+            failed++;
+            mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
+              pullId, fileName: item.name, index, total, status: 'error', error: (err as Error).message,
+            });
+          }
+        }
+        return { success: true, data: { savedDir, succeeded, failed } };
+      } catch (error) {
+        return toIpcErrorResponse(error, '批量下载失败');
+      }
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.SELECT_UPLOAD_FILES, async () => {
+    try {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: '选择要上传到设备的文件',
+        properties: ['openFile', 'multiSelections'],
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, error: '取消选择' };
+      }
+      return { success: true, data: result.filePaths };
+    } catch (error) {
+      return toIpcErrorResponse(error, '选择上传文件失败');
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.PUSH_DEVICE_FILE,
+    async (_event, deviceId: string, remoteDir: string, localPaths: string[], uploadId: string) => {
+      const total = localPaths.length;
+      try {
+        for (let index = 0; index < total; index++) {
+          const localPath = localPaths[index];
+          const fileName = path.basename(localPath);
+          try {
+            await adbManager.pushDeviceFile(deviceId, localPath, remoteDir, fileName, (percent) => {
+              mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
+                uploadId, fileName, index, total, percent, status: 'uploading',
+              });
+            });
+            mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
+              uploadId, fileName, index, total, percent: 100, status: 'done',
+            });
+          } catch (err) {
+            mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
+              uploadId, fileName, index, total, percent: 0, status: 'error',
+              error: (err as Error).message,
+            });
+            throw err;
+          }
+        }
+        return { success: true, data: total };
+      } catch (error) {
+        return toIpcErrorResponse(error, '上传文件失败');
+      }
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.UNINSTALL_APP, async (_event, deviceId: string, packageName: string) => {
+    try {
+      const output = await adbManager.uninstallApp(deviceId, packageName);
+      return { success: true, data: { packageName, output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '卸载应用失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LAUNCH_APP, async (_event, deviceId: string, packageName: string) => {
+    try {
+      const output = await adbManager.launchApp(deviceId, packageName);
+      return { success: true, data: { packageName, output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '启动应用失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.FORCE_STOP_APP, async (_event, deviceId: string, packageName: string) => {
+    try {
+      await adbManager.forceStopApp(deviceId, packageName);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '关闭应用失败');
     }
   });
 
@@ -312,6 +519,24 @@ const setupIpcHandlers = () => {
       return { success: true };
     } catch (error) {
       return toIpcErrorResponse(error, '设备息屏失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WAKE_DEVICE, async (_event, deviceId: string) => {
+    try {
+      await adbManager.wakeDevice(deviceId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '设备唤醒失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UNLOCK_DEVICE, async (_event, deviceId: string) => {
+    try {
+      await adbManager.unlockDevice(deviceId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '设备解锁失败');
     }
   });
 
@@ -337,7 +562,13 @@ const setupIpcHandlers = () => {
       }
 
       const content = logs
-        .map((log) => `${new Date(log.timestamp).toISOString()} ${log.deviceId} ${log.processId}/${log.threadId} ${log.level}/${log.tag}: ${log.message}`)
+        .map((log) => {
+          // 导出用本地时间（与界面显示一致），不能用 toISOString()——它输出 UTC 会比本地少 8 小时
+          const d = new Date(log.timestamp);
+          const pad = (n: number, len = 2) => String(n).padStart(len, '0');
+          const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+          return `${ts} ${log.deviceId} ${log.processId}/${log.threadId} ${log.level}/${log.tag}: ${log.message}`;
+        })
         .join('\n');
       await fs.writeFile(result.filePath, content, 'utf-8');
       return { success: true, data: result.filePath };
@@ -365,6 +596,28 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.MIRROR_START, async (_event, deviceId: string, options?: MirrorStartOptions) => {
+    try {
+      const session = await scrcpyManager.startMirror(deviceId, options ?? {});
+      return { success: true, data: session };
+    } catch (error) {
+      return toIpcErrorResponse(error, '启动投屏失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MIRROR_STOP, async (_event, deviceId: string) => {
+    try {
+      scrcpyManager.stopMirror(deviceId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '停止投屏失败');
+    }
+  });
+
+  scrcpyManager.onStatus((session) => {
+    mainWindow?.webContents.send(IPC_CHANNELS.MIRROR_STATUS, session);
+  });
+
   adbManager.onAdbStatusChanged((status) => {
     mainWindow?.webContents.send(IPC_CHANNELS.ADB_STATUS_CHANGED, status);
   });
@@ -384,6 +637,7 @@ const setupIpcHandlers = () => {
 
 app.whenReady().then(() => {
   adbManager = new ADBManager();
+  registerPerformanceMediaProtocol(() => resolveRuntimeAppRoot(app));
   createWindow();
   setupIpcHandlers();
   adbManager.startDeviceMonitoring();

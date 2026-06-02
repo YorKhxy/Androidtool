@@ -10,6 +10,7 @@ android-device-monitor/out/
 
 # Runtime artifacts
 android-device-monitor/performance-snapshots/
+android-device-monitor/performance-recordings/
 android-device-monitor/.playwright-cli/
 android-device-monitor/.electron_cache/
 android-device-monitor/node_modules/.electron-*/
@@ -19,9 +20,13 @@ android-device-monitor/node_modules/.*-*/
 android-device-monitor/vendor/platform-tools/**
 !android-device-monitor/vendor/platform-tools/
 !android-device-monitor/vendor/platform-tools/README.md
+android-device-monitor/vendor/scrcpy/**
+!android-device-monitor/vendor/scrcpy/
 
 # Local tool/workflow state
+.claude/
 .codex/
+.claude/
 .trae/
 .tmp*/
 AGENTS.md

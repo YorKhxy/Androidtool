@@ -2,12 +2,15 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { EventEmitter } from 'events';
 import * as path from 'path';
+import { statSync as nodeFsStatSync, mkdtempSync as nodeFsMkdtempSync, renameSync as nodeFsRenameSync, copyFileSync as nodeFsCopyFileSync, rmSync as nodeFsRmSync } from 'fs';
+import { tmpdir as nodeOsTmpdir } from 'os';
 import type { ExecFileOptions } from 'child_process';
-import { ActivityStackEntry, AdbStatus, DeviceInfo, LogEntry, NetworkRequest, PerformanceMetrics, ProcessInfo } from '../../shared/types';
+import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo } from '../../shared/types';
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
 import { ResolvedAdbBinary, getBundledAdbCandidates, resolveBundledAdbBinaryPath } from './adbBinary';
 import { AdbRuntimeInspector, CapturedPerformanceSnapshot } from './runtimeInspector';
+import { PerformanceRecordingManager } from './performanceRecording';
 
 export interface PerformanceInfo {
   provider?: 'android' | 'pico';
@@ -56,6 +59,11 @@ export class ADBManager extends EventEmitter {
     (args, options) => this.execAdb(args, options),
     (args, options) => this.execAdbBuffer(args, options)
   );
+  private readonly performanceRecordingManager = new PerformanceRecordingManager(
+    (args, options) => this.execAdb(args, options),
+    async () => (await this.resolveAdbBinary()).path,
+    (deviceId) => this.getPerformanceMetrics(deviceId)
+  );
   private adbBinary: ResolvedAdbBinary | null = null;
   private deviceInfoCache = new Map<string, DeviceInfo>();
   private lastDeviceSnapshot = new Map<string, string>();
@@ -97,6 +105,7 @@ export class ADBManager extends EventEmitter {
         let device: DeviceInfo = {
           id: summary.id,
           name: 'Unknown',
+          serialNo: 'Unknown',
           model: 'Unknown',
           manufacturer: 'Unknown',
           androidVersion: 'Unknown',
@@ -104,10 +113,12 @@ export class ADBManager extends EventEmitter {
           connectionType: summary.connectionType,
           status: summary.status,
         };
-        
+
         try {
           const props = await this.getDeviceProperties(summary.id);
           device.name = props['ro.product.name'] || device.name;
+          // WiFi 设备的 id 是 IP:port，真实 SN 需从 ro.serialno 取；取不到时回退到 id
+          device.serialNo = props['ro.serialno'] || props['ro.boot.serialno'] || summary.id;
           device.model = props['ro.product.model'] || device.model;
           device.manufacturer = props['ro.product.manufacturer'] || device.manufacturer;
           device.androidVersion = props['ro.build.version.release'] || device.androidVersion;
@@ -153,6 +164,14 @@ export class ADBManager extends EventEmitter {
 
       if (id === 'adb' || id.startsWith('emulator-') || id === 'host') {
         logger.log('ADBManager: skipping special device:', id);
+        continue;
+      }
+
+      // 过滤 adb 列出的 mDNS 服务条目（如 adb-xxxx._adb-tls-connect._tcp）。
+      // 无线调试自动连接后，adb devices 会同时列出真实连接（IP:端口）和这个服务名，
+      // 服务名不是真实设备，否则会在设备列表里多出一张重复卡片。
+      if (id.includes('._tcp') || id.includes('_adb-tls-') || id.includes('_adb._')) {
+        logger.log('ADBManager: skipping mdns service entry:', id);
         continue;
       }
 
@@ -295,6 +314,340 @@ export class ADBManager extends EventEmitter {
       logger.error('ADBManager: connectWiFi failed:', error);
       throw this.wrapOperationError('WiFi connection failed', error);
     }
+  }
+
+  async pairDevice(target: string, pairingCode: string): Promise<PairResult> {
+    try {
+      logger.log('ADBManager: pairDevice called with:', target);
+
+      const trimmedTarget = target.trim();
+      const trimmedCode = pairingCode.trim();
+
+      if (!trimmedTarget.includes(':')) {
+        throw new Error('请填写配对地址 IP:端口（无线调试「使用配对码配对设备」里显示的地址和端口）');
+      }
+
+      // 先检查是否已配对过：adb 无法直接查询"配对记录"，但配对成功后设备会自动连接并留在设备列表里。
+      // 因此设备列表中已存在该 IP 的已连接设备，即视为已配对过，直接返回避免重复配对。
+      const ip = trimmedTarget.split(':')[0];
+      const alreadyConnected = (await this.getDevices()).find(
+        (d) => d.id.startsWith(`${ip}:`) && d.status === 'connected'
+      );
+      if (alreadyConnected) {
+        alreadyConnected.connectionType = 'wifi';
+        return { message: '该设备已配对并连接', device: alreadyConnected, alreadyPaired: true };
+      }
+
+      if (!/^\d{6}$/.test(trimmedCode)) {
+        throw new Error('配对码应为 6 位数字（无线调试弹窗里显示的配对码）');
+      }
+
+      // adb pair 是交互式命令：正常会提示输入配对码，这里通过参数直接传入
+      const { stdout, stderr } = await this.execAdb(['pair', trimmedTarget, trimmedCode], {
+        timeout: 20000,
+      });
+      logger.log('ADBManager: pair result:', stdout, stderr);
+
+      const output = `${stdout}\n${stderr}`;
+      if (!output.includes('Successfully paired')) {
+        // 失败时把 adb 的原始提示带出去，便于排查（配对码错误 / 端口不对 / 配对窗口已关闭）
+        throw new Error(stdout.trim() || stderr.trim() || '配对失败，请确认配对地址、端口和配对码是否正确');
+      }
+
+      // 配对成功后，现代 adb 会通过 mDNS/TLS 自动把设备连上，并以 IP:连接端口 出现在设备列表里。
+      // 这里轮询设备列表，按配对地址的 IP 找到那台自动连上的设备，省去用户再手填连接端口。
+      const device = await this.discoverPairedConnection(ip);
+      if (device) {
+        return { message: '配对并连接成功', device };
+      }
+      return {
+        message: '配对成功，但未能自动连接。请用上方「连接」填写无线调试主界面显示的 IP:连接端口',
+        device: null,
+      };
+    } catch (error) {
+      logger.error('ADBManager: pairDevice failed:', error);
+      throw this.wrapOperationError('WiFi pairing failed', error);
+    }
+  }
+
+  // 配对成功后发现并返回已自动连接的设备：优先轮询设备列表按 IP 匹配，
+  // 兜底用 adb mdns services 找到连接端口后主动 connect（部分 Windows 环境 mDNS 不稳定，仅作兜底）。
+  private async discoverPairedConnection(ip: string): Promise<DeviceInfo | null> {
+    for (let i = 0; i < 10; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      const devices = await this.getDevices();
+      const found = devices.find((d) => d.id.startsWith(`${ip}:`) && d.status === 'connected');
+      if (found) {
+        found.connectionType = 'wifi';
+        return found;
+      }
+
+      const discovered = await this.discoverConnectAddress(ip);
+      if (discovered) {
+        try {
+          return await this.connectWiFi(discovered);
+        } catch (error) {
+          logger.warn('ADBManager: auto-connect after pair failed:', discovered, error);
+        }
+      }
+    }
+    return null;
+  }
+
+  private async discoverConnectAddress(ip: string): Promise<string | null> {
+    try {
+      const { stdout } = await this.execAdb(['mdns', 'services'], { timeout: 5000 });
+      const escapedIp = ip.replace(/\./g, '\\.');
+      const matcher = new RegExp(`(${escapedIp}:\\d+)`);
+      for (const line of stdout.split('\n')) {
+        if (line.includes('_adb-tls-connect._tcp')) {
+          const match = line.match(matcher);
+          if (match) {
+            return match[1];
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn('ADBManager: mdns services discovery failed:', error);
+    }
+    return null;
+  }
+
+  // 列出设备上指定目录的内容（默认从 /sdcard 起步）。基于 toybox `ls -lA` 解析，
+  // 兼容主流 Android ROM。访问受限目录（如 /data/data）时 adb 会返回 Permission denied，
+  // 这里转成友好的中文错误抛出，让前端如实提示而不是假装能进。
+  async listDeviceFiles(deviceId: string, dirPath: string): Promise<DeviceFileList> {
+    const normalizedDir = this.normalizeRemoteDir(dirPath);
+    // 末尾补斜杠：/sdcard 本身是指向 /storage/self/primary 的符号链接，
+    // 不带斜杠时 ls -lA 只会返回链接自身一行；带斜杠才会跟随进目录列出内容。
+    const lsTarget = normalizedDir === '/' ? '/' : `${normalizedDir}/`;
+    try {
+      const { stdout, stderr } = await this.execAdbWithExitCode(
+        ['-s', deviceId, 'shell', 'ls', '-lA', this.quoteRemotePath(lsTarget)],
+        { timeout: 15000, maxBuffer: 1024 * 1024 * 16 }
+      ).then((r) => ({ stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }));
+
+      const lowerErr = (stderr || '').toLowerCase();
+      if (lowerErr.includes('permission denied')) {
+        throw new Error('该目录需要更高权限（可能需要 root），无法访问');
+      }
+      if (lowerErr.includes('no such file') || lowerErr.includes('not a directory')) {
+        throw new Error('目录不存在或不是文件夹');
+      }
+
+      const entries = this.parseLsOutput(stdout, normalizedDir);
+      return { path: normalizedDir, entries };
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes('权限') || error.message.includes('目录'))) {
+        throw error;
+      }
+      logger.error('ADBManager: listDeviceFiles failed:', error);
+      throw this.wrapOperationError('列出设备文件失败', error);
+    }
+  }
+
+  // 把电脑本地文件上传到设备目录（adb push）。adb push 在 pipe 模式下不输出中间进度，
+  // 因此用 spawn 启动 push 的同时，定时轮询设备端目标文件已写入大小，按本地总大小算真实百分比。
+  // onProgress 回调把 0-100 的百分比上报给上层（再经 IPC 推给渲染层进度条）。
+  async pushDeviceFile(
+    deviceId: string,
+    localPath: string,
+    remoteDir: string,
+    fileName: string,
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    const adbBinary = await this.resolveAdbBinary();
+    const normalizedDir = this.normalizeRemoteDir(remoteDir);
+    const remotePath = normalizedDir === '/' ? `/${fileName}` : `${normalizedDir}/${fileName}`;
+
+    let totalBytes = 0;
+    try {
+      totalBytes = nodeFsStatSync(localPath).size;
+    } catch {
+      totalBytes = 0;
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const child = spawn(adbBinary.path, ['-s', deviceId, 'push', localPath, remotePath], {
+        windowsHide: true,
+      });
+
+      let stderrText = '';
+      let stdoutText = '';
+      let settled = false;
+
+      // 轮询设备端已写入大小，换算百分比；本地很快就传完时这条最多触发一两次
+      let pollTimer: NodeJS.Timeout | null = null;
+      if (totalBytes > 0 && onProgress) {
+        const poll = async () => {
+          try {
+            const { stdout } = await this.execAdb(
+              ['-s', deviceId, 'shell', 'stat', '-c', '%s', this.quoteRemotePath(remotePath)],
+              { timeout: 5000, maxBuffer: 1024 * 64 }
+            );
+            const written = parseInt(stdout.trim(), 10);
+            if (Number.isFinite(written) && written > 0) {
+              const percent = Math.min(99, Math.round((written / totalBytes) * 100));
+              onProgress(percent);
+            }
+          } catch {
+            // 文件还没创建或 stat 失败，忽略本次轮询
+          }
+          if (!settled) {
+            pollTimer = setTimeout(poll, 500);
+          }
+        };
+        pollTimer = setTimeout(poll, 500);
+      }
+
+      const finish = (err?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (pollTimer) clearTimeout(pollTimer);
+        if (err) {
+          reject(this.wrapOperationError('上传文件失败', err));
+        } else {
+          onProgress?.(100);
+          resolve();
+        }
+      };
+
+      child.stdout.on('data', (d) => { stdoutText += d.toString(); });
+      child.stderr.on('data', (d) => { stderrText += d.toString(); });
+      child.on('error', (err) => finish(err));
+      child.on('close', (code) => {
+        const combined = `${stdoutText}\n${stderrText}`.toLowerCase();
+        if (code === 0 && combined.includes('file pushed') && !combined.includes('error:')) {
+          finish();
+        } else if (combined.includes('permission denied') || combined.includes('read-only')) {
+          finish(new Error('目标目录没有写入权限'));
+        } else if (code === 0 && !combined.includes('error:')) {
+          // 某些 adb 版本成功也可能不打 "file pushed"，按退出码兜底
+          finish();
+        } else {
+          finish(new Error(stderrText.trim() || stdoutText.trim() || '上传失败'));
+        }
+      });
+    });
+  }
+
+  // 把设备上的文件/目录拉取到电脑本地路径（adb pull）。localPath 由主进程的保存对话框确定。
+  async pullDeviceFile(deviceId: string, remotePath: string, localPath: string): Promise<void> {
+    // adb 已知缺陷：pull 无法把文件直接写到盘符根目录（如 F:\file.mp4），但写到任意子目录正常。
+    // 当目标在盘根时，先 pull 到系统临时目录，再移动到用户选定位置，规避该缺陷。
+    const parsed = path.parse(localPath);
+    const isDriveRoot = parsed.dir === parsed.root && parsed.root !== '';
+
+    try {
+      if (isDriveRoot) {
+        const tempDir = nodeFsMkdtempSync(path.join(nodeOsTmpdir(), 'adm-pull-'));
+        const tempPath = path.join(tempDir, parsed.base);
+        try {
+          await this.runAdbPull(deviceId, remotePath, tempPath);
+          // 跨卷移动用复制+删除兜底（rename 跨盘会失败）
+          try {
+            nodeFsRenameSync(tempPath, localPath);
+          } catch {
+            nodeFsCopyFileSync(tempPath, localPath);
+            nodeFsRmSync(tempPath, { force: true });
+          }
+        } finally {
+          nodeFsRmSync(tempDir, { recursive: true, force: true });
+        }
+      } else {
+        await this.runAdbPull(deviceId, remotePath, localPath);
+      }
+    } catch (error) {
+      logger.error('ADBManager: pullDeviceFile failed:', error);
+      throw this.wrapOperationError('下载设备文件失败', error);
+    }
+  }
+
+  private async runAdbPull(deviceId: string, remotePath: string, localPath: string): Promise<void> {
+    const result = await this.execAdbWithExitCode(
+      ['-s', deviceId, 'pull', remotePath, localPath],
+      { timeout: 300000, maxBuffer: 1024 * 1024 * 16 }
+    );
+    const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
+    if (result.exitCode !== 0 || output.includes('permission denied') || output.includes('error:')) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || '拉取文件失败');
+    }
+  }
+
+  // 删除设备上的文件或目录（adb shell rm）。目录用 -rf 递归删除，文件用 -f。
+  // 删除不可逆，二次确认由渲染层负责；这里只做实际删除并把权限/失败提示带回。
+  async deleteDeviceFile(deviceId: string, remotePath: string, isDir: boolean): Promise<void> {
+    try {
+      const rmArgs = isDir ? ['rm', '-rf'] : ['rm', '-f'];
+      const result = await this.execAdbWithExitCode(
+        ['-s', deviceId, 'shell', ...rmArgs, this.quoteRemotePath(remotePath)],
+        { timeout: 15000, maxBuffer: 1024 * 64 }
+      );
+      const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
+      if (output.includes('permission denied') || output.includes('read-only')) {
+        throw new Error('没有删除权限（可能需要 root）');
+      }
+      if (result.exitCode !== 0 || output.includes('no such file')) {
+        throw new Error(result.stderr.trim() || result.stdout.trim() || '删除失败');
+      }
+    } catch (error) {
+      logger.error('ADBManager: deleteDeviceFile failed:', error);
+      throw this.wrapOperationError('删除设备文件失败', error);
+    }
+  }
+
+  private normalizeRemoteDir(dirPath: string): string {
+    const trimmed = (dirPath || '').trim() || '/sdcard';
+    // 统一为以 / 开头、不以 / 结尾（根目录除外），并去掉重复斜杠
+    const collapsed = ('/' + trimmed).replace(/\/+/g, '/');
+    if (collapsed.length > 1 && collapsed.endsWith('/')) {
+      return collapsed.slice(0, -1);
+    }
+    return collapsed;
+  }
+
+  private quoteRemotePath(remotePath: string): string {
+    // 用单引号包裹，处理带空格的路径；转义路径内的单引号
+    return `'${remotePath.replace(/'/g, `'\\''`)}'`;
+  }
+
+  private parseLsOutput(stdout: string, baseDir: string): DeviceFileEntry[] {
+    const entries: DeviceFileEntry[] = [];
+    // toybox `ls -lA` 行格式：mode links owner group size YYYY-MM-DD HH:MM name
+    // 符号链接行尾形如 "name -> target"
+    const lineRe = /^([dlbcps-])[rwxsStT.+@-]{9,}\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s+(.+)$/;
+    for (const rawLine of stdout.split('\n')) {
+      const line = rawLine.replace(/\r$/, '');
+      if (!line.trim() || line.startsWith('total ')) continue;
+      const match = line.match(lineRe);
+      if (!match) continue;
+
+      const typeChar = match[1];
+      const size = parseInt(match[2], 10) || 0;
+      const mtime = match[3];
+      let name = match[4];
+
+      const isSymlink = typeChar === 'l';
+      if (isSymlink) {
+        const arrowIdx = name.indexOf(' -> ');
+        if (arrowIdx >= 0) {
+          name = name.slice(0, arrowIdx);
+        }
+      }
+      if (name === '.' || name === '..') continue;
+
+      const isDir = typeChar === 'd';
+      const childPath = baseDir === '/' ? `/${name}` : `${baseDir}/${name}`;
+      entries.push({ name, path: childPath, isDir, isSymlink, size, mtime });
+    }
+
+    // 目录在前，再按名称排序，符合文件管理器习惯
+    entries.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      return a.name.localeCompare(b.name, 'zh');
+    });
+    return entries;
   }
 
   async disconnect(deviceId: string): Promise<void> {
@@ -672,17 +1025,19 @@ export class ADBManager extends EventEmitter {
     });
   }
 
-  async installApk(deviceId: string, apkPath: string): Promise<string> {
+  async installApk(deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean }): Promise<string> {
     const cleanedApkPath = apkPath.trim();
     if (!cleanedApkPath.toLowerCase().endsWith('.apk')) {
       throw new Error('Only APK files can be installed.');
     }
 
+    // -r 重装保留数据；-d 允许版本降级覆盖（按 options.allowDowngrade 开启）。
+    const installFlags = options?.allowDowngrade ? ['-r', '-d'] : ['-r'];
     const installOptions: ExecFileOptions = {
       timeout: 10 * 60 * 1000,
       maxBuffer: 1024 * 1024 * 8,
     };
-    const baseArgs = ['-s', deviceId, 'install', '-r', cleanedApkPath];
+    const baseArgs = ['-s', deviceId, 'install', ...installFlags, cleanedApkPath];
     const primaryResult = await this.execAdbWithExitCode(baseArgs, installOptions);
     const primaryOutput = [primaryResult.stdout, primaryResult.stderr].filter(Boolean).join('\n').trim();
     if (/success/i.test(primaryOutput)) {
@@ -690,7 +1045,7 @@ export class ADBManager extends EventEmitter {
     }
 
     if (this.shouldRetryInstallWithoutStreaming(primaryResult)) {
-      const fallbackArgs = ['-s', deviceId, 'install', '--no-streaming', '-r', cleanedApkPath];
+      const fallbackArgs = ['-s', deviceId, 'install', '--no-streaming', ...installFlags, cleanedApkPath];
       const fallbackResult = await this.execAdbWithExitCode(fallbackArgs, installOptions);
       const fallbackOutput = [fallbackResult.stdout, fallbackResult.stderr].filter(Boolean).join('\n').trim();
       if (/success/i.test(fallbackOutput)) {
@@ -713,10 +1068,130 @@ export class ADBManager extends EventEmitter {
     });
   }
 
+  async listInstalledPackages(deviceId: string): Promise<string[]> {
+    // -3 仅列出第三方（用户安装）应用，排除系统应用。
+    const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'pm', 'list', 'packages', '-3'], {
+      timeout: 30 * 1000,
+    });
+    const packages = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('package:'))
+      .map((line) => line.slice('package:'.length).trim())
+      .filter(Boolean);
+    return Array.from(new Set(packages)).sort((a, b) => a.localeCompare(b));
+  }
+
+  async uninstallApp(deviceId: string, packageName: string): Promise<string> {
+    const cleanedPackage = packageName.trim();
+    if (!cleanedPackage || !/^[A-Za-z][\w.]*$/.test(cleanedPackage)) {
+      throw new AdbCommandError({
+        code: 'ADB_COMMAND_FAILED',
+        message: `卸载失败：非法包名 ${packageName}`,
+        hint: '请从进程/应用列表中选择一个有效的应用包名。',
+        details: `Invalid package name: ${packageName}`,
+      });
+    }
+
+    const result = await this.execAdbWithExitCode(['-s', deviceId, 'uninstall', cleanedPackage], {
+      timeout: 60 * 1000,
+    });
+    const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+    if (/success/i.test(output)) {
+      return output;
+    }
+
+    throw new AdbCommandError({
+      code: 'ADB_COMMAND_FAILED',
+      message: `卸载应用失败：${cleanedPackage}`,
+      hint: '请确认该应用存在且非受保护的系统应用，部分预装应用无法卸载。',
+      details: output || 'adb uninstall did not report success.',
+    });
+  }
+
+  async launchApp(deviceId: string, packageName: string): Promise<string> {
+    const cleanedPackage = this.assertValidPackageName(packageName);
+    const result = await this.execAdbWithExitCode(
+      ['-s', deviceId, 'shell', 'monkey', '-p', cleanedPackage, '-c', 'android.intent.category.LAUNCHER', '1'],
+      { timeout: 15 * 1000 }
+    );
+    const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+    if (/Events injected:\s*1/i.test(output)) {
+      return output;
+    }
+
+    throw new AdbCommandError({
+      code: 'ADB_COMMAND_FAILED',
+      message: `启动应用失败：${cleanedPackage}`,
+      hint: '该应用可能没有可启动的入口 Activity（如纯后台/服务类应用），或包名不存在。',
+      details: output || 'monkey did not report an injected launcher event.',
+    });
+  }
+
+  async forceStopApp(deviceId: string, packageName: string): Promise<void> {
+    const cleanedPackage = this.assertValidPackageName(packageName);
+    await this.execAdb(['-s', deviceId, 'shell', 'am', 'force-stop', cleanedPackage], {
+      timeout: 10 * 1000,
+    });
+  }
+
+  private assertValidPackageName(packageName: string): string {
+    const cleaned = packageName.trim();
+    if (!cleaned || !/^[A-Za-z][\w.]*$/.test(cleaned)) {
+      throw new AdbCommandError({
+        code: 'ADB_COMMAND_FAILED',
+        message: `非法包名：${packageName}`,
+        hint: '请从已安装应用列表中选择一个有效的应用包名。',
+        details: `Invalid package name: ${packageName}`,
+      });
+    }
+    return cleaned;
+  }
+
   async sleepDevice(deviceId: string): Promise<void> {
     await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_SLEEP'], {
       timeout: 8000,
     });
+  }
+
+  async wakeDevice(deviceId: string): Promise<void> {
+    await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'], {
+      timeout: 8000,
+    });
+  }
+
+  async unlockDevice(deviceId: string): Promise<void> {
+    // 先点亮屏幕
+    await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'], {
+      timeout: 8000,
+    });
+
+    // 读取屏幕分辨率以计算上滑坐标，读取失败时退回常见的 1080x1920
+    let width = 1080;
+    let height = 1920;
+    try {
+      const { stdout: sizeOutput } = await this.execAdb(['-s', deviceId, 'shell', 'wm', 'size'], {
+        timeout: 8000,
+      });
+      const match =
+        sizeOutput.match(/Override size:\s*(\d+)x(\d+)/) || sizeOutput.match(/Physical size:\s*(\d+)x(\d+)/);
+      if (match) {
+        width = parseInt(match[1], 10);
+        height = parseInt(match[2], 10);
+      }
+    } catch {
+      // 分辨率读取失败时使用默认值继续上滑
+    }
+
+    // 从屏幕下方向上滑动划开锁屏：无锁屏/滑动锁直接进入桌面；
+    // 有 PIN/密码/手势的设备会停在输入界面，需在设备上手动输入
+    const x = Math.round(width / 2);
+    const startY = Math.round(height * 0.8);
+    const endY = Math.round(height * 0.2);
+    await this.execAdb(
+      ['-s', deviceId, 'shell', 'input', 'swipe', String(x), String(startY), String(x), String(endY), '300'],
+      { timeout: 8000 }
+    );
   }
 
   async rebootDevice(deviceId: string): Promise<void> {
@@ -737,6 +1212,19 @@ export class ADBManager extends EventEmitter {
     return this.runtimeInspector.capturePerformanceSnapshot(deviceId, {
       preferPico: this.isLikelyPicoDevice(deviceId),
       currentMetrics,
+    });
+  }
+
+  async startPerformanceRecording(
+    deviceId: string,
+    baseDir: string,
+    options: PerformanceRecordingOptions
+  ): Promise<PerformanceRecording> {
+    return this.performanceRecordingManager.startRecording({
+      deviceId,
+      baseDir,
+      options,
+      isPico: this.isLikelyPicoDevice(deviceId),
     });
   }
 
