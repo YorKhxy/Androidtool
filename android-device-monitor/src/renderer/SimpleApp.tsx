@@ -746,6 +746,13 @@ function SimpleApp() {
     return set;
   }, [devices]);
 
+  // 历史列表只展示当前未连接的设备：已连接的设备上方实时设备卡已呈现，无需在历史里重复。
+  // 连接中（尚未进入 devices 已连接态）仍保留在列表，展示「连接中…」；连上后从历史消失，断开/重启后回来。
+  const offlineHistoryDevices = useMemo(
+    () => historyDevices.filter(item => !onlineHistorySerials.has(item.serialNo)),
+    [historyDevices, onlineHistorySerials]
+  );
+
   const pairWiFiDevice = async () => {
     if (!pairAddress.trim()) {
       setError('\u8bf7\u8f93\u5165\u914d\u5bf9\u5730\u5740 IP:\u7aef\u53e3');
@@ -2099,14 +2106,15 @@ function SimpleApp() {
 
           <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550' }}>
             <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u5386\u53f2\u8bbe\u5907'}</h2>
-            {historyDevices.length === 0 ? (
+            {offlineHistoryDevices.length === 0 ? (
               <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
-                {'\u6682\u65e0\u5386\u53f2 WiFi \u8bbe\u5907\uff0c\u6210\u529f\u8fde\u63a5\u4e00\u6b21\u540e\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\uff0c\u4e0b\u6b21\u53ef\u4e00\u952e\u5feb\u901f\u91cd\u8fde\u3002'}
+                {historyDevices.length === 0
+                  ? '\u6682\u65e0\u5386\u53f2 WiFi \u8bbe\u5907\uff0c\u6210\u529f\u8fde\u63a5\u4e00\u6b21\u540e\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\uff0c\u4e0b\u6b21\u53ef\u4e00\u952e\u5feb\u901f\u91cd\u8fde\u3002'
+                  : '\u5386\u53f2 WiFi \u8bbe\u5907\u5df2\u5168\u90e8\u8fde\u63a5\uff0c\u65ad\u5f00\u6216\u91cd\u542f\u540e\u4f1a\u56de\u5230\u8fd9\u91cc\u3002'}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {historyDevices.map(item => {
-                  const online = onlineHistorySerials.has(item.serialNo);
+                {offlineHistoryDevices.map(item => {
                   const connecting = quickConnectingSerial === item.serialNo;
                   const editing = inlineEditSerial === item.serialNo;
                   const cardError = historyErrorBySerial[item.serialNo];
@@ -2117,7 +2125,7 @@ function SimpleApp() {
                     <div key={item.serialNo} style={{ padding: '10px', backgroundColor: '#2a2a40', borderRadius: '8px', border: '1px solid #353550' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                         <span style={{ color: '#fff', fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayName}>{displayName}</span>
-                        <span style={{ flexShrink: 0, fontSize: '11px', color: online ? '#22c55e' : '#9ca3af', backgroundColor: online ? '#22c55e22' : '#9ca3af22', padding: '2px 8px', borderRadius: '10px' }}>{online ? '\u5728\u7ebf' : '\u79bb\u7ebf'}</span>
+                        <span style={{ flexShrink: 0, fontSize: '11px', color: '#9ca3af', backgroundColor: '#9ca3af22', padding: '2px 8px', borderRadius: '10px' }}>{'\u672a\u8fde\u63a5'}</span>
                       </div>
                       <div style={{ marginTop: '6px', fontSize: '11px', color: '#9ca3af', lineHeight: 1.7 }}>
                         <div style={{ wordBreak: 'break-all' }}>{'SN\uff1a'}{item.serialNo}</div>
@@ -2148,10 +2156,10 @@ function SimpleApp() {
                         {!editing && (
                           <button
                             onClick={() => handleQuickConnectHistory(item)}
-                            disabled={connecting || online}
-                            title={online ? '\u8be5\u8bbe\u5907\u5df2\u8fde\u63a5' : '\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5'}
-                            style={{ padding: '4px 10px', backgroundColor: '#2f6fb0', border: 'none', borderRadius: '4px', color: '#fff', cursor: (connecting || online) ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: (connecting || online) ? 0.6 : 1 }}
-                          >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : (online ? '\u5df2\u8fde\u63a5' : '\u5feb\u901f\u8fde\u63a5')}</button>
+                            disabled={connecting}
+                            title="\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5"
+                            style={{ padding: '4px 10px', backgroundColor: '#2f6fb0', border: 'none', borderRadius: '4px', color: '#fff', cursor: connecting ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: connecting ? 0.6 : 1 }}
+                          >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : '\u5feb\u901f\u8fde\u63a5'}</button>
                         )}
                         {editing && (
                           <button
