@@ -19,6 +19,7 @@ import {
   removeSearchHistory,
   saveSearchHistory,
 } from './lib/searchHistoryStore';
+import { isTransferActive } from './lib/fileTransferManager';
 import {
   BATCH_UPDATE_DELAY,
   BATCH_UPDATE_SIZE,
@@ -716,6 +717,15 @@ function SimpleApp() {
       return next;
     });
   }, []);
+
+  // 关闭文件管理：若该设备有文件传输进行中，先确认（关闭后传输仍在后台继续，重开可看回进度）。
+  const closeFileBrowser = useCallback(() => {
+    if (fileBrowserDevice && isTransferActive(fileBrowserDevice.id)) {
+      const ok = window.confirm('正在传输文件，确定关闭文件管理吗？\n关闭后传输会在后台继续，重新打开可看到进度。');
+      if (!ok) return;
+    }
+    setFileBrowserDevice(null);
+  }, [fileBrowserDevice]);
 
   // 从历史移除一条关键字。
   const removeOneSearchHistory = useCallback((keyword: string) => {
@@ -2561,7 +2571,7 @@ function SimpleApp() {
 
       {fileBrowserDevice && (
         <div
-          onClick={() => setFileBrowserDevice(null)}
+          onClick={closeFileBrowser}
           style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1500 }}
         >
           <div
@@ -2573,7 +2583,7 @@ function SimpleApp() {
                 {'📁 设备文件 · '}{customDeviceNames[fileBrowserDevice.id] || fileBrowserDevice.name || fileBrowserDevice.id}
               </span>
               <button
-                onClick={() => setFileBrowserDevice(null)}
+                onClick={closeFileBrowser}
                 style={{ width: '28px', height: '28px', background: '#1f2937', border: 'none', borderRadius: '6px', color: '#cbd5e1', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}
               >×</button>
             </div>

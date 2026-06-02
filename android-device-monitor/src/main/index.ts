@@ -383,6 +383,17 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.OPEN_PATH, async (_event, targetPath: string) => {
+    try {
+      // 直接打开该目录/文件（下载完成后打开存放目录）。openPath 失败时返回非空错误串。
+      const error = await shell.openPath(targetPath);
+      if (error) return { success: false, error };
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '打开目录失败');
+    }
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.PULL_DEVICE_FILE,
     async (_event, deviceId: string, remotePath: string, name: string, isDir: boolean) => {

@@ -375,6 +375,16 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.OPEN_PATH, async (_event, targetPath: string) => {
+    try {
+      const error = await shell.openPath(targetPath);
+      if (error) return { success: false, error };
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '打开目录失败');
+    }
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.PULL_DEVICE_FILE,
     async (_event, deviceId: string, remotePath: string, name: string, isDir: boolean) => {

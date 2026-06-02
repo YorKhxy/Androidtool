@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { DeviceInfo, DeviceFileEntry, PushProgress, PullProgress } from '@/shared/types';
+import { DeviceInfo, DeviceFileEntry } from '@/shared/types';
 import { hasElectronAPI } from '@/renderer/lib/electronApi';
+import { getTransferState, subscribeTransfer, startUpload, startPullFiles } from '@/renderer/lib/fileTransferManager';
 
 interface FilesPanelProps {
   selectedDevice: DeviceInfo | null;
@@ -48,7 +49,6 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
   const [currentPath, setCurrentPath] = useState<string>(ROOT_PATH);
   const [entries, setEntries] = useState<DeviceFileEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
   const [confirmDeletePath, setConfirmDeletePath] = useState<string | null>(null);
   const [deletingPath, setDeletingPath] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>('');
@@ -58,22 +58,25 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
   const [lastDownloadPath, setLastDownloadPath] = useState<string | null>(null);
   // 当前目录内的文件名搜索关键词（仅过滤当前已加载的列表，不重新请求设备）
   const [search, setSearch] = useState('');
-  // 多选下载：选中的文件路径集合 + 批量下载进度
+  // 多选下载：选中的文件路径集合
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
-  const [pull, setPull] = useState<PullProgress | null>(null);
-  const activePullIdRef = useRef<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [upload, setUpload] = useState<PushProgress | null>(null);
   const uploadDirRef = useRef<string>(ROOT_PATH);
-  // 当前进行中的 uploadId。push 完成（invoke 返回）后置空，用于忽略晚于 invoke 返回到达的迟到进度事件，
-  // 否则最后一个 done 事件会在 setUpload(null) 之后把进度条又设回 100%，导致按钮一直 disabled。
-  const activeUploadIdRef = useRef<string | null>(null);
+  // 上传/批量下载进度来自传输管理器（单例，不随本组件卸载消失）。订阅它，关界面再打开仍能显示回正在进行的进度。
+  const [transfer, setTransfer] = useState(getTransferState());
   // 新建文件夹：creatingFolder 控制输入行显隐，newFolderName 为输入值，creatingFolderBusy 防重复提交
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolderBusy, setCreatingFolderBusy] = useState(false);
 
   const deviceId = selectedDevice?.id ?? null;
+  // 仅显示属于当前设备的传输进度（管理器是全局单例，可能记着别的设备的传输）
+  const upload = transfer.deviceId === deviceId ? transfer.upload : null;
+  const uploadDir = transfer.deviceId === deviceId ? transfer.uploadDir : null;
+  const pull = transfer.deviceId === deviceId ? transfer.pull : null;
+  const pullDir = transfer.deviceId === deviceId ? transfer.pullDir : null;
+  // 传输（上传 / 下载）进行中：禁止删除与再次下载，避免删掉/重复拉取正在传输的文件
+  const transferBusy = Boolean(upload) || Boolean(pull);
 
   const loadDir = useCallback(
     async (path: string) => {
@@ -122,30 +125,43 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
     }
   };
 
-  const handleDownload = async (entry: DeviceFileEntry) => {
-    if (!deviceId || !hasElectronAPI()) return;
-    setDownloadingPath(entry.path);
+  // 下载（单个或多个）走传输管理器：绿色进度条、点击进度条跳转、关界面不中断、重开续显进度。
+  // 返回是否成功，供批量下载据此清空选择。
+  const runDownload = async (items: { path: string; name: string }[]): Promise<boolean> => {
+    if (!deviceId || !hasElectronAPI() || items.length === 0) return false;
     setNotice('');
     setLastDownloadPath(null);
     try {
-      const result = await window.electronAPI!.pullDeviceFile(deviceId, entry.path, entry.name, entry.isDir);
+      const result = await startPullFiles(deviceId, items, currentPath);
       if (result.success && result.data) {
-        setNotice(`已下载到：${result.data}`);
+        const { savedDir, succeeded, failed } = result.data;
+        setNotice(`已下载 ${succeeded} 个到 ${savedDir}${failed > 0 ? `，${failed} 个失败` : ''}`);
         setNoticeKind('success');
-        setLastDownloadPath(result.data);
-      } else if (result.error && result.error !== '取消下载') {
+        setLastDownloadPath(savedDir);
+        return true;
+      }
+      if (result.error && result.error !== '取消下载') {
         onError(result.error);
       }
+      return false;
     } catch (err) {
       onError('下载失败：' + (err as Error).message);
-    } finally {
-      setDownloadingPath(null);
+      return false;
     }
+  };
+
+  const downloadOne = (entry: DeviceFileEntry) => {
+    runDownload([{ path: entry.path, name: entry.name }]);
   };
 
   // 删除采用行内二次确认：第一次点「删除」进入确认态，再点「确认删除」才真正删除。
   const doDelete = async (entry: DeviceFileEntry) => {
     if (!deviceId || !hasElectronAPI()) return;
+    if (transferBusy) {
+      onError('文件传输进行中，暂时不能删除');
+      setConfirmDeletePath(null);
+      return;
+    }
     setConfirmDeletePath(null);
     setDeletingPath(entry.path);
     setNotice('');
@@ -174,7 +190,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
     });
   };
 
-  // 批量下载选中的文件到 PC 同一个文件夹
+  // 批量下载选中的文件到 PC 同一个文件夹（与单文件下载共用 runDownload）
   const downloadSelected = async () => {
     if (!deviceId || !hasElectronAPI() || selectedPaths.size === 0) return;
     // 只下载文件，忽略目录（目录批量下载交互复杂，单独「下载」按钮已支持单个目录）
@@ -185,29 +201,8 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       onError('选中项中没有可下载的文件（目录请用行内「下载」按钮）');
       return;
     }
-    const pullId = `pull-${Date.now()}-${items.length}`;
-    activePullIdRef.current = pullId;
-    setNotice('');
-    setLastDownloadPath(null);
-    setPull({ pullId, fileName: '', index: 0, total: items.length, status: 'downloading' });
-    try {
-      const result = await window.electronAPI!.pullDeviceFiles(deviceId, items, pullId);
-      activePullIdRef.current = null;
-      setPull(null);
-      if (result.success && result.data) {
-        const { savedDir, succeeded, failed } = result.data;
-        setNotice(`已下载 ${succeeded} 个文件到 ${savedDir}${failed > 0 ? `，${failed} 个失败` : ''}`);
-        setNoticeKind('success');
-        setLastDownloadPath(savedDir);
-        setSelectedPaths(new Set());
-      } else if (result.error && result.error !== '取消下载') {
-        onError(result.error);
-      }
-    } catch (err) {
-      activePullIdRef.current = null;
-      setPull(null);
-      onError('批量下载失败：' + (err as Error).message);
-    }
+    const ok = await runDownload(items);
+    if (ok) setSelectedPaths(new Set());
   };
 
   // 始终用最新目录作为上传目标（拖拽/上传都进当前目录）
@@ -215,39 +210,15 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
     uploadDirRef.current = currentPath;
   }, [currentPath]);
 
-  // 订阅主进程推送的批量下载进度
-  useEffect(() => {
-    if (!hasElectronAPI() || !window.electronAPI?.onPullProgress) return;
-    const unsubscribe = window.electronAPI.onPullProgress((progress) => {
-      if (progress.pullId !== activePullIdRef.current) return;
-      setPull(progress);
-    });
-    return unsubscribe;
-  }, []);
-
-  // 订阅主进程推送的上传进度
-  useEffect(() => {
-    if (!hasElectronAPI() || !window.electronAPI?.onPushProgress) return;
-    const unsubscribe = window.electronAPI.onPushProgress((progress) => {
-      // 只处理当前活跃上传的事件，忽略 invoke 已返回后迟到的事件
-      if (progress.uploadId !== activeUploadIdRef.current) return;
-      setUpload(progress);
-    });
-    return unsubscribe;
-  }, []);
+  // 订阅传输管理器：进度变化时刷新本组件展示（管理器常驻，关界面再打开仍能拿到正在进行的进度）
+  useEffect(() => subscribeTransfer(() => setTransfer(getTransferState())), []);
 
   const uploadFiles = async (localPaths: string[]) => {
     if (!deviceId || !hasElectronAPI() || localPaths.length === 0) return;
     const targetDir = uploadDirRef.current;
-    const uploadId = `up-${Date.now()}-${localPaths.length}`;
-    activeUploadIdRef.current = uploadId;
     setNotice('');
-    setUpload({ uploadId, fileName: '', index: 0, total: localPaths.length, percent: 0, status: 'uploading' });
     try {
-      const result = await window.electronAPI!.pushDeviceFile(deviceId, targetDir, localPaths, uploadId);
-      // 先停掉对该 uploadId 的事件响应，再清进度，避免迟到事件覆盖
-      activeUploadIdRef.current = null;
-      setUpload(null);
+      const result = await startUpload(deviceId, targetDir, localPaths);
       if (result.success) {
         setNotice(`已上传 ${result.data} 个文件到 ${targetDir}`);
         setNoticeKind('success');
@@ -256,8 +227,6 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         onError(result.error);
       }
     } catch (err) {
-      activeUploadIdRef.current = null;
-      setUpload(null);
       onError('上传失败：' + (err as Error).message);
     }
   };
@@ -381,6 +350,23 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         >
           ↑ 上一级
         </button>
+        <button
+          onClick={() => loadDir(currentPath)}
+          disabled={loading}
+          title="重新加载当前目录"
+          style={{
+            padding: '4px 10px',
+            backgroundColor: '#353550',
+            border: 'none',
+            borderRadius: '6px',
+            color: '#cbd5e1',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            fontSize: '12px',
+            opacity: loading ? 0.6 : 1,
+          }}
+        >
+          {loading ? '刷新中…' : '🔄 刷新'}
+        </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexWrap: 'wrap', fontSize: '13px' }}>
           {crumbs.map((crumb, idx) => (
             <React.Fragment key={crumb.path}>
@@ -437,7 +423,11 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
 
       {/* 上传进度条 */}
       {upload && (
-        <div style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '8px' }}>
+        <div
+          onClick={() => { if (uploadDir) loadDir(uploadDir); }}
+          title={uploadDir ? `点击前往：${uploadDir}` : undefined}
+          style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '8px', cursor: uploadDir ? 'pointer' : 'default' }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
               {upload.status === 'error' ? '上传失败：' : '上传中：'}{upload.fileName || '准备中…'}
@@ -445,6 +435,11 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
             </span>
             <span>{upload.percent}%</span>
           </div>
+          {uploadDir && (
+            <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={uploadDir}>
+              上传到：{uploadDir}　<span style={{ color: '#60a5fa' }}>（点击前往）</span>
+            </div>
+          )}
           <div style={{ height: '6px', backgroundColor: '#334155', borderRadius: '3px', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${upload.percent}%`, backgroundColor: upload.status === 'error' ? '#ef4444' : '#4a90d9', transition: 'width 240ms ease' }} />
           </div>
@@ -458,11 +453,16 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
             <button
               onClick={async () => {
                 if (!hasElectronAPI()) return;
-                const result = await window.electronAPI!.showItemInFolder(lastDownloadPath);
+                // 直接打开下载保存的目录（lastDownloadPath 为保存文件夹）；
+                // 若 preload 较旧没有 openPath，则回退到 showItemInFolder，避免报错。
+                const api = window.electronAPI!;
+                const result = api.openPath
+                  ? await api.openPath(lastDownloadPath)
+                  : await api.showItemInFolder(lastDownloadPath);
                 if (!result.success && result.error) onError(result.error);
               }}
               style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '4px 12px', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
-            >📂 打开所在文件夹</button>
+            >📂 打开下载目录</button>
           )}
         </div>
       )}
@@ -503,17 +503,26 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         </div>
       )}
 
-      {/* 批量下载进度条 */}
+      {/* 下载进度条（单文件 / 批量共用）。绿色，区别于上传的蓝色；点击跳到正在下载文件的设备目录 */}
       {pull && (
-        <div style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
+        <div
+          onClick={() => { if (pullDir) loadDir(pullDir); }}
+          title={pullDir ? `点击前往：${pullDir}` : undefined}
+          style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#10241c', border: '1px solid #14532d', borderRadius: '8px', cursor: pullDir ? 'pointer' : 'default' }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#bbf7d0', marginBottom: '6px' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
               {pull.status === 'error' ? '下载失败：' : '下载中：'}{pull.fileName || '准备中…'} ({pull.index + 1}/{pull.total})
             </span>
             <span>{Math.round(((pull.index + (pull.status === 'done' ? 1 : 0)) / pull.total) * 100)}%</span>
           </div>
-          <div style={{ height: '6px', backgroundColor: '#334155', borderRadius: '3px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${Math.round(((pull.index + (pull.status === 'done' ? 1 : 0)) / pull.total) * 100)}%`, backgroundColor: '#16a34a', transition: 'width 240ms ease' }} />
+          {pullDir && (
+            <div style={{ fontSize: '11px', color: '#86a795', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={pullDir}>
+              来自：{pullDir}　<span style={{ color: '#4ade80' }}>（点击前往）</span>
+            </div>
+          )}
+          <div style={{ height: '6px', backgroundColor: '#0b3a26', borderRadius: '3px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${Math.round(((pull.index + (pull.status === 'done' ? 1 : 0)) / pull.total) * 100)}%`, backgroundColor: '#22c55e', transition: 'width 240ms ease' }} />
           </div>
         </div>
       )}
@@ -548,7 +557,12 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         ) : visibleEntries.length === 0 ? (
           <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>没有匹配「{search.trim()}」的文件</div>
         ) : (
-          visibleEntries.map((entry) => (
+          visibleEntries.map((entry) => {
+            // 当前正在上传的就是这一项（同目录 + 同文件名）时，禁止下载，避免下到半成品
+            const uploadingThisEntry = !!(upload && currentPath === uploadDir && upload.fileName === entry.name);
+            // 当前正在下载的就是这一项时，标记「下载中…」
+            const downloadingThisEntry = !!(pull && currentPath === pullDir && pull.fileName === entry.name);
+            return (
             <div
               key={entry.path}
               style={{
@@ -587,26 +601,28 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
               <span style={{ textAlign: 'right', color: '#94a3b8' }}>{entry.mtime}</span>
               <span style={{ textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                 <button
-                  onClick={() => handleDownload(entry)}
-                  disabled={downloadingPath === entry.path}
+                  onClick={() => downloadOne(entry)}
+                  disabled={transferBusy}
+                  title={uploadingThisEntry ? '该文件正在上传，暂不可下载' : transferBusy ? '传输进行中，暂不可下载' : undefined}
                   style={{
                     padding: '3px 10px',
                     backgroundColor: '#353550',
                     border: 'none',
                     borderRadius: '4px',
                     color: '#86efac',
-                    cursor: downloadingPath === entry.path ? 'not-allowed' : 'pointer',
+                    cursor: transferBusy ? 'not-allowed' : 'pointer',
                     fontSize: '12px',
-                    opacity: downloadingPath === entry.path ? 0.6 : 1,
+                    opacity: transferBusy ? 0.6 : 1,
                   }}
                 >
-                  {downloadingPath === entry.path ? '下载中…' : '下载'}
+                  {downloadingThisEntry ? '下载中…' : uploadingThisEntry ? '上传中…' : '下载'}
                 </button>
                 {confirmDeletePath === entry.path ? (
                   <>
                     <button
                       onClick={() => doDelete(entry)}
-                      style={{ padding: '3px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+                      disabled={transferBusy}
+                      style={{ padding: '3px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: transferBusy ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: transferBusy ? 0.6 : 1 }}
                     >确认删除</button>
                     <button
                       onClick={() => setConfirmDeletePath(null)}
@@ -616,13 +632,15 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
                 ) : (
                   <button
                     onClick={() => setConfirmDeletePath(entry.path)}
-                    disabled={deletingPath === entry.path}
-                    style={{ padding: '3px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: deletingPath === entry.path ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: deletingPath === entry.path ? 0.6 : 1 }}
+                    disabled={deletingPath === entry.path || transferBusy}
+                    title={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
+                    style={{ padding: '3px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: (deletingPath === entry.path || transferBusy) ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: (deletingPath === entry.path || transferBusy) ? 0.6 : 1 }}
                   >{deletingPath === entry.path ? '删除中…' : '删除'}</button>
                 )}
               </span>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 

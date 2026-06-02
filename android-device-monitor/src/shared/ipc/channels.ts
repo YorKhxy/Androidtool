@@ -29,6 +29,7 @@ export const IPC_CHANNELS = {
   DELETE_DEVICE_FILE: 'adb:delete-device-file',
   CREATE_DEVICE_FOLDER: 'adb:create-device-folder',
   SHOW_ITEM_IN_FOLDER: 'app:show-item-in-folder',
+  OPEN_PATH: 'app:open-path',
   PUSH_DEVICE_FILE: 'adb:push-device-file',
   PUSH_DEVICE_FILE_PROGRESS: 'adb:push-device-file-progress',
   SELECT_UPLOAD_FILES: 'adb:select-upload-files',

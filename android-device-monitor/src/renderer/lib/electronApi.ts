@@ -62,6 +62,7 @@ export interface ElectronAPI {
   deleteDeviceFile: (deviceId: string, remotePath: string, isDir: boolean) => Promise<ElectronResult<undefined>>;
   createDeviceFolder: (deviceId: string, dirPath: string, name: string) => Promise<ElectronResult<string>>;
   showItemInFolder: (localPath: string) => Promise<ElectronResult<undefined>>;
+  openPath: (targetPath: string) => Promise<ElectronResult<undefined>>;
   pullDeviceFiles: (deviceId: string, items: { path: string; name: string }[], pullId: string) => Promise<ElectronResult<PullFilesResult>>;
   onPullProgress: (callback: (progress: PullProgress) => void) => () => void;
   selectUploadFiles: () => Promise<ElectronResult<string[]>>;
