@@ -87,7 +87,7 @@ describe('project smoke checks', () => {
     const logStoreSource = fs.readFileSync(path.join(root, 'src/renderer/lib/logStore.ts'), 'utf-8');
 
     expect(typeSource).toContain('deviceId: string');
-    expect(adbSource).toContain('parseLogcatLine(line, deviceId)');
+    expect(adbSource).toContain('parseLongLogHeader(line, deviceId)');
     expect(adbSource).toContain('deviceId,');
     expect(logStoreSource).toContain('type DeviceLogState');
     expect(rendererSource).toContain('new Map<string, DeviceLogState>()');
@@ -100,7 +100,7 @@ describe('project smoke checks', () => {
 
     expect(source).toContain('logcatPidPackageCache');
     expect(source).toContain('refreshLogcatPidPackageCacheIfNeeded(deviceId)');
-    expect(source).toContain('logEntry.packageName = this.getCachedLogcatPackageName(deviceId, logEntry.processId)');
+    expect(source).toContain('entry.packageName = this.getCachedLogcatPackageName(deviceId, entry.processId)');
     expect(source).toContain("this.execAdb(['-s', deviceId, 'shell', 'ps', '-A'])");
     expect(source).toContain('normalizeAndroidPackageName');
   });
@@ -108,8 +108,8 @@ describe('project smoke checks', () => {
   test('logcat package filters capture related logs across processes without failing when app is not running', () => {
     const source = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
 
-    // 用 threadtime 输出，主解析正则才能拿到 PID/TID/TAG（旧的 -v time 与解析器不配套）
-    expect(source).toContain("'logcat', '-v', 'threadtime'");
+    // 用 -v long 输出，靠条目边界（[头]+消息行+空行）精确解析 PID/TID/TAG，并区分同头独立日志
+    expect(source).toContain("'logcat', '-v', 'long'");
     // 按包名过滤改为「关联匹配」：全量抓取 + 关联过滤，而非用 --pid 锁死应用自身进程
     expect(source).toContain('const relatedPackage =');
     expect(source).toContain('haystack.includes(relatedPackage)');
@@ -118,13 +118,13 @@ describe('project smoke checks', () => {
     expect(source).not.toContain('Package process is not running');
   });
 
-  test('logcat coalesces multi-line entries that share the same header', () => {
+  test('logcat assembles -v long entries by boundary (header + message lines + blank separator)', () => {
     const source = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
 
-    // 同头连续行（时间+PID+TID+级别+TAG）合并成一条 LogEntry，message 以换行拼接
-    expect(source).toContain('const key = `${logEntry.timestamp.getTime()}|${logEntry.processId}|${logEntry.threadId}|${logEntry.level}|${logEntry.tag}`');
-    expect(source).toContain('pendingEntry.message += `\\n${logEntry.message}`');
-    // 合并条目在 flush 时统一过滤/限流，并在 close/stop 时清空残留
+    // 按 -v long 头行起新条目、空行结束条目、其余行累加 message：多行堆栈合一条、同头独立日志分开
+    expect(source).toContain('parseLongLogHeader');
+    expect(source).toContain('pendingHasMessage');
+    // 头行起新条目（先 flush 上一条）；空行作为条目分隔符
     expect(source).toContain('flushPendingLog');
     expect(source).toContain('flushTimer');
   });
@@ -141,11 +141,12 @@ describe('project smoke checks', () => {
     }
   });
 
-  test('renderer honors selected low log levels when starting logcat', () => {
+  test('renderer always captures all log levels; level dropdown only filters display', () => {
     const source = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
 
-    expect(source).toContain("const sourceLevel: LogEntry['level'] = filterLevel === 'all' ? 'V' : filterLevel");
-    expect(source).not.toContain("sourceLevel = 'W'");
+    // 抓取恒定 all levels（*:V），不受等级下拉框限制；等级仅作显示筛选（filteredLogs 用 filterLevel）
+    expect(source).toContain("const sourceLevel: LogEntry['level'] = 'V'");
+    expect(source).toContain('const hasLevelFilter = filterLevel !== ');
   });
 
   test('renderer removes USB devices from the monitor view without adb disconnect', () => {
