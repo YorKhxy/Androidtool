@@ -721,7 +721,7 @@ export class ADBManager extends EventEmitter {
         // 预热 PID→包名缓存：应用自身日志的消息体未必含包名，需靠进程归属判定，先同步一次避免开头漏判。
         await this.refreshLogcatPidPackageCache(deviceId).catch(() => undefined);
       }
-      const logcatArgs = ['-s', deviceId, 'logcat', '-v', 'threadtime'];
+      const logcatArgs = ['-s', deviceId, 'logcat', '-v', 'long'];
       const adbBinary = await this.resolveAdbBinary();
       if (sourcePid) {
         logcatArgs.push(`--pid=${sourcePid}`);
@@ -731,19 +731,23 @@ export class ADBManager extends EventEmitter {
       let callbackWindowStart = Date.now();
       let callbackCount = 0;
 
-      // 多行日志合并：异常堆栈等单条日志在 logcat 里是多条「同 时间+PID+TID+Level+TAG」的物理行，
-      // 合并成一条 LogEntry（message 以换行拼接），过滤/搜索按整条匹配，与 Android Studio 一致。
+      // 用 -v long 的条目边界解析：每条日志 = 「[ 头 ]」+ 若干消息行 + 一个空行分隔符。
+      // 据此精确切分——多行堆栈合为一条，同毫秒、同 PID/TID/级别/TAG 的独立日志也能分开，
+      // 避免 threadtime 文本下「按头合并」把同头独立日志误并导致条目变少。
       let pendingEntry: LogEntry | null = null;
-      let pendingKey = '';
+      let pendingHasMessage = false;
       let flushTimer: ReturnType<typeof setTimeout> | undefined;
-      const COALESCE_FLUSH_MS = 250;
+      const ENTRY_FLUSH_MS = 250;
 
-      // flush 时才统一做级别过滤、关联过滤与限流：一条多行日志只计一次吞吐、整条命中关联词。
+      // flush 时统一做级别过滤、关联过滤与限流：一条（可能多行）日志只计一次吞吐、整条命中关联词。
       const flushPendingLog = () => {
         const entry = pendingEntry;
+        const hasMessage = pendingHasMessage;
         pendingEntry = null;
-        pendingKey = '';
-        if (!entry) return;
+        pendingHasMessage = false;
+        if (!entry || !hasMessage) return;
+        // 进程归属包名，用于关联过滤与渲染层来源展示。
+        entry.packageName = this.getCachedLogcatPackageName(deviceId, entry.processId);
         if (levelPriority[entry.level] < minPriority) return;
         if (relatedPackage) {
           const haystack = `${entry.tag} ${entry.message} ${entry.packageName || ''} ${entry.processId}`.toLowerCase();
@@ -782,29 +786,33 @@ export class ADBManager extends EventEmitter {
           ? lines.slice(-this.maxLogLinesPerChunk)
           : lines;
 
-        for (const line of limitedLines) {
-          if (!line.trim()) continue;
+        for (const rawLine of limitedLines) {
+          const line = rawLine.replace(/[\r\n]+$/, '');
+          // logcat buffer 分隔标记（如 "--------- beginning of main"），忽略。
+          if (line.startsWith('---------')) continue;
 
-          const logEntry = this.parseLogcatLine(line, deviceId);
-          if (!logEntry) continue;
-
-          // 进程归属包名（threadtime 下 processId 可靠），用于关联过滤与渲染层来源展示。
-          logEntry.packageName = this.getCachedLogcatPackageName(deviceId, logEntry.processId);
-
-          // 同头连续行（时间+PID+TID+级别+TAG 完全一致）视为同一条日志的续行，追加到 message。
-          const key = `${logEntry.timestamp.getTime()}|${logEntry.processId}|${logEntry.threadId}|${logEntry.level}|${logEntry.tag}`;
-          if (pendingEntry && key === pendingKey) {
-            pendingEntry.message += `\n${logEntry.message}`;
+          const header = this.parseLongLogHeader(line, deviceId);
+          if (header) {
+            // 新条目开始：上一条已完整，先 flush，再以本头开新条目。
+            flushPendingLog();
+            pendingEntry = header;
+            pendingHasMessage = false;
             continue;
           }
-          // 遇到不同头：上一条已完整，先 flush，再把本行作为新的待合并条目。
-          flushPendingLog();
-          pendingEntry = logEntry;
-          pendingKey = key;
+          if (line === '') {
+            // 空行 = 条目结束分隔符。
+            flushPendingLog();
+            continue;
+          }
+          // 其余行是当前条目的消息行（含多行堆栈），按行累加。
+          if (pendingEntry) {
+            pendingEntry.message = pendingHasMessage ? `${pendingEntry.message}\n${line}` : line;
+            pendingHasMessage = true;
+          }
         }
 
-        // 本批未必结束当前多行条目，留给后续续行；若一段时间无新数据则定时 flush，避免堆栈被切成两条。
-        flushTimer = setTimeout(flushPendingLog, COALESCE_FLUSH_MS);
+        // 末条目的分隔空行可能落在下一批数据里，定时兜底 flush，避免最后一条迟迟不显示。
+        flushTimer = setTimeout(flushPendingLog, ENTRY_FLUSH_MS);
       });
       
       logcatProcess.stderr.on('data', (data) => {
@@ -953,96 +961,24 @@ export class ADBManager extends EventEmitter {
     return cleanedPid;
   }
 
-  private parseLogcatLine(line: string, deviceId: string): LogEntry | null {
-    try {
-      // Windows 上 adb.exe 的 logcat 输出是 \r\n，按 \n 切分后每行尾部残留 \r，
-      // 会让结尾带 $ 的主正则匹配失败而退回降级解析（Level=V/TAG=UNKNOWN/整行当消息）。
-      // 先剥掉行尾 \r，threadtime 主正则才能正常解析 PID/TID/TAG/级别。
-      line = line.replace(/[\r\n]+$/, '');
-      const timeFormatMatch = line.match(/^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEF])\s+([^:]+):\s?(.*)$/);
-      if (timeFormatMatch) {
-        const [, month, day, hours, minutes, seconds, ms, pid, tid, level, tag, message] = timeFormatMatch;
-        const now = new Date();
-        return {
-          id: `${pid}-${tid}-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
-          deviceId,
-          timestamp: new Date(now.getFullYear(), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds), Number(ms)),
-          processId: Number(pid),
-          threadId: Number(tid),
-          level: level as LogEntry['level'],
-          tag: tag.trim(),
-          message
-        };
-      }
-
-      const fullTimePattern = /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})/;
-      const fullTimeMatch = line.match(fullTimePattern);
-      
-      let timestamp = new Date();
-      if (fullTimeMatch) {
-        const timeStr = fullTimeMatch[1];
-        const datePart = timeStr.substring(0, 5);
-        const timePart = timeStr.substring(6);
-        
-        const now = new Date();
-        const currentYear = now.getFullYear();
-        const [month, day] = datePart.split('-').map(Number);
-        const [hours, minutes, secondsMs] = timePart.split(':');
-        const [seconds, ms] = secondsMs.split('.');
-        
-        timestamp = new Date(currentYear, month - 1, day, parseInt(hours), parseInt(minutes), parseInt(seconds), parseInt(ms));
-      }
-
-      const levelPattern = /([VDIWEF])\//;
-      const levelMatch = line.match(levelPattern);
-      if (!levelMatch) {
-        return {
-          id: `unknown-${Date.now()}`,
-          deviceId,
-          timestamp,
-          processId: 0,
-          threadId: 0,
-          level: 'V',
-          tag: 'UNKNOWN',
-          message: line
-        };
-      }
-
-      const level = levelMatch[1] as LogEntry['level'];
-      
-      const tagPattern = /[VDIWEF]\/([^\(\s]+)/;
-      const tagMatch = line.match(tagPattern);
-      const tag = tagMatch ? tagMatch[1].trim() : 'UNKNOWN';
-      
-      const pidPattern = /\((\d+)\)/;
-      const pidMatch = line.match(pidPattern);
-      const processId = pidMatch ? parseInt(pidMatch[1]) : 0;
-      
-      const messageStart = line.indexOf('):');
-      const message = messageStart >= 0 ? line.substring(messageStart + 2).trim() : line;
-      
-      return {
-        id: `${processId}-${timestamp.getTime()}`,
-        deviceId,
-        timestamp,
-        processId,
-        threadId: 0,
-        level,
-        tag,
-        message
-      };
-    } catch (e) {
-      return {
-        id: `unknown-${Date.now()}`,
-        deviceId,
-        timestamp: new Date(),
-        processId: 0,
-        threadId: 0,
-        level: 'V',
-        tag: 'UNKNOWN',
-        message: line
-      };
-    }
+  // 解析 -v long 的头行：形如「[ 06-02 17:53:19.595  1368:15488 W/qdgralloc ]」。
+  // 匹配成功返回只含元数据、message 为空的 LogEntry（消息行由流式状态机后续累加）；非头行返回 null。
+  // TID 可能空格右对齐（如「1355: 4375」），故用 :\s* 容错。
+  private parseLongLogHeader(line: string, deviceId: string): LogEntry | null {
+    const match = line.match(/^\[ (\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+(\d+):\s*(\d+) ([VDIWEF])\/(.*?) \]$/);
+    if (!match) return null;
+    const [, month, day, hours, minutes, seconds, ms, pid, tid, level, tag] = match;
+    const now = new Date();
+    return {
+      id: `${pid}-${tid}-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+      deviceId,
+      timestamp: new Date(now.getFullYear(), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds), Number(ms)),
+      processId: Number(pid),
+      threadId: Number(tid),
+      level: level as LogEntry['level'],
+      tag: tag.trim(),
+      message: '',
+    };
   }
 
   async getPerformanceInfo(deviceId: string): Promise<PerformanceInfo> {
