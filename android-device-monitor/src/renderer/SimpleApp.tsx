@@ -14,6 +14,12 @@ import {
   upsertHistoryDevice,
 } from './lib/historyDeviceStore';
 import {
+  addSearchHistory,
+  loadSearchHistory,
+  removeSearchHistory,
+  saveSearchHistory,
+} from './lib/searchHistoryStore';
+import {
   BATCH_UPDATE_DELAY,
   BATCH_UPDATE_SIZE,
   createDeviceLogState,
@@ -185,6 +191,10 @@ function SimpleApp() {
   const [pairing, setPairing] = useState(false);
   const [packageFilter, setPackageFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  // 日志搜索关键字历史：重启工具仍在，可在搜索框下拉直接选。
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => loadSearchHistory());
+  // 自定义历史下拉的显隐（不用原生 datalist，以统一暗色 UI 风格）。
+  const [showSearchHistory, setShowSearchHistory] = useState(false);
   const [filterLevel, setFilterLevel] = useState<LogLevelFilter>('all');
   const [logTagFilter, setLogTagFilter] = useState('');
   const [logPackageFilter, setLogPackageFilter] = useState('');
@@ -696,6 +706,35 @@ function SimpleApp() {
       return next;
     });
   }, []);
+
+  // 记录一次搜索关键字到历史（去重置顶 + 持久化）。在搜索框回车或失焦时调用。
+  const recordSearchHistory = useCallback((keyword: string) => {
+    if (!keyword.trim()) return;
+    setSearchHistory(prev => {
+      const next = addSearchHistory(prev, keyword);
+      saveSearchHistory(next);
+      return next;
+    });
+  }, []);
+
+  // 从历史移除一条关键字。
+  const removeOneSearchHistory = useCallback((keyword: string) => {
+    setSearchHistory(prev => {
+      const next = removeSearchHistory(prev, keyword);
+      saveSearchHistory(next);
+      return next;
+    });
+  }, []);
+
+  // 历史下拉里展示的条目：按当前输入做前缀联想（输入为空则全部），排除与输入完全相同的项。
+  const visibleSearchHistory = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    if (!query) return searchHistory;
+    return searchHistory.filter(item => {
+      const lower = item.toLowerCase();
+      return lower.includes(query) && lower !== query;
+    });
+  }, [searchHistory, searchTerm]);
 
   // \u5386\u53f2\u5361\u7247\u300c\u5feb\u901f\u8fde\u63a5\u300d\uff1a\u7528\u8bb0\u5f55\u7684 lastAddress \u76f4\u63a5\u8fde\u3002\u5931\u8d25\u591a\u534a\u662f\u8bbe\u5907 IP \u53d8\u4e86\uff0c
   // \u5c31\u5730\u5c55\u5f00\u8f93\u5165\u6846\u5e76\u9884\u586b\u4e0a\u6b21\u5730\u5740\u4f9b\u7528\u6237\u4fee\u6539\u540e\u91cd\u8fde\uff0c\u4e0d\u5220\u9664\u5386\u53f2\u8bb0\u5f55\u3002
@@ -1848,7 +1887,44 @@ function SimpleApp() {
         </select>
         <input value={logPackageFilter} onChange={(e) => setLogPackageFilter(e.target.value)} placeholder={'\u5e94\u7528/\u5305\u540d'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
         <input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
-        <input type="text" placeholder={useRegexSearch ? '\u6b63\u5219\u641c\u7d22' : '\u641c\u7d22\u65e5\u5fd7'} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
+        <div style={{ position: 'relative' }}>
+          <input
+            type="text"
+            placeholder={useRegexSearch ? '\u6b63\u5219\u641c\u7d22' : '\u641c\u7d22\u65e5\u5fd7'}
+            value={searchTerm}
+            // 每次输入变化都重新弹出并刷新匹配的历史（visibleSearchHistory 按输入联想过滤，无匹配则自动隐藏）。
+            onChange={(e) => { setSearchTerm(e.target.value); setShowSearchHistory(true); }}
+            onFocus={() => setShowSearchHistory(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { recordSearchHistory(searchTerm); setShowSearchHistory(false); }
+              else if (e.key === 'Escape') setShowSearchHistory(false);
+            }}
+            // \u8bb0\u5f55\u5173\u952e\u5b57\u5e76\u5ef6\u8fdf\u6536\u8d77\uff0c\u7559\u51fa\u65f6\u95f4\u8ba9\u4e0b\u62c9\u9879\u7684 mousedown \u5148\u89e6\u53d1\u9009\u62e9\u3002
+            onBlur={() => { recordSearchHistory(searchTerm); window.setTimeout(() => setShowSearchHistory(false), 150); }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
+          />
+          {showSearchHistory && visibleSearchHistory.length > 0 && (
+            <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, maxHeight: '260px', overflowY: 'auto', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.45)' }}>
+              {visibleSearchHistory.map((keyword) => (
+                <div
+                  key={keyword}
+                  // \u7528 onMouseDown + preventDefault\uff1a\u5728 input \u5931\u7126\u524d\u5b8c\u6210\u9009\u62e9\uff0c\u907f\u514d\u4e0b\u62c9\u5148\u88ab\u5173\u6389\u3002
+                  onMouseDown={(e) => { e.preventDefault(); setSearchTerm(keyword); recordSearchHistory(keyword); setShowSearchHistory(false); }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#33335a'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '7px 10px', cursor: 'pointer', color: '#e5e7eb', fontSize: '13px' }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{keyword}</span>
+                  <span
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeOneSearchHistory(keyword); }}
+                    title={'\u4ece\u5386\u53f2\u79fb\u9664'}
+                    style={{ flexShrink: 0, color: '#9ca3af', cursor: 'pointer', padding: '0 4px', fontSize: '14px', lineHeight: 1 }}
+                  >{'\u00d7'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <input value={logPidFilter} onChange={(e) => setLogPidFilter(e.target.value.replace(/\D/g, ''))} placeholder={'\u8fdb\u7a0b PID'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
         <button onClick={() => setUseRegexSearch(!useRegexSearch)} style={{ padding: '8px 10px', backgroundColor: useRegexSearch ? '#4a90d9' : '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u6b63\u5219'}</button>
       </div>
@@ -2220,7 +2296,7 @@ function SimpleApp() {
                           <button
                             onClick={() => handleQuickConnectHistory(item)}
                             disabled={connecting}
-                            title="\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5"
+                            title={'\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5'}
                             style={{ padding: '4px 10px', backgroundColor: '#2f6fb0', border: 'none', borderRadius: '4px', color: '#fff', cursor: connecting ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: connecting ? 0.6 : 1 }}
                           >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : '\u5feb\u901f\u8fde\u63a5'}</button>
                         )}
@@ -2244,7 +2320,7 @@ function SimpleApp() {
                         ) : (
                           <button
                             onClick={() => setConfirmRemoveSerial(item.serialNo)}
-                            title="\u4ece\u5386\u53f2\u5217\u8868\u79fb\u9664\u8be5\u8bbe\u5907\uff08\u4e0d\u5f71\u54cd\u5f53\u524d\u5df2\u5efa\u7acb\u7684\u8fde\u63a5\uff09"
+                            title={'\u4ece\u5386\u53f2\u5217\u8868\u79fb\u9664\u8be5\u8bbe\u5907\uff08\u4e0d\u5f71\u54cd\u5f53\u524d\u5df2\u5efa\u7acb\u7684\u8fde\u63a5\uff09'}
                             style={{ padding: '4px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: 'pointer', fontSize: '12px' }}
                           >{'\u79fb\u9664'}</button>
                         )}
