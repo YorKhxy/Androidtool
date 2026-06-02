@@ -185,6 +185,27 @@ describe('project smoke checks', () => {
     expect(filesSource).toContain('handleCreateFolder');
   });
 
+  test('file transfers survive closing the file manager and progress resumes on reopen', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/renderer/lib/fileTransferManager.ts'), 'utf-8');
+    const filesSource = fs.readFileSync(path.join(root, 'src/renderer/components/FilesPanel.tsx'), 'utf-8');
+    const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    // 传输状态在模块单例里，进度订阅常驻，不随 FilesPanel 卸载消失
+    expect(managerSource).toContain('export const startUpload');
+    expect(managerSource).toContain('export const startPullFiles');
+    expect(managerSource).toContain('export const subscribeTransfer');
+    expect(managerSource).toContain('export const isTransferActive');
+    // FilesPanel 改用管理器，不再持有本地上传/下载进度 setState
+    expect(filesSource).toContain('subscribeTransfer');
+    expect(filesSource).toContain('startUpload(');
+    expect(filesSource).toContain('startPullFiles(');
+    expect(filesSource).not.toContain('setUpload(');
+    expect(filesSource).not.toContain('setPull(');
+    // 关闭文件管理时若有传输进行中先确认
+    expect(rendererSource).toContain('closeFileBrowser');
+    expect(rendererSource).toContain('isTransferActive(fileBrowserDevice.id)');
+  });
+
   test('renderer removes USB devices from the monitor view without adb disconnect', () => {
     const source = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
 
