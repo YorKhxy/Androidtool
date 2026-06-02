@@ -712,9 +712,16 @@ export class ADBManager extends EventEmitter {
 
       const levelPriority = { V: 0, D: 1, I: 2, W: 3, E: 4, F: 5 };
       const minPriority = levelPriority[minLevel];
-      const sourcePid = await this.resolveLogcatPid(deviceId, packageName, pid);
-      const sourcePackageName = sourcePid && packageName?.trim() ? packageName.trim() : undefined;
-      const logcatArgs = ['-s', deviceId, 'logcat', '-v', 'time'];
+      // 仅显式传入的数字 PID 才用 --pid 锁定进程；按包名过滤不再用 --pid。
+      const sourcePid = this.resolveExplicitLogcatPid(pid);
+      // 按包名过滤采用「关联匹配」口径：不把范围锁死到应用自身进程，而是全量抓取后保留所有与该包相关的行
+      //（应用自身进程的日志 + 其它进程/系统服务消息体里提到该包的行），与 Android Studio 整机日志口径一致。
+      const relatedPackage = !sourcePid ? packageName?.trim().toLowerCase() || undefined : undefined;
+      if (relatedPackage) {
+        // 预热 PID→包名缓存：应用自身日志的消息体未必含包名，需靠进程归属判定，先同步一次避免开头漏判。
+        await this.refreshLogcatPidPackageCache(deviceId).catch(() => undefined);
+      }
+      const logcatArgs = ['-s', deviceId, 'logcat', '-v', 'threadtime'];
       const adbBinary = await this.resolveAdbBinary();
       if (sourcePid) {
         logcatArgs.push(`--pid=${sourcePid}`);
@@ -724,50 +731,80 @@ export class ADBManager extends EventEmitter {
       let callbackWindowStart = Date.now();
       let callbackCount = 0;
 
+      // 多行日志合并：异常堆栈等单条日志在 logcat 里是多条「同 时间+PID+TID+Level+TAG」的物理行，
+      // 合并成一条 LogEntry（message 以换行拼接），过滤/搜索按整条匹配，与 Android Studio 一致。
+      let pendingEntry: LogEntry | null = null;
+      let pendingKey = '';
+      let flushTimer: ReturnType<typeof setTimeout> | undefined;
+      const COALESCE_FLUSH_MS = 250;
+
+      // flush 时才统一做级别过滤、关联过滤与限流：一条多行日志只计一次吞吐、整条命中关联词。
+      const flushPendingLog = () => {
+        const entry = pendingEntry;
+        pendingEntry = null;
+        pendingKey = '';
+        if (!entry) return;
+        if (levelPriority[entry.level] < minPriority) return;
+        if (relatedPackage) {
+          const haystack = `${entry.tag} ${entry.message} ${entry.packageName || ''} ${entry.processId}`.toLowerCase();
+          if (!haystack.includes(relatedPackage)) return;
+        }
+        const now = Date.now();
+        if (now - callbackWindowStart >= 1000) {
+          callbackWindowStart = now;
+          callbackCount = 0;
+        }
+        if (callbackCount >= this.maxLogCallbacksPerSecond) return;
+        callbackCount++;
+        callback(entry);
+      };
+
       const logcatProcess = spawn(adbBinary.path, logcatArgs);
-      
+
       logcatProcess.stdout.on('data', (data) => {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = undefined;
+        }
         this.refreshLogcatPidPackageCacheIfNeeded(deviceId);
         const rawData = data.toString('utf-8');
         const existingBuffer = this.logcatBuffer.get(deviceId) || '';
         const fullData = (existingBuffer + rawData).slice(-this.maxLogcatBufferChars);
         const lines = fullData.split('\n');
-        
+
         let remainingBuffer = '';
         if (lines.length > 0 && !rawData.endsWith('\n')) {
           remainingBuffer = lines.pop() || '';
         }
         this.logcatBuffer.set(deviceId, remainingBuffer);
-        
+
         const limitedLines = lines.length > this.maxLogLinesPerChunk
           ? lines.slice(-this.maxLogLinesPerChunk)
           : lines;
 
         for (const line of limitedLines) {
           if (!line.trim()) continue;
-          
+
           const logEntry = this.parseLogcatLine(line, deviceId);
-          if (logEntry) {
-            const entryPriority = levelPriority[logEntry.level];
-            if (entryPriority >= minPriority) {
-              const now = Date.now();
-              if (now - callbackWindowStart >= 1000) {
-                callbackWindowStart = now;
-                callbackCount = 0;
-              }
-              if (callbackCount >= this.maxLogCallbacksPerSecond) {
-                continue;
-              }
-              callbackCount++;
-              if (sourcePackageName) {
-                logEntry.packageName = sourcePackageName;
-              } else {
-                logEntry.packageName = this.getCachedLogcatPackageName(deviceId, logEntry.processId);
-              }
-              callback(logEntry);
-            }
+          if (!logEntry) continue;
+
+          // 进程归属包名（threadtime 下 processId 可靠），用于关联过滤与渲染层来源展示。
+          logEntry.packageName = this.getCachedLogcatPackageName(deviceId, logEntry.processId);
+
+          // 同头连续行（时间+PID+TID+级别+TAG 完全一致）视为同一条日志的续行，追加到 message。
+          const key = `${logEntry.timestamp.getTime()}|${logEntry.processId}|${logEntry.threadId}|${logEntry.level}|${logEntry.tag}`;
+          if (pendingEntry && key === pendingKey) {
+            pendingEntry.message += `\n${logEntry.message}`;
+            continue;
           }
+          // 遇到不同头：上一条已完整，先 flush，再把本行作为新的待合并条目。
+          flushPendingLog();
+          pendingEntry = logEntry;
+          pendingKey = key;
         }
+
+        // 本批未必结束当前多行条目，留给后续续行；若一段时间无新数据则定时 flush，避免堆栈被切成两条。
+        flushTimer = setTimeout(flushPendingLog, COALESCE_FLUSH_MS);
       });
       
       logcatProcess.stderr.on('data', (data) => {
@@ -780,6 +817,11 @@ export class ADBManager extends EventEmitter {
       
       let stopEntry: StopLogcatProcess | undefined;
       logcatProcess.on('close', () => {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = undefined;
+        }
+        flushPendingLog();
         if (this.logcatProcesses.get(deviceId) === stopEntry) {
           this.logcatProcesses.delete(deviceId);
         }
@@ -791,6 +833,11 @@ export class ADBManager extends EventEmitter {
         stop: async () => {
         logcatProcess.stdout.removeAllListeners('data');
         logcatProcess.stderr.removeAllListeners('data');
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = undefined;
+        }
+        flushPendingLog();
 
         if (!logcatProcess.killed) {
           if (process.platform === 'win32' && logcatProcess.pid) {
@@ -893,31 +940,25 @@ export class ADBManager extends EventEmitter {
     this.logcatPidPackageRefreshes.delete(deviceId);
   }
 
-  private async resolveLogcatPid(deviceId: string, packageName?: string, pid?: string): Promise<string | undefined> {
+  // 仅解析用户显式输入的数字 PID（用于 --pid 锁定单进程）。按包名过滤不再在此解析进程，
+  // 改由 startLogcat 全量抓取 + 关联过滤实现，覆盖系统/其它进程提到该包的日志。
+  private resolveExplicitLogcatPid(pid?: string): string | undefined {
     const cleanedPid = pid?.trim();
-    if (cleanedPid) {
-      if (!/^\d+$/.test(cleanedPid)) {
-        throw new Error('PID must be numeric.');
-      }
-      return cleanedPid;
-    }
-
-    const cleanedPackage = packageName?.trim();
-    if (!cleanedPackage) {
+    if (!cleanedPid) {
       return undefined;
     }
-
-    try {
-      const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'pidof', cleanedPackage]);
-      return stdout.trim().split(/\s+/).find((value) => /^\d+$/.test(value));
-    } catch (error) {
-      logger.warn('ADBManager: package process not found, continuing unscoped logcat:', cleanedPackage, error);
-      return undefined;
+    if (!/^\d+$/.test(cleanedPid)) {
+      throw new Error('PID must be numeric.');
     }
+    return cleanedPid;
   }
 
   private parseLogcatLine(line: string, deviceId: string): LogEntry | null {
     try {
+      // Windows 上 adb.exe 的 logcat 输出是 \r\n，按 \n 切分后每行尾部残留 \r，
+      // 会让结尾带 $ 的主正则匹配失败而退回降级解析（Level=V/TAG=UNKNOWN/整行当消息）。
+      // 先剥掉行尾 \r，threadtime 主正则才能正常解析 PID/TID/TAG/级别。
+      line = line.replace(/[\r\n]+$/, '');
       const timeFormatMatch = line.match(/^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEF])\s+([^:]+):\s?(.*)$/);
       if (timeFormatMatch) {
         const [, month, day, hours, minutes, seconds, ms, pid, tid, level, tag, message] = timeFormatMatch;

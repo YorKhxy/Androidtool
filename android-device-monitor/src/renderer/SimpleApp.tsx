@@ -19,11 +19,30 @@ import {
   createDeviceLogState,
   createLogCounts,
   DeviceLogState,
+  LOG_LINE_HEIGHT,
   LOG_OVERSCAN_ROWS,
   LOG_ROW_HEIGHT,
   MAX_LOG_ENTRIES,
   MAX_PENDING_LOG_BUFFER,
 } from './lib/logStore';
+
+// 多行日志（异常堆栈等）在列表里整条铺开，每条高度 = 文本行数 × LOG_LINE_HEIGHT + 垂直内边距。
+// 行数按 message 的换行数确定性计算（WeakMap 缓存，条目不可变，避免重复计算），
+// 供变高虚拟滚动用——高度可预测，无需测量 DOM。
+const logEntryLineCounts = new WeakMap<LogEntry, number>();
+const getLogEntryLineCount = (log: LogEntry): number => {
+  const cached = logEntryLineCounts.get(log);
+  if (cached !== undefined) return cached;
+  let lines = 1;
+  const message = log.message;
+  for (let i = 0; i < message.length; i++) {
+    if (message.charCodeAt(i) === 10) lines++;
+  }
+  logEntryLineCounts.set(log, lines);
+  return lines;
+};
+const getLogRowHeight = (log: LogEntry): number =>
+  getLogEntryLineCount(log) * LOG_LINE_HEIGHT + (LOG_ROW_HEIGHT - LOG_LINE_HEIGHT);
 
 const isLikelyPicoDevice = (device: DeviceInfo | null): boolean => {
   const identity = [device?.manufacturer, device?.name, device?.model, device?.id]
@@ -1635,8 +1654,13 @@ function SimpleApp() {
         return false;
       }
 
-      if (packageFilter && !(log.packageName || '').toLowerCase().includes(packageFilter)) {
-        return false;
+      // 应用/包名过滤为「关联匹配」：跨 message+tag+包名+PID 命中即保留，与主进程抓取口径一致，
+      // 这样系统服务/其它进程里提到该应用的日志也能显示，而不是只剩应用自身进程那几行。
+      if (packageFilter) {
+        const packageHaystack = `${log.message} ${log.tag} ${log.packageName || ''} ${log.processId}`.toLowerCase();
+        if (!packageHaystack.includes(packageFilter)) {
+          return false;
+        }
       }
 
       if (pidFilter && String(log.processId) !== pidFilter) {
@@ -1652,22 +1676,50 @@ function SimpleApp() {
     });
   }, [logVersion, currentLogState, hasActiveLogFilter, searchTerm, filterLevel, logTagFilter, logPackageFilter, logPidFilter, useRegexSearch]);
 
-  const displayedLogCount = hasActiveLogFilter ? filteredLogs.length : allLogCount;
-  const visibleStartIndex = Math.max(0, Math.floor(logViewport.scrollTop / LOG_ROW_HEIGHT) - LOG_OVERSCAN_ROWS);
-  const visibleRowCount = Math.ceil(logViewport.height / LOG_ROW_HEIGHT) + LOG_OVERSCAN_ROWS * 2;
-  const visibleEndIndex = Math.min(displayedLogCount, visibleStartIndex + visibleRowCount);
+  // 变高虚拟滚动：每条日志高度按行数变化，需先把当前可见列表物化成数组以便算累计偏移。
+  const activeLogList = useMemo<LogEntry[]>(
+    () => (hasActiveLogFilter ? filteredLogs : currentLogState?.store.toArray() ?? []),
+    [logVersion, hasActiveLogFilter, filteredLogs, currentLogState]
+  );
+  const displayedLogCount = activeLogList.length;
+  // 前缀和：logRowOffsets[i] = 第 i 条之前所有行的累计高度（即第 i 条的 top）；末项为总高度。
+  const logRowOffsets = useMemo<number[]>(() => {
+    const offsets = new Array<number>(activeLogList.length + 1);
+    offsets[0] = 0;
+    for (let i = 0; i < activeLogList.length; i++) {
+      offsets[i + 1] = offsets[i] + getLogRowHeight(activeLogList[i]);
+    }
+    return offsets;
+  }, [activeLogList]);
+  const totalLogHeight = logRowOffsets[logRowOffsets.length - 1] || 0;
+  // 二分查找：返回最大的 i 使 logRowOffsets[i] <= y（即落在偏移 y 处的那一条）。
+  const findLogRowIndexAtOffset = (y: number): number => {
+    let lo = 0;
+    let hi = displayedLogCount;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (logRowOffsets[mid] <= y) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+  const visibleStartIndex = Math.max(0, findLogRowIndexAtOffset(logViewport.scrollTop) - LOG_OVERSCAN_ROWS);
+  const visibleEndIndex = Math.min(
+    displayedLogCount,
+    findLogRowIndexAtOffset(logViewport.scrollTop + logViewport.height) + 1 + LOG_OVERSCAN_ROWS
+  );
   const visibleLogs = useMemo(() => {
     const rows: Array<{ log: LogEntry; index: number }> = [];
     for (let index = visibleStartIndex; index < visibleEndIndex; index++) {
-      const log = hasActiveLogFilter ? filteredLogs[index] : currentLogState?.store.get(index);
+      const log = activeLogList[index];
       if (log) {
         rows.push({ log, index });
       }
     }
     return rows;
-  }, [logVersion, currentLogState, hasActiveLogFilter, filteredLogs, visibleStartIndex, visibleEndIndex]);
-  const virtualTopPadding = visibleStartIndex * LOG_ROW_HEIGHT;
-  const virtualBottomPadding = Math.max(0, (displayedLogCount - visibleEndIndex) * LOG_ROW_HEIGHT);
+  }, [activeLogList, visibleStartIndex, visibleEndIndex]);
+  const virtualTopPadding = logRowOffsets[visibleStartIndex] || 0;
+  const virtualBottomPadding = Math.max(0, totalLogHeight - (logRowOffsets[visibleEndIndex] ?? totalLogHeight));
 
   const scrollToBottom = useCallback(() => {
     if (logsContainerRef.current) {
@@ -1817,7 +1869,7 @@ function SimpleApp() {
         ) : displayedLogCount === 0 ? (
           <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280' }}>{'\u6ca1\u6709\u5339\u914d\u7684\u65e5\u5fd7'}</div>
         ) : (
-          <div style={{ minHeight: displayedLogCount * LOG_ROW_HEIGHT }}>
+          <div style={{ minHeight: totalLogHeight }}>
             <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'grid', gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, 1fr)', backgroundColor: '#1f2937', color: '#9ca3af', fontWeight: 700 }}>
               <div style={{ padding: '8px' }}>{'\u65f6\u95f4'}</div>
               <div style={{ padding: '8px' }}>Level</div>
@@ -1834,8 +1886,11 @@ function SimpleApp() {
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, 1fr)',
-                  height: `${LOG_ROW_HEIGHT}px`,
-                  lineHeight: `${LOG_ROW_HEIGHT - 1}px`,
+                  height: `${getLogRowHeight(log)}px`,
+                  lineHeight: `${LOG_LINE_HEIGHT}px`,
+                  padding: '4px 0',
+                  boxSizing: 'border-box',
+                  alignItems: 'start',
                   borderBottom: '1px solid #1f2937',
                   backgroundColor: selectedLogEntry?.id === log.id ? '#1e3a5f' : 'transparent',
                   cursor: 'pointer',
@@ -1846,7 +1901,9 @@ function SimpleApp() {
                 <div style={{ padding: '0 8px', color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden' }}>{log.processId || '--'}</div>
                 <div style={{ padding: '0 8px', color: '#60a5fa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.packageName || '--'}</div>
                 <div style={{ padding: '0 8px', color: '#93c5fd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.tag}</div>
-                <div style={{ padding: '0 8px', color: '#e5e7eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.message}</div>
+                {/* 整条铺开多行：white-space:pre 保留换行、每个逻辑行不自动换行（高度=行数×LOG_LINE_HEIGHT 可预测），
+                    过长单行横向裁切，完整内容点开看底部详情面板。 */}
+                <div style={{ padding: '0 8px', color: '#e5e7eb', overflow: 'hidden', whiteSpace: 'pre' }}>{log.message}</div>
               </div>
             ))}
             <div style={{ height: virtualBottomPadding }} />

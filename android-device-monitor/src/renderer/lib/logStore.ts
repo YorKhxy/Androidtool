@@ -6,6 +6,9 @@ export const BATCH_UPDATE_DELAY = 100;
 export const MAX_PENDING_LOG_BUFFER = 2000;
 export const LOG_CHUNK_SIZE = 512;
 export const LOG_ROW_HEIGHT = 28;
+// 单条日志内每个文本行的高度。多行日志整条铺开时，行高 = 行数 × LOG_LINE_HEIGHT + 垂直内边距，
+// 使单行日志仍为 LOG_ROW_HEIGHT（20 + 8），高度可由换行数确定性算出，供变高虚拟滚动使用。
+export const LOG_LINE_HEIGHT = 20;
 export const LOG_OVERSCAN_ROWS = 12;
 
 export type LogCounts = Record<LogEntry['level'], number>;
