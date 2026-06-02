@@ -105,13 +105,28 @@ describe('project smoke checks', () => {
     expect(source).toContain('normalizeAndroidPackageName');
   });
 
-  test('logcat package filters do not fail startup when a package is not running', () => {
+  test('logcat package filters capture related logs across processes without failing when app is not running', () => {
     const source = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
 
-    expect(source).toContain('continuing unscoped logcat');
-    expect(source).toContain('return undefined');
-    expect(source).toContain('const sourcePackageName = sourcePid && packageName?.trim()');
+    // 用 threadtime 输出，主解析正则才能拿到 PID/TID/TAG（旧的 -v time 与解析器不配套）
+    expect(source).toContain("'logcat', '-v', 'threadtime'");
+    // 按包名过滤改为「关联匹配」：全量抓取 + 关联过滤，而非用 --pid 锁死应用自身进程
+    expect(source).toContain('const relatedPackage =');
+    expect(source).toContain('haystack.includes(relatedPackage)');
+    // 仅显式数字 PID 才用 --pid；按包名不再 pidof，故应用未运行也不会导致启动失败
+    expect(source).toContain('resolveExplicitLogcatPid');
     expect(source).not.toContain('Package process is not running');
+  });
+
+  test('logcat coalesces multi-line entries that share the same header', () => {
+    const source = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+
+    // 同头连续行（时间+PID+TID+级别+TAG）合并成一条 LogEntry，message 以换行拼接
+    expect(source).toContain('const key = `${logEntry.timestamp.getTime()}|${logEntry.processId}|${logEntry.threadId}|${logEntry.level}|${logEntry.tag}`');
+    expect(source).toContain('pendingEntry.message += `\\n${logEntry.message}`');
+    // 合并条目在 flush 时统一过滤/限流，并在 close/stop 时清空残留
+    expect(source).toContain('flushPendingLog');
+    expect(source).toContain('flushTimer');
   });
 
   test('starting or stopping one device logcat does not clear all queued logs', () => {
