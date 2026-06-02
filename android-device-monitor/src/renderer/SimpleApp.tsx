@@ -1880,7 +1880,9 @@ function SimpleApp() {
       </header>
       
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <aside style={{ width: '288px', backgroundColor: '#252540', borderRight: '1px solid #353550', padding: '16px', overflowY: 'auto' }}>
+        {/* 侧栏用 flex 列 + 各区块 order 控制顺序：ADB状态(0) → WiFi连接(1) → 设备列表(2) → 设备信息(3) → 历史设备(4)。
+            用 order 而非物理调整 JSX 顺序，避免大段含中文的块搬运出错；ADB 状态保持默认 order 0 居首。 */}
+        <aside style={{ width: '288px', backgroundColor: '#252540', borderRight: '1px solid #353550', padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           {adbStatus && (
             <div
               style={{
@@ -1906,6 +1908,7 @@ function SimpleApp() {
             </div>
           )}
 
+          <div style={{ order: 2 }}>
           <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u8bbe\u5907\u5217\u8868'}</h2>
           <div style={{ display: 'flex', gap: '8px', margin: '0 0 12px 0' }}>
             <button onClick={loadDevices} style={{ flex: 1, padding: '6px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px' }}>刷新设备</button>
@@ -2027,8 +2030,9 @@ function SimpleApp() {
               )})}
             </div>
           )}
-          
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550' }}>
+          </div>
+
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 1 }}>
             <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'WiFi \u8fde\u63a5'}</h2>
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
@@ -2104,7 +2108,7 @@ function SimpleApp() {
             )}
           </div>
 
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550' }}>
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 4 }}>
             <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u5386\u53f2\u8bbe\u5907'}</h2>
             {offlineHistoryDevices.length === 0 ? (
               <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
@@ -2194,7 +2198,7 @@ function SimpleApp() {
           </div>
 
           {selectedDevice && (
-            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550' }}>
+            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 3 }}>
               <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u8bbe\u5907\u4fe1\u606f'}</h2>
               <div style={{ fontSize: '12px', color: '#888' }}>
                 <div style={{ marginBottom: '10px' }}>
