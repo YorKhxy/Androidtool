@@ -884,7 +884,9 @@ function SimpleApp() {
     } else {
       const sourcePackage = logPackageFilter.trim() || packageFilter.trim() || undefined;
       const sourcePid = logPidFilter.trim() || undefined;
-      const sourceLevel: LogEntry['level'] = filterLevel === 'all' ? 'V' : filterLevel;
+      // 抓取恒定按 all levels（*:V），不受日志等级下拉框限制——等级只做显示筛选（见 filteredLogs）。
+      // 这样切换等级无需重新采集，也不会因选了高等级而漏抓低等级日志。
+      const sourceLevel: LogEntry['level'] = 'V';
       const result = await window.electronAPI!.startLogcat(selectedDevice.id, sourceLevel, sourcePackage, sourcePid);
       if (result.success) {
         state.running = true;
