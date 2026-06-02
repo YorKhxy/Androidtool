@@ -68,6 +68,10 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
   // 当前进行中的 uploadId。push 完成（invoke 返回）后置空，用于忽略晚于 invoke 返回到达的迟到进度事件，
   // 否则最后一个 done 事件会在 setUpload(null) 之后把进度条又设回 100%，导致按钮一直 disabled。
   const activeUploadIdRef = useRef<string | null>(null);
+  // 新建文件夹：creatingFolder 控制输入行显隐，newFolderName 为输入值，creatingFolderBusy 防重复提交
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [creatingFolderBusy, setCreatingFolderBusy] = useState(false);
 
   const deviceId = selectedDevice?.id ?? null;
 
@@ -266,6 +270,38 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
     }
   };
 
+  // 在当前目录新建文件夹
+  const handleCreateFolder = async () => {
+    if (!deviceId || !hasElectronAPI()) return;
+    const name = newFolderName.trim();
+    if (!name) {
+      onError('请输入文件夹名称');
+      return;
+    }
+    if (/[\/\\]/.test(name)) {
+      onError('文件夹名称不能包含 / 或 \\');
+      return;
+    }
+    setCreatingFolderBusy(true);
+    setNotice('');
+    try {
+      const result = await window.electronAPI!.createDeviceFolder(deviceId, currentPath, name);
+      if (result.success) {
+        setNotice(`已创建文件夹：${name}`);
+        setNoticeKind('success');
+        setCreatingFolder(false);
+        setNewFolderName('');
+        loadDir(currentPath);
+      } else {
+        onError(result.error || '创建文件夹失败');
+      }
+    } catch (err) {
+      onError('创建文件夹失败：' + (err as Error).message);
+    } finally {
+      setCreatingFolderBusy(false);
+    }
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
@@ -359,13 +395,45 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
           ))}
         </div>
         <button
+          onClick={() => { setCreatingFolder((v) => !v); setNewFolderName(''); }}
+          style={{ marginLeft: 'auto', padding: '4px 12px', backgroundColor: creatingFolder ? '#4a90d9' : '#353550', border: 'none', borderRadius: '6px', color: creatingFolder ? '#fff' : '#cbd5e1', cursor: 'pointer', fontSize: '12px' }}
+        >
+          📁+ 新建文件夹
+        </button>
+        <button
           onClick={handleUploadClick}
           disabled={Boolean(upload)}
-          style={{ marginLeft: 'auto', padding: '4px 12px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: '#fff', cursor: upload ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: upload ? 0.6 : 1 }}
+          style={{ padding: '4px 12px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: '#fff', cursor: upload ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: upload ? 0.6 : 1 }}
         >
           ⬆ 上传文件
         </button>
       </div>
+
+      {/* 新建文件夹输入行 */}
+      {creatingFolder && (
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+          <input
+            autoFocus
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleCreateFolder();
+              else if (e.key === 'Escape') { setCreatingFolder(false); setNewFolderName(''); }
+            }}
+            placeholder={`在 ${currentPath} 下新建文件夹的名称`}
+            style={{ flex: 1, minWidth: 0, padding: '6px 10px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', color: '#e5e7eb', fontSize: '13px', outline: 'none' }}
+          />
+          <button
+            onClick={handleCreateFolder}
+            disabled={creatingFolderBusy}
+            style={{ flexShrink: 0, padding: '6px 14px', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: creatingFolderBusy ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: creatingFolderBusy ? 0.6 : 1 }}
+          >{creatingFolderBusy ? '创建中…' : '创建'}</button>
+          <button
+            onClick={() => { setCreatingFolder(false); setNewFolderName(''); }}
+            style={{ flexShrink: 0, padding: '6px 12px', backgroundColor: '#475569', border: 'none', borderRadius: '6px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+          >取消</button>
+        </div>
+      )}
 
       {/* 上传进度条 */}
       {upload && (

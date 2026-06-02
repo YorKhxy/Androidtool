@@ -357,6 +357,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.CREATE_DEVICE_FOLDER, async (_event, deviceId: string, dirPath: string, name: string) => {
+    try {
+      const createdPath = await adbManager.createDeviceFolder(deviceId, dirPath, name);
+      return { success: true, data: createdPath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '创建文件夹失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.SHOW_ITEM_IN_FOLDER, async (_event, localPath: string) => {
     try {
       shell.showItemInFolder(localPath);

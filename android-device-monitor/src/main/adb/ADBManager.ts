@@ -597,6 +597,36 @@ export class ADBManager extends EventEmitter {
     }
   }
 
+  // 在指定目录下新建文件夹。name 不允许包含路径分隔符或越级（. / ..），避免越权写到别处。
+  async createDeviceFolder(deviceId: string, dirPath: string, name: string): Promise<string> {
+    const trimmedName = (name || '').trim();
+    if (!trimmedName || trimmedName === '.' || trimmedName === '..' || /[\/\\]/.test(trimmedName)) {
+      throw new Error('文件夹名称不合法（不能为空，且不能包含 / \\）');
+    }
+    const normalizedDir = this.normalizeRemoteDir(dirPath);
+    const targetPath = `${normalizedDir === '/' ? '' : normalizedDir}/${trimmedName}`;
+    try {
+      const result = await this.execAdbWithExitCode(
+        ['-s', deviceId, 'shell', 'mkdir', this.quoteRemotePath(targetPath)],
+        { timeout: 15000, maxBuffer: 1024 * 64 }
+      );
+      const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
+      if (output.includes('file exists') || output.includes('already exists')) {
+        throw new Error('同名文件或文件夹已存在');
+      }
+      if (output.includes('permission denied') || output.includes('read-only')) {
+        throw new Error('没有创建权限（可能需要 root）');
+      }
+      if (result.exitCode !== 0) {
+        throw new Error(result.stderr.trim() || result.stdout.trim() || '创建文件夹失败');
+      }
+      return targetPath;
+    } catch (error) {
+      logger.error('ADBManager: createDeviceFolder failed:', error);
+      throw this.wrapOperationError('创建文件夹失败', error);
+    }
+  }
+
   private normalizeRemoteDir(dirPath: string): string {
     const trimmed = (dirPath || '').trim() || '/sdcard';
     // 统一为以 / 开头、不以 / 结尾（根目录除外），并去掉重复斜杠
