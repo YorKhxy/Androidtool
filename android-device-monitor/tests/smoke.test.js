@@ -149,6 +149,23 @@ describe('project smoke checks', () => {
     expect(source).toContain('const hasLevelFilter = filterLevel !== ');
   });
 
+  test('log search keeps a persisted, selectable history', () => {
+    const storeSource = fs.readFileSync(path.join(root, 'src/renderer/lib/searchHistoryStore.ts'), 'utf-8');
+    const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    // 历史持久化到 localStorage，去重置顶
+    expect(storeSource).toContain("'adm.logSearchHistory.v1'");
+    expect(storeSource).toContain('export const addSearchHistory');
+    expect(storeSource).toContain('export const loadSearchHistory');
+    // 自定义暗色下拉（非原生 datalist），回车/失焦记录历史，重启后从 localStorage 载入可选，支持移除
+    expect(rendererSource).toContain('loadSearchHistory()');
+    expect(rendererSource).toContain('recordSearchHistory');
+    expect(rendererSource).toContain('showSearchHistory');
+    expect(rendererSource).toContain('visibleSearchHistory');
+    expect(rendererSource).toContain('removeOneSearchHistory');
+    expect(rendererSource).not.toContain('<datalist');
+  });
+
   test('renderer removes USB devices from the monitor view without adb disconnect', () => {
     const source = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
 
