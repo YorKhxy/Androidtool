@@ -166,6 +166,25 @@ describe('project smoke checks', () => {
     expect(rendererSource).not.toContain('<datalist');
   });
 
+  test('file manager can create a folder in the current directory', () => {
+    const adbSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const channelsSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const mainSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const apiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const filesSource = fs.readFileSync(path.join(root, 'src/renderer/components/FilesPanel.tsx'), 'utf-8');
+
+    expect(adbSource).toContain('async createDeviceFolder');
+    expect(adbSource).toContain("'mkdir'");
+    expect(channelsSource).toContain("CREATE_DEVICE_FOLDER: 'adb:create-device-folder'");
+    expect(mainSource).toContain('IPC_CHANNELS.CREATE_DEVICE_FOLDER');
+    expect(prodSource).toContain('IPC_CHANNELS.CREATE_DEVICE_FOLDER');
+    expect(preloadSource).toContain('createDeviceFolder:');
+    expect(apiSource).toContain('createDeviceFolder:');
+    expect(filesSource).toContain('handleCreateFolder');
+  });
+
   test('renderer removes USB devices from the monitor view without adb disconnect', () => {
     const source = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
 
