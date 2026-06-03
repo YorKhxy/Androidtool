@@ -1,7 +1,9 @@
 ﻿param(
     # 默认每次打包自动把版本号 patch +1（1.0.0 -> 1.0.1），省得忘了改导致客户端不更新。
     # 已手动改好版本、不想自增时，加 -NoVersionBump。
-    [switch]$NoVersionBump
+    [switch]$NoVersionBump,
+    # 默认从 git 提交自动生成本次更新说明写进 release-notes.md。想手写说明时加 -NoAutoNotes。
+    [switch]$NoAutoNotes
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,8 +43,16 @@ try {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "  Note: version was auto-bumped; remember to commit package.json" -ForegroundColor DarkYellow
     Write-Host "  (and package-lock.json) after a successful build." -ForegroundColor DarkYellow
-    Write-Host "  Reminder: edit release-notes.md before packing -- its content becomes this" -ForegroundColor DarkYellow
-    Write-Host "  version's update notes that friends see after auto-updating." -ForegroundColor DarkYellow
+    Write-Host ""
+
+    # 自动生成本次更新说明（从 git 提交），写入 release-notes.md，供下方 electron-builder 打进 latest.yml。
+    if ($NoAutoNotes) {
+        Write-Host "Using existing release-notes.md (auto-notes skipped via -NoAutoNotes)" -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "Generating release notes from git commits..." -ForegroundColor Yellow
+        node "$ProjectRoot\scripts\gen-release-notes.js"
+    }
     Write-Host ""
 
     Write-Host "[1/5] Preparing bundled adb..." -ForegroundColor Yellow

@@ -57,6 +57,10 @@ describe('project smoke checks', () => {
     expect(updatePackPs1).toContain('index-prod.js');
     expect(updatePackPs1).toContain('electron-builder');
     expect(updatePackPs1).toContain('npm version patch');
+    // 自动生成更新说明：releaseInfo 指向 release-notes.md，打包脚本调用生成器
+    expect(pkg.build.releaseInfo).toBeDefined();
+    expect(pkg.build.releaseInfo.releaseNotesFile).toBe('release-notes.md');
+    expect(updatePackPs1).toContain('gen-release-notes.js');
     expect(updatePackBat).toContain('make-update-package.ps1');
     // 更新服务器脚本支持 Range（差量下载需要）
     expect(pkg.scripts['serve:updates']).toContain('serve-updates.js');
