@@ -162,6 +162,7 @@ function SimpleApp() {
   // 手动「检查更新」：ref 标记本次为手动触发（后台检查静默，手动检查要给「已是最新/失败」反馈）。
   const manualCheckRef = useRef(false);
   const [checkResult, setCheckResult] = useState<string>('');
+  const lastCheckAtRef = useRef(0); // 上次点检查更新的时间戳，做 0.5s 冷却防狂点刷爆服务器
   // 自动更新状态（来自主进程 electron-updater 事件），驱动右下角更新提示条。
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -598,6 +599,10 @@ function SimpleApp() {
   // 手动检查更新：标记为手动触发并显示「检查中…」，结果由 onUpdateStatus 回调据 manualCheckRef 给反馈。
   const handleCheckUpdate = async () => {
     if (!hasElectronAPI() || !window.electronAPI?.checkForUpdate) return;
+    // 0.5s 冷却 + 上次检查未出结果时忽略：防止狂点把更新服务器刷爆。
+    const now = Date.now();
+    if (now - lastCheckAtRef.current < 500 || manualCheckRef.current) return;
+    lastCheckAtRef.current = now;
     manualCheckRef.current = true;
     setCheckResult('检查中…');
     setUpdateDismissed(false);
@@ -2242,10 +2247,28 @@ function SimpleApp() {
           )}
           <button
             onClick={handleCheckUpdate}
+            disabled={checkResult === '\u68c0\u67e5\u4e2d\u2026'}
             title={'\u5411\u66f4\u65b0\u670d\u52a1\u5668\u68c0\u67e5\u662f\u5426\u6709\u65b0\u7248\u672c'}
-            style={{ fontSize: '12px', color: '#cbd5e1', background: 'none', border: '1px solid #454560', borderRadius: '6px', cursor: 'pointer', padding: '2px 8px' }}
+            style={{ fontSize: '12px', color: '#cbd5e1', background: 'none', border: '1px solid #454560', borderRadius: '6px', cursor: checkResult === '\u68c0\u67e5\u4e2d\u2026' ? 'not-allowed' : 'pointer', padding: '2px 8px', opacity: checkResult === '\u68c0\u67e5\u4e2d\u2026' ? 0.6 : 1 }}
           >{'\u68c0\u67e5\u66f4\u65b0'}</button>
-          {checkResult && <span style={{ fontSize: '12px', color: '#9ca3af' }}>{checkResult}</span>}
+          {/* \u542f\u52a8\u65f6\u9759\u9ed8\u68c0\u67e5\u5230\u65b0\u7248 \u2192 \u5728\u6309\u94ae\u65c1\u5e38\u9a7b\u9192\u76ee\u63d0\u793a\uff08\u4e0d\u81ea\u52a8\u66f4\u65b0\uff0c\u7531\u7528\u6237\u70b9\u66f4\u65b0\uff09 */}
+          {updateStatus?.state === 'available' && (
+            <button
+              onClick={() => setUpdateDismissed(false)}
+              title={'\u70b9\u67e5\u770b\u5e76\u66f4\u65b0'}
+              style={{ fontSize: '12px', fontWeight: 700, color: '#fff', backgroundColor: '#dc2626', border: 'none', borderRadius: '6px', cursor: 'pointer', padding: '2px 8px' }}
+            >{`\u6709\u65b0\u7248\u672c${updateStatus.version ? ` v${updateStatus.version}` : ''}`}</button>
+          )}
+          {updateStatus?.state === 'downloaded' && (
+            <button
+              onClick={() => setUpdateDismissed(false)}
+              title={'\u70b9\u7acb\u5373\u5b89\u88c5\u5e76\u91cd\u542f'}
+              style={{ fontSize: '12px', fontWeight: 700, color: '#fff', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', cursor: 'pointer', padding: '2px 8px' }}
+            >{'\u65b0\u7248\u5df2\u5c31\u7eea'}</button>
+          )}
+          {checkResult && updateStatus?.state !== 'available' && updateStatus?.state !== 'downloaded' && (
+            <span style={{ fontSize: '12px', color: '#9ca3af' }}>{checkResult}</span>
+          )}
         </div>
       </header>
       {showReleaseNotes && (
