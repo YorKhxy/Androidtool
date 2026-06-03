@@ -35,11 +35,19 @@
    产物落在 `dist/`：`安卓设备监控 Setup x.y.z.exe`、`latest.yml`、`*.blockmap`（这三类是自动更新必需的）。
 
 3. **启动更新服务器**（在作为「更新服务器」的那台电脑上，一般就是你开发这台）：
+
+   **方式 A：双击脚本（推荐，最快）**
+   - 启动：双击 `scripts\update-server-start.bat` —— 弹出窗口跑着服务器、显示日志。
+   - 关闭：双击 `scripts\update-server-stop.bat`（按端口结束进程），或直接关掉那个窗口 / 在窗口里按 Ctrl+C。
+
+   **方式 B：命令行**
    ```bash
    npm run serve:updates
    ```
    默认服务 `dist/` 目录、端口 `8384`、监听 `0.0.0.0`（局域网/穿透都能访问）。
-   保持这个窗口开着；朋友的 app 启动时就能拉到更新。
+   保持窗口开着；朋友的 app 启动时就能拉到更新。
+
+   > 改了端口的话，`update-server-stop.bat` 里的 `PORT` 也要同步改成一样的值。
 
 4. **朋友端**：下次打开 app 即自动检测 → 后台下载 → 右下角提示「新版本已就绪，立即重启更新」。无需你再传文件。
 
@@ -111,4 +119,5 @@
 | `src/main/preload.js` / `src/renderer/lib/electronApi.ts` | IPC 契约：`onUpdateStatus` / `checkForUpdate` / `quitAndInstallUpdate` |
 | `src/renderer/SimpleApp.tsx` | 右下角更新提示条（下载进度 / 「立即重启更新」） |
 | `scripts/serve-updates.js` | 极简静态更新服务器（支持 Range，差量下载用） |
+| `scripts/update-server-start.bat` / `update-server-stop.bat` | 双击启动 / 停止更新服务器（停止按端口结束进程） |
 | `package.json` `build.publish` | generic provider 默认更新源地址 |
