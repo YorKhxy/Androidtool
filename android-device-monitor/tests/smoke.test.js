@@ -56,6 +56,7 @@ describe('project smoke checks', () => {
     expect(updatePackPs1).toContain('npm run build:renderer');
     expect(updatePackPs1).toContain('index-prod.js');
     expect(updatePackPs1).toContain('electron-builder');
+    expect(updatePackPs1).toContain('npm version patch');
     expect(updatePackBat).toContain('make-update-package.ps1');
     // 更新服务器脚本支持 Range（差量下载需要）
     expect(pkg.scripts['serve:updates']).toContain('serve-updates.js');

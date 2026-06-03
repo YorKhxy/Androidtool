@@ -1,3 +1,9 @@
+param(
+    # 默认每次打包自动把版本号 patch +1（1.0.0 -> 1.0.1），省得忘了改导致客户端不更新。
+    # 已手动改好版本、不想自增时，加 -NoVersionBump。
+    [switch]$NoVersionBump
+)
+
 $ErrorActionPreference = "Stop"
 
 # 打「热更包」：用 electron-builder 产出 NSIS 安装包 + latest.yml + .blockmap，
@@ -13,15 +19,28 @@ $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
 
 Push-Location $ProjectRoot
 try {
-    $pkg = Get-Content (Join-Path $ProjectRoot "package.json") -Raw | ConvertFrom-Json
-    $version = $pkg.version
+    $pkgPath = Join-Path $ProjectRoot "package.json"
+    $oldVersion = (Get-Content $pkgPath -Raw | ConvertFrom-Json).version
+
+    if ($NoVersionBump) {
+        $version = $oldVersion
+        Write-Host "Version: $version (auto-bump skipped via -NoVersionBump)" -ForegroundColor Cyan
+    }
+    else {
+        # 自动把 patch 段 +1，不打 git tag、不提交（仅改 package.json / package-lock.json）。
+        Write-Host "Bumping version (patch)..." -ForegroundColor Yellow
+        npm version patch --no-git-tag-version | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "npm version patch failed" }
+        $version = (Get-Content $pkgPath -Raw | ConvertFrom-Json).version
+        Write-Host "Version: $oldVersion -> $version" -ForegroundColor Green
+    }
 
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "  Make Update Package (electron-updater)" -ForegroundColor Cyan
     Write-Host "  Version: $version" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "  Reminder: bump 'version' in package.json before each release," -ForegroundColor DarkYellow
-    Write-Host "  otherwise clients won't see it as an update." -ForegroundColor DarkYellow
+    Write-Host "  Note: version was auto-bumped; remember to commit package.json" -ForegroundColor DarkYellow
+    Write-Host "  (and package-lock.json) after a successful build." -ForegroundColor DarkYellow
     Write-Host ""
 
     Write-Host "[1/5] Preparing bundled adb..." -ForegroundColor Yellow

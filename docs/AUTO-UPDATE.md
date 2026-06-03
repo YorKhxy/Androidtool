@@ -25,8 +25,9 @@
 
 在 `android-device-monitor/` 目录下：
 
-1. **改版本号**：把 `package.json` 的 `version` 往上加（如 `1.0.0` → `1.0.1`）。
-   > electron-updater 只在「服务器版本 > 本机已安装版本」时才更新，所以版本号必须递增。
+1. **版本号**：打热更包脚本会**自动把 patch 段 +1**（如 `1.0.0` → `1.0.1`），不用手动改。
+   > electron-updater 只在「服务器版本 > 本机已安装版本」时才更新，所以版本号必须递增。脚本已替你保证。
+   > 打完包记得把改动的 `package.json` / `package-lock.json` 提交。已手动设好版本不想自增时，用 `npm run update:pack -- -NoVersionBump`（或给 bat 传 `-NoVersionBump`）。
 
 2. **打热更包**（用专门的脚本，别用 `npm run dist`）：
 
