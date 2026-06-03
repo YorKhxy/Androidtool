@@ -157,6 +157,9 @@ function SimpleApp() {
   // 更新日志弹窗：点版本号查看本版本更新内容（来自打进安装包的 release-notes.md）。
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [releaseNotesText, setReleaseNotesText] = useState<string>('');
+  // 手动「检查更新」：ref 标记本次为手动触发（后台检查静默，手动检查要给「已是最新/失败」反馈）。
+  const manualCheckRef = useRef(false);
+  const [checkResult, setCheckResult] = useState<string>('');
   // 自动更新状态（来自主进程 electron-updater 事件），驱动右下角更新提示条。
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -514,6 +517,23 @@ function SimpleApp() {
           if (status.state === 'available' || status.state === 'downloading' || status.state === 'downloaded') {
             setUpdateDismissed(false); // 有实质更新动作时重新弹出提示
           }
+          // 手动检查时给按钮旁文字反馈（后台检查不反馈，保持静默）。
+          if (manualCheckRef.current) {
+            if (status.state === 'checking') {
+              setCheckResult('检查中…');
+            } else if (status.state === 'not-available') {
+              manualCheckRef.current = false;
+              setCheckResult('已是最新版本');
+              window.setTimeout(() => setCheckResult(''), 4000);
+            } else if (status.state === 'error') {
+              manualCheckRef.current = false;
+              setCheckResult('检查失败，请确认更新服务器');
+              window.setTimeout(() => setCheckResult(''), 5000);
+            } else {
+              manualCheckRef.current = false;
+              setCheckResult(''); // available/downloading/downloaded → 交给提示框展示
+            }
+          }
         });
         const unsubscribeMirrorStatus = window.electronAPI!.onMirrorStatus((session) => {
           setMirrorSessionsByDeviceId(prev => ({ ...prev, [session.deviceId]: session }));
@@ -560,6 +580,20 @@ function SimpleApp() {
       if (result.success && result.data) setAppVersion(result.data);
     });
   }, []);
+
+  // 手动检查更新：标记为手动触发并显示「检查中…」，结果由 onUpdateStatus 回调据 manualCheckRef 给反馈。
+  const handleCheckUpdate = async () => {
+    if (!hasElectronAPI() || !window.electronAPI?.checkForUpdate) return;
+    manualCheckRef.current = true;
+    setCheckResult('检查中…');
+    setUpdateDismissed(false);
+    try {
+      await window.electronAPI.checkForUpdate();
+    } catch {
+      manualCheckRef.current = false;
+      setCheckResult('检查失败');
+    }
+  };
 
   // 点版本号：读取本版本更新日志（打进安装包的 release-notes.md）并弹窗展示。
   const openReleaseNotes = async () => {
@@ -2162,6 +2196,12 @@ function SimpleApp() {
               style={{ fontSize: '12px', color: '#93c5fd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline dotted' }}
             >v{appVersion}</button>
           )}
+          <button
+            onClick={handleCheckUpdate}
+            title={'\u5411\u66f4\u65b0\u670d\u52a1\u5668\u68c0\u67e5\u662f\u5426\u6709\u65b0\u7248\u672c'}
+            style={{ fontSize: '12px', color: '#cbd5e1', background: 'none', border: '1px solid #454560', borderRadius: '6px', cursor: 'pointer', padding: '2px 8px' }}
+          >{'\u68c0\u67e5\u66f4\u65b0'}</button>
+          {checkResult && <span style={{ fontSize: '12px', color: '#9ca3af' }}>{checkResult}</span>}
         </div>
       </header>
       {showReleaseNotes && (
