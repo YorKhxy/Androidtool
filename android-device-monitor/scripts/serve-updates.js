@@ -34,6 +34,26 @@ const CONTENT_TYPES = {
   '.json': 'application/json; charset=utf-8',
 };
 
+// 客户端 IP（去掉 IPv6 映射前缀 ::ffff:），用于显示是哪台 PC 来检查/下载更新。
+const clientIp = (req) => {
+  const ip = (req.socket && req.socket.remoteAddress) || '';
+  return ip.replace(/^::ffff:/, '') || '未知IP';
+};
+const stamp = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+// 按请求路径标注客户端动作：取 latest.yml = 检查更新；取安装包/blockmap = 下载更新（即在热更）。
+const actionLabel = (urlPath) => {
+  if (/latest.*\.yml$/i.test(urlPath)) return '   <= 检查更新';
+  if (/\.exe$/i.test(urlPath) || /\.blockmap$/i.test(urlPath)) return '   <= 下载更新（热更中）';
+  return '';
+};
+const logReq = (req, code, urlPath, extra) => {
+  console.log(`[${stamp()}] ${clientIp(req)}  ${code} ${urlPath}${extra || ''}${actionLabel(urlPath)}`);
+};
+
 const server = http.createServer((req, res) => {
   // 取出 path 部分并解码，去掉查询串。
   let urlPath;
@@ -57,7 +77,7 @@ const server = http.createServer((req, res) => {
     if (err || !stat.isFile()) {
       res.writeHead(404);
       res.end('Not Found');
-      console.log(`404 ${urlPath}`);
+      logReq(req, 404, urlPath);
       return;
     }
 
@@ -82,7 +102,7 @@ const server = http.createServer((req, res) => {
           'Content-Length': end - start + 1,
         });
         fs.createReadStream(resolved, { start, end }).pipe(res);
-        console.log(`206 ${urlPath} [${start}-${end}]`);
+        logReq(req, 206, urlPath, ` [${start}-${end}]`);
         return;
       }
     }
@@ -93,7 +113,7 @@ const server = http.createServer((req, res) => {
       'Accept-Ranges': 'bytes',
     });
     fs.createReadStream(resolved).pipe(res);
-    console.log(`200 ${urlPath}`);
+    logReq(req, 200, urlPath);
   });
 });
 
