@@ -461,15 +461,23 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         </div>
       )}
 
-      {/* 未完成传输恢复提示：进入该设备文件管理时若有上次没传完的批次，就地提示继续/丢弃 */}
+      {/* 未完成传输恢复提示：进入该设备文件管理时若有上次没传完的批次，就地提示继续/丢弃。
+          上传/下载用方向徽标（箭头+配色+文案）明显区分：上传=蓝色↑，下载=青色↓。 */}
       {resumeBatches.map((batch) => {
         const busy = resumeBusyBatchId === batch.batchId;
-        const directionLabel = batch.direction === 'upload' ? '上传' : '下载';
+        const isUpload = batch.direction === 'upload';
+        const accent = isUpload ? '#3b82f6' : '#14b8a6'; // 上传蓝 / 下载青
+        const badgeText = isUpload ? '↑ 上传到设备' : '↓ 从设备下载';
         return (
-          <div key={batch.batchId} style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#3a2e12', border: '1px solid #92710a', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div key={batch.batchId} style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#3a2e12', border: '1px solid #92710a', borderLeft: `4px solid ${accent}`, borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: '13px', color: '#fcd34d', fontWeight: 600 }}>
-                上次有 {batch.remaining} 个文件未{directionLabel}完
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                <span style={{ flexShrink: 0, fontSize: '11px', fontWeight: 700, color: '#fff', backgroundColor: accent, padding: '1px 8px', borderRadius: '10px', whiteSpace: 'nowrap' }}>
+                  {badgeText}
+                </span>
+                <span style={{ fontSize: '13px', color: '#fcd34d', fontWeight: 600 }}>
+                  上次有 {batch.remaining} 个文件没传完
+                </span>
               </div>
               <div style={{ fontSize: '11px', color: '#d6b35f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {batch.sampleNames.join('、')}{batch.remaining > batch.sampleNames.length ? ' …' : ''}
@@ -484,7 +492,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
               onClick={() => handleResumeBatch(batch)}
               disabled={busy || transferBusy}
               title={transferBusy ? '有传输进行中，稍候再继续' : ''}
-              style={{ flexShrink: 0, padding: '4px 12px', backgroundColor: busy || transferBusy ? '#374151' : '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: busy || transferBusy ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+              style={{ flexShrink: 0, padding: '4px 12px', backgroundColor: busy || transferBusy ? '#374151' : accent, border: 'none', borderRadius: '6px', color: '#fff', cursor: busy || transferBusy ? 'not-allowed' : 'pointer', fontSize: '12px' }}
             >继续</button>
           </div>
         );
