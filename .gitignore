@@ -6,6 +6,7 @@ dist/
 android-device-monitor/dist/
 android-device-monitor/src/release/
 android-device-monitor/release/
+android-device-monitor/update-releases/
 android-device-monitor/out/
 
 # Runtime artifacts

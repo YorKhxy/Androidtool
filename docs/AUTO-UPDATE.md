@@ -11,11 +11,11 @@
 ```
 你的电脑（开发 + 更新服务器）                朋友的电脑
 ┌─────────────────────────────┐          ┌────────────────────────┐
-│ npm run dist  → dist/        │          │ 已安装的 app            │
-│   安卓设备监控 Setup x.y.z.exe │  HTTP    │  启动时检查更新 ───────┐ │
-│   latest.yml                 │ ◀────────┤  发现新版→后台下载     │ │
-│   *.blockmap                 │  拉取     │  下完提示「重启更新」  │ │
-│ npm run serve:updates ───────┼─────────▶│                        │ │
+│ make-update-package.bat      │          │ 已安装的 app            │
+│   → update-releases\latest\  │  HTTP    │  启动时检查更新 ───────┐ │
+│      安卓设备监控 Setup ...exe │ ◀────────┤  发现新版→后台下载     │ │
+│      latest.yml / *.blockmap │  拉取     │  下完提示「重启更新」  │ │
+│ update-server-start.bat ─────┼─────────▶│                        │ │
 └─────────────────────────────┘          └────────────────────────┘
 ```
 
@@ -34,8 +34,10 @@
    **方式 A：双击** `scripts\make-update-package.bat`
    **方式 B：命令行** `npm run update:pack`
 
-   它会：备好内置 adb/scrcpy → 编译主进程并切到生产入口(index-prod) → 编译渲染层 → electron-builder 出 NSIS 包。
-   产物落在 `dist/`：`安卓设备监控 Setup x.y.z.exe`、`latest.yml`、`*.blockmap`（这三类是自动更新必需的）。
+   它会：备好内置 adb/scrcpy → 编译主进程并切到生产入口(index-prod) → 编译渲染层 → electron-builder 出 NSIS 包 → **自动归档产物**。
+   产物（`安卓设备监控 Setup x.y.z.exe`、`latest.yml`、`*.blockmap`）会从 dist 收纳到 `update-releases\` 下：
+   - `update-releases\v{版本}_{时间}\` —— 每次打包按版本归档一份，方便回看（dist 不再堆乱）
+   - `update-releases\latest\` —— 始终是最新一版，**更新服务器只服务这个目录**
 
    > ⚠️ 不要用 `npm run dist`：它不会先编译 build:main/renderer、也不切生产入口，打出来的包对自动更新不可用。
    > `build-and-package.ps1`（旧的 portable 打包）同样**不产 latest.yml**，不能用于热更。
@@ -50,7 +52,7 @@
    ```bash
    npm run serve:updates
    ```
-   默认服务 `dist/` 目录、端口 `8384`、监听 `0.0.0.0`（局域网/穿透都能访问）。
+   默认服务 `update-releases\latest` 目录、端口 `8384`、监听 `0.0.0.0`（局域网/穿透都能访问）。
    保持窗口开着；朋友的 app 启动时就能拉到更新。
 
    > 改了端口的话，`update-server-stop.bat` 里的 `PORT` 也要同步改成一样的值。
@@ -84,7 +86,7 @@
 
 ## 四、首次分发
 
-第一版还是要**手动发给朋友安装一次**（把 `安卓设备监控 Setup 1.0.0.exe` 发过去装上）。装上之后，以后的版本就全自动了，不用再传文件。
+第一版还是要**手动发给朋友安装一次**（把 `update-releases\latest\安卓设备监控 Setup x.y.z.exe` 发过去装上）。装上之后，以后的版本就全自动了，不用再传文件。
 
 ---
 

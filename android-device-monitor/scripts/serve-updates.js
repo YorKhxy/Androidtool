@@ -3,9 +3,9 @@
 // 供朋友端 app 的 electron-updater 拉取 latest.yml 与安装包做自动更新。
 //
 // 用法（在 android-device-monitor/ 下）：
-//   npm run serve:updates                 # 默认服务 dist/，端口 8384，监听 0.0.0.0
+//   npm run serve:updates                 # 默认服务 update-releases/latest，端口 8384，监听 0.0.0.0
 //   PORT=9000 npm run serve:updates       # 自定义端口
-//   node ./scripts/serve-updates.js dist 8384
+//   node ./scripts/serve-updates.js update-releases/latest 8384
 //
 // 要点：
 //  - 监听 0.0.0.0，局域网/内网穿透均可访问；朋友端把更新源 URL 指到 http://<你的地址>:<端口>/
@@ -17,7 +17,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const servedDirArg = process.argv[2] || 'dist';
+// 默认服务 update-releases/latest（make-update-package 每次打包刷新它，只含最新一版的干净产物）。
+const servedDirArg = process.argv[2] || 'update-releases/latest';
 const port = Number(process.env.PORT || process.argv[3] || 8384);
 // 从脚本所在位置推导项目根，再定位服务目录，不写死绝对路径。
 const root = path.resolve(__dirname, '..', servedDirArg);

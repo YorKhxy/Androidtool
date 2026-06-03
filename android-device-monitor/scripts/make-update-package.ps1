@@ -72,17 +72,36 @@ try {
     npx electron-builder --publish never
     if ($LASTEXITCODE -ne 0) { throw "electron-builder packaging failed" }
 
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "  Update package ready (in dist\)" -ForegroundColor Green
-    Write-Host "========================================" -ForegroundColor Cyan
-    $artifacts = Get-ChildItem (Join-Path $ProjectRoot "dist") -File |
+    # 归档产物：把自动更新需要的三类文件（Setup*.exe / latest.yml / *.blockmap）从 dist 收纳到
+    # update-releases\ 下，按「版本_时间」分文件夹存档，同时刷新 update-releases\latest（更新服务器只服务它）。
+    Write-Host "Organizing update artifacts..." -ForegroundColor Yellow
+    $stamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
+    $relRoot = Join-Path $ProjectRoot "update-releases"
+    $archiveDir = Join-Path $relRoot "v${version}_${stamp}"
+    $latestDir = Join-Path $relRoot "latest"
+    New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
+    if (Test-Path $latestDir) { Remove-Item -Path $latestDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $latestDir -Force | Out-Null
+
+    $updateFiles = Get-ChildItem (Join-Path $ProjectRoot "dist") -File |
         Where-Object { $_.Name -match 'Setup .*\.exe$' -or $_.Name -eq 'latest.yml' -or $_.Name -match '\.blockmap$' }
-    foreach ($a in $artifacts) {
-        Write-Host ("  {0}  ({1:N1} MB)" -f $a.Name, ($a.Length / 1MB)) -ForegroundColor White
+    if (-not $updateFiles) { throw "No update artifacts (Setup*.exe / latest.yml / *.blockmap) found in dist" }
+    foreach ($f in $updateFiles) {
+        Copy-Item $f.FullName -Destination $latestDir -Force   # 给更新服务器用
+        Move-Item $f.FullName -Destination $archiveDir -Force  # 从 dist 收纳进存档，保持 dist 干净
     }
+
     Write-Host ""
-    Write-Host "Next: run update-server-start.bat to serve dist\ to your friends' apps." -ForegroundColor Gray
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "  Update package ready" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "  Archive : $archiveDir" -ForegroundColor White
+    foreach ($a in (Get-ChildItem $archiveDir -File)) {
+        Write-Host ("    {0}  ({1:N1} MB)" -f $a.Name, ($a.Length / 1MB)) -ForegroundColor Gray
+    }
+    Write-Host "  Served  : $latestDir  (update server serves this)" -ForegroundColor White
+    Write-Host ""
+    Write-Host "Next: run update-server-start.bat (it serves update-releases\latest)." -ForegroundColor Gray
     Write-Host ""
 }
 catch {
