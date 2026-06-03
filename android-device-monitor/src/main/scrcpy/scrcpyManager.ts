@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import type { MirrorSession, MirrorStartOptions } from '../../shared/types';
 import { resolveBundledScrcpyBinaryPath } from './scrcpyBinary';
 import { resolveBundledAdbBinaryPath } from '../adb/adbBinary';
+import { logger } from '../logger';
 
 const execFileAsync = promisify(execFile);
 
@@ -98,9 +99,9 @@ export class ScrcpyManager {
       this.sessions.set(deviceId, child);
 
       child.on('spawn', () => {
-        // 若启动时即要求转发音频，主窗口起来后再拉起纯音频进程。
+        // 若启动时即要求转发音频，主窗口起来后再拉起纯音频进程（优先两边都出声）。
         if (meta.audioForwarded) {
-          this.startAudioForward(deviceId);
+          this.startAudioForward(deviceId, true);
         }
         this.emit({ deviceId, status: 'running', ...meta });
       });
@@ -155,29 +156,35 @@ export class ScrcpyManager {
   }
 
   /**
-   * 投屏过程中实时切换音频去向。forward=true 起一个纯音频 scrcpy 进程把声音转到电脑
-   * （设备本机静音）；forward=false 停掉它，声音回到设备本机。主视频窗口不受影响。
+   * 投屏过程中实时切换音频去向。forward=true 起一个纯音频 scrcpy 进程把声音转到电脑，
+   * 优先「两边都出声」（--audio-dup，需设备 Android 13+），不支持时自动降级为「仅电脑出声、
+   * 设备静音」；forward=false 停掉它，声音回到设备本机。主视频窗口不受影响。
    * 返回更新后的运行态会话（含 audioForwarded），无进行中投屏则返回 stopped。
    */
   setAudioForward(deviceId: string, forward: boolean): MirrorSession {
     if (!this.sessions.has(deviceId)) {
       return { deviceId, status: 'stopped' };
     }
-    if (forward) {
-      this.startAudioForward(deviceId);
-    } else {
-      this.stopAudioForward(deviceId);
-    }
+    // 先落 meta（再 start/stop）：让纯音频进程的 exit 回调能据此判断是否需要降级重试。
     const meta = this.sessionMeta.get(deviceId) ?? {};
     meta.audioForwarded = forward;
     this.sessionMeta.set(deviceId, meta);
+    if (forward) {
+      this.startAudioForward(deviceId, true);
+    } else {
+      this.stopAudioForward(deviceId);
+    }
     const session: MirrorSession = { deviceId, status: 'running', ...meta };
     this.emit(session);
     return session;
   }
 
-  /** 拉起纯音频 scrcpy 进程（--no-video --no-control --no-window）。已存在则复用。 */
-  private startAudioForward(deviceId: string): void {
+  /**
+   * 拉起纯音频 scrcpy 进程（--no-video --no-control --no-window）。已存在则复用。
+   * duplicate=true：--audio-source=playback + --audio-dup，设备与电脑同时出声（需 Android 13+）。
+   * duplicate=false：默认 output 源，仅电脑出声、设备静音（兼容低版本的降级兜底）。
+   */
+  private startAudioForward(deviceId: string, duplicate: boolean): void {
     if (this.audioSessions.has(deviceId)) {
       return;
     }
@@ -187,12 +194,24 @@ export class ScrcpyManager {
     }
     const adbPath = resolveBundledAdbBinaryPath();
     const env = adbPath ? { ...process.env, ADB: adbPath } : process.env;
-    // 纯音频：禁用视频转发、控制与窗口，仅把设备音频转到电脑播放。
     const args = ['-s', deviceId, '--no-video', '--no-control', '--no-window'];
+    if (duplicate) {
+      args.push('--audio-source=playback', '--audio-dup');
+    }
     const child = spawn(scrcpyPath, args, { env, windowsHide: true });
     this.audioSessions.set(deviceId, child);
+    const startedAt = Date.now();
     child.on('error', () => this.audioSessions.delete(deviceId));
-    child.on('exit', () => this.audioSessions.delete(deviceId));
+    child.on('exit', (code) => {
+      this.audioSessions.delete(deviceId);
+      // duplicate 模式若很快异常退出（设备多半 < Android 13、不支持 playback/audio-dup），
+      // 自动降级为 output 模式（仅电脑出声）。仅当用户仍要求转发且投屏仍在时重试。
+      const stillWanted = this.sessions.has(deviceId) && this.sessionMeta.get(deviceId)?.audioForwarded === true;
+      if (duplicate && code !== 0 && Date.now() - startedAt < 5000 && stillWanted) {
+        logger.warn('ScrcpyManager: audio-dup 不可用（设备可能低于 Android 13），降级为仅电脑出声');
+        this.startAudioForward(deviceId, false);
+      }
+    });
   }
 
   /** 停止纯音频进程，声音回到设备本机。 */

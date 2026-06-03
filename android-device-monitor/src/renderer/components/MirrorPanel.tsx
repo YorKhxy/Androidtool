@@ -158,7 +158,7 @@ export function MirrorPanel({ deviceName, isPico, session, starting, onStart, on
         </label>
         <label
           style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#cbd5e1', cursor: starting ? 'not-allowed' : 'pointer', opacity: starting ? 0.6 : 1 }}
-          title="默认声音留在设备本机播放；勾选把设备声音转到电脑（设备本机会静音）。投屏过程中可随时切换，不影响画面。"
+          title="默认声音只在设备本机播放；勾选后电脑也出声。设备 Android 13+ 时两边同时出声（设备不静音），低版本会自动降级为仅电脑出声（设备静音）。投屏过程中可随时切换，不影响画面。"
         >
           <input
             type="checkbox"

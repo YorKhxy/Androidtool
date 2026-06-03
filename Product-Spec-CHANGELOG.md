@@ -83,5 +83,6 @@
 - 恢复提示 UI 区分上传 / 下载：上传=蓝色↑徽标「上传到设备」，下载=青色↓徽标「从设备下载」，避免两者文案过于相近难辨。
 - 文件管理新增**批量删除**（2.6）：批量操作栏在「下载选中」旁增加「删除选中 (N)」，带二次确认（再点「确认删除 N 项」才执行），支持文件与文件夹，删完汇总成功 / 失败数。
 - 投屏新增**声音去向实时切换**（镜像模块）：勾选「把设备声音传到电脑」即可在设备本机 / 电脑间切换音频，默认留在设备。解决 Pico 等设备投屏时 scrcpy 默认把音频抢到电脑、设备静音的问题。
-  - 实现：主视频窗口永远 `--no-audio`，音频改由独立的「纯音频」scrcpy 进程（`--no-video --no-control --no-window`）承载。勾选起该进程（声音到电脑、设备静音）、取消停该进程（声音回设备）。**投屏过程中可随时切换，主画面不闪动**。新增 IPC `mirror:set-audio` 与 `MirrorSession.audioForwarded` 状态。
+  - 实现：主视频窗口永远 `--no-audio`，音频改由独立的「纯音频」scrcpy 进程（`--no-video --no-control --no-window`）承载。勾选起该进程、取消停该进程（声音回设备）。**投屏过程中可随时切换，主画面不闪动**。新增 IPC `mirror:set-audio` 与 `MirrorSession.audioForwarded` 状态。
+  - 「传到电脑」优先**两边同时出声**：纯音频进程用 `--audio-source=playback --audio-dup`，设备本机不静音、电脑也出声（需设备 Android 13+）。设备低于 13（多数 Pico）时纯音频进程会快速报错退出，自动降级为 `output` 源（仅电脑出声、设备静音），保证至少有声音。
 - 新增**自动更新（热更新）**能力：基于 electron-updater 的 generic provider，朋友端 app 启动时向「自建更新服务器」拉取 `latest.yml`，发现新版本后台增量下载新安装包，右下角提示「立即重启更新」。更新源地址支持环境变量 / userData 配置 / 打包默认三级解析，换 IP/穿透地址无需重打包。配套 `scripts/serve-updates.js`（支持 Range 的静态更新服务器）与 `docs/AUTO-UPDATE.md` 发版指南。免去每次手动传文件给用户。
