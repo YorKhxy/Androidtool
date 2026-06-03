@@ -63,7 +63,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "http://127.0.0.1:8384/"
+        "url": "http://192.168.1.158:8384/"
       }
     ],
     "files": [
