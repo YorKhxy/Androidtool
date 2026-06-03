@@ -35,6 +35,7 @@ export const IPC_CHANNELS = {
   SHOW_ITEM_IN_FOLDER: 'app:show-item-in-folder',
   OPEN_PATH: 'app:open-path',
   GET_APP_VERSION: 'app:get-version',
+  GET_RELEASE_NOTES: 'app:get-release-notes',
   PUSH_DEVICE_FILE: 'adb:push-device-file',
   PUSH_DEVICE_FILE_PROGRESS: 'adb:push-device-file-progress',
   SELECT_UPLOAD_FILES: 'adb:select-upload-files',

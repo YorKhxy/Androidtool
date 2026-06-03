@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showItemInFolder: (localPath) => ipcRenderer.invoke('app:show-item-in-folder', localPath),
   openPath: (targetPath) => ipcRenderer.invoke('app:open-path', targetPath),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+  getReleaseNotes: () => ipcRenderer.invoke('app:get-release-notes'),
   pullDeviceFiles: (deviceId, items, pullId) => ipcRenderer.invoke('adb:pull-device-files', deviceId, items, pullId),
   onPullProgress: (callback) => {
     const listener = (_, progress) => callback(progress);

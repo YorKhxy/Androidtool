@@ -154,6 +154,9 @@ function SimpleApp() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   // 应用版本号（显示在标题栏，便于确认是否已更新到最新版）。
   const [appVersion, setAppVersion] = useState<string>('');
+  // 更新日志弹窗：点版本号查看本版本更新内容（来自打进安装包的 release-notes.md）。
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
+  const [releaseNotesText, setReleaseNotesText] = useState<string>('');
   // 自动更新状态（来自主进程 electron-updater 事件），驱动右下角更新提示条。
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -557,6 +560,15 @@ function SimpleApp() {
       if (result.success && result.data) setAppVersion(result.data);
     });
   }, []);
+
+  // 点版本号：读取本版本更新日志（打进安装包的 release-notes.md）并弹窗展示。
+  const openReleaseNotes = async () => {
+    if (hasElectronAPI() && window.electronAPI?.getReleaseNotes) {
+      const result = await window.electronAPI.getReleaseNotes();
+      setReleaseNotesText(result.success && result.data ? result.data : '');
+    }
+    setShowReleaseNotes(true);
+  };
 
 
 
@@ -2127,9 +2139,28 @@ function SimpleApp() {
       <header style={{ height: '56px', backgroundColor: '#252540', borderBottom: '1px solid #353550', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
           <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
-          {appVersion && <span style={{ fontSize: '12px', color: '#6b7280' }}>v{appVersion}</span>}
+          {appVersion && (
+            <button
+              onClick={openReleaseNotes}
+              title={'\u67e5\u770b\u672c\u7248\u672c\u66f4\u65b0\u65e5\u5fd7'}
+              style={{ fontSize: '12px', color: '#93c5fd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline dotted' }}
+            >v{appVersion}</button>
+          )}
         </div>
       </header>
+      {showReleaseNotes && (
+        <div onClick={() => setShowReleaseNotes(false)} style={{ position: 'fixed', inset: 0, zIndex: 1200, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: '460px', maxHeight: '70vh', display: 'flex', flexDirection: 'column', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '12px', padding: '18px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <h2 style={{ fontSize: '15px', fontWeight: 700, margin: 0 }}>{'\u66f4\u65b0\u65e5\u5fd7'} {appVersion ? `v${appVersion}` : ''}</h2>
+              <button onClick={() => setShowReleaseNotes(false)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>\u00d7</button>
+            </div>
+            <div style={{ overflowY: 'auto', fontSize: '13px', color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6 }}>
+              {releaseNotesText.trim() ? releaseNotesText : '\u6682\u65e0\u672c\u7248\u672c\u66f4\u65b0\u8bf4\u660e\u3002'}
+            </div>
+          </div>
+        </div>
+      )}
       
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* 侧栏用 flex 列 + 各区块 order 控制顺序：ADB状态(0) → WiFi连接(1) → 设备列表(2) → 设备信息(3) → 历史设备(4)。

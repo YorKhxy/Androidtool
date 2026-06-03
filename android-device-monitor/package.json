@@ -1,6 +1,6 @@
 {
   "name": "android-device-monitor",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "安卓设备监控 - 设备监控工具",
   "main": "./dist/main/main/index.js",
   "scripts": {
@@ -72,7 +72,8 @@
     "files": [
       "dist/main/**/*",
       "dist/renderer/**/*",
-      "index.html"
+      "index.html",
+      "release-notes.md"
     ],
     "extraResources": [
       {

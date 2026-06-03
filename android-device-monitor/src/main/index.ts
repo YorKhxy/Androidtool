@@ -422,6 +422,16 @@ const setupIpcHandlers = () => {
     }
   });
 
+  // 读取打进安装包的本版本更新日志（release-notes.md），供「更新日志」弹窗展示。读不到返回空串。
+  ipcMain.handle(IPC_CHANNELS.GET_RELEASE_NOTES, async () => {
+    try {
+      const content = await fs.readFile(path.join(app.getAppPath(), 'release-notes.md'), 'utf-8');
+      return { success: true, data: content };
+    } catch {
+      return { success: true, data: '' };
+    }
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.PULL_DEVICE_FILE,
     async (_event, deviceId: string, remotePath: string, name: string, isDir: boolean) => {

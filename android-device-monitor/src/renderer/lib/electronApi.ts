@@ -71,6 +71,7 @@ export interface ElectronAPI {
   showItemInFolder: (localPath: string) => Promise<ElectronResult<undefined>>;
   openPath: (targetPath: string) => Promise<ElectronResult<undefined>>;
   getAppVersion: () => Promise<ElectronResult<string>>;
+  getReleaseNotes: () => Promise<ElectronResult<string>>;
   pullDeviceFiles: (deviceId: string, items: { path: string; name: string }[], pullId: string) => Promise<ElectronResult<PullFilesResult>>;
   onPullProgress: (callback: (progress: PullProgress) => void) => () => void;
   selectUploadFiles: () => Promise<ElectronResult<string[]>>;
