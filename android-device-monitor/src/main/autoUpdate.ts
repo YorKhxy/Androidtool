@@ -39,6 +39,24 @@ const send = (getWindow: () => BrowserWindow | null, status: UpdateStatus): void
   getWindow()?.webContents.send(IPC_CHANNELS.UPDATE_STATUS, status);
 };
 
+// electron-updater 的 releaseNotes 可能是字符串，或 [{version, note}] 数组（多版本累计）；统一成纯文本。
+const normalizeReleaseNotes = (notes: unknown): string | undefined => {
+  if (!notes) return undefined;
+  if (typeof notes === 'string') return notes.trim() || undefined;
+  if (Array.isArray(notes)) {
+    const text = notes
+      .map((n) => {
+        const item = n as { version?: string; note?: string | null };
+        const head = item.version ? `v${item.version}` : '';
+        return [head, item.note ?? ''].filter(Boolean).join('\n');
+      })
+      .filter(Boolean)
+      .join('\n\n');
+    return text.trim() || undefined;
+  }
+  return undefined;
+};
+
 // 初始化：配置 autoUpdater、覆盖更新源、绑定事件转发到渲染层。只执行一次。
 export const initAutoUpdate = (getWindow: () => BrowserWindow | null): void => {
   if (configured) return;
@@ -61,10 +79,10 @@ export const initAutoUpdate = (getWindow: () => BrowserWindow | null): void => {
   }
 
   autoUpdater.on('checking-for-update', () => send(getWindow, { state: 'checking' }));
-  autoUpdater.on('update-available', (info) => send(getWindow, { state: 'available', version: info.version }));
+  autoUpdater.on('update-available', (info) => send(getWindow, { state: 'available', version: info.version, releaseNotes: normalizeReleaseNotes(info.releaseNotes) }));
   autoUpdater.on('update-not-available', () => send(getWindow, { state: 'not-available' }));
   autoUpdater.on('download-progress', (p) => send(getWindow, { state: 'downloading', percent: Math.round(p.percent) }));
-  autoUpdater.on('update-downloaded', (info) => send(getWindow, { state: 'downloaded', version: info.version }));
+  autoUpdater.on('update-downloaded', (info) => send(getWindow, { state: 'downloaded', version: info.version, releaseNotes: normalizeReleaseNotes(info.releaseNotes) }));
   autoUpdater.on('error', (err) => send(getWindow, { state: 'error', error: err instanceof Error ? err.message : String(err) }));
 };
 

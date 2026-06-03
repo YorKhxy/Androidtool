@@ -29,6 +29,8 @@
    > electron-updater 只在「服务器版本 > 本机已安装版本」时才更新，所以版本号必须递增。脚本已替你保证。
    > 打完包记得把改动的 `package.json` / `package-lock.json` 提交。已手动设好版本不想自增时，用 `npm run update:pack -- -NoVersionBump`（或给 bat 传 `-NoVersionBump`）。
 
+1.5. **写本次更新说明**：编辑 `android-device-monitor\release-notes.md`，写这一版的更新内容。这段文字会被打进 `latest.yml`，朋友热更后会在「发现新版本 / 已就绪」提示里看到「本次更新说明」。
+
 2. **打热更包**（用专门的脚本，别用 `npm run dist`）：
 
    **方式 A：双击** `scripts\make-update-package.bat`

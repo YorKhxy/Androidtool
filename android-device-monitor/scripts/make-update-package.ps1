@@ -41,6 +41,8 @@ try {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "  Note: version was auto-bumped; remember to commit package.json" -ForegroundColor DarkYellow
     Write-Host "  (and package-lock.json) after a successful build." -ForegroundColor DarkYellow
+    Write-Host "  Reminder: edit release-notes.md before packing -- its content becomes this" -ForegroundColor DarkYellow
+    Write-Host "  version's update notes that friends see after auto-updating." -ForegroundColor DarkYellow
     Write-Host ""
 
     Write-Host "[1/5] Preparing bundled adb..." -ForegroundColor Yellow

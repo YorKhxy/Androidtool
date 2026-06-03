@@ -318,6 +318,7 @@ export interface UpdateStatus {
   version?: string; // available / downloaded 时的新版本号
   percent?: number; // downloading 时的进度百分比（0-100，整数）
   error?: string;   // error 时的错误信息
+  releaseNotes?: string; // available / downloaded 时的本次更新说明（来自 latest.yml）
 }
 
 export type IpcChannel =
