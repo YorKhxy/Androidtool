@@ -70,6 +70,40 @@ export interface PullFilesResult {
   failed: number;      // 失败的文件数
 }
 
+/** 文件传输方向：上传到设备 / 从设备下载。 */
+export type TransferDirection = 'upload' | 'download';
+
+/** 单个传输任务的状态。pending=未开始，transferring=进行中，done=已完成，failed=失败。 */
+export type TransferTaskStatus = 'pending' | 'transferring' | 'done' | 'failed';
+
+/**
+ * 一次文件传输任务（批量中的单个文件）。持久化到 userData/transfer-journal.json，
+ * 用于进程崩溃 / 被强杀后识别未完成任务并文件级续传。只有停留在 pending/transferring
+ * 的任务才算「需恢复的残留」；用户主动取消或失败的任务在了结时即移除，不进恢复队列。
+ */
+export interface TransferTask {
+  id: string;                  // 任务唯一 id
+  batchId: string;             // 所属批次 id（一次批量上传/下载共享同一 batchId）
+  direction: TransferDirection;
+  deviceId: string;            // 任务绑定的设备，恢复以原设备为前提
+  sourcePath: string;          // 上传=本地文件路径；下载=设备文件路径
+  targetPath: string;          // 上传=设备目标目录；下载=PC 保存目录
+  fileName: string;            // 文件名
+  size: number;                // 文件大小（字节），未知填 0
+  status: TransferTaskStatus;
+  createdAt: number;           // 创建时间戳
+  updatedAt: number;           // 最后更新时间戳
+}
+
+/** 启动时推送给渲染层的「可恢复批次」摘要，用于弹窗提示。 */
+export interface TransferResumeBatch {
+  batchId: string;
+  direction: TransferDirection;
+  deviceId: string;
+  remaining: number;           // 该批次未完成文件数
+  sampleNames: string[];       // 文件名样例（最多几个，供提示展示）
+}
+
 export interface ProcessInfo {
   pid: number;
   ppid: number;
