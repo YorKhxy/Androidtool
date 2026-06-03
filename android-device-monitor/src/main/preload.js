@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopMirror: (deviceId) => ipcRenderer.invoke('mirror:stop', deviceId),
   setMirrorAudio: (deviceId, forward) => ipcRenderer.invoke('mirror:set-audio', deviceId, forward),
   checkForUpdate: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
   quitAndInstallUpdate: () => ipcRenderer.invoke('update:quit-and-install'),
   onUpdateStatus: (callback) => {
     const listener = (_, status) => callback(status);

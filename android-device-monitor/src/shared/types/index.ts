@@ -366,6 +366,7 @@ export type IpcChannel =
   | 'mirror:set-audio'
   | 'update:status'
   | 'update:check'
+  | 'update:download'
   | 'update:quit-and-install'
   | 'log:export'
   | 'log:export-full'

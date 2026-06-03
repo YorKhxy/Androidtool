@@ -99,7 +99,7 @@ export const initAutoUpdate = (getWindow: () => BrowserWindow | null): void => {
   if (configured) return;
   configured = true;
 
-  autoUpdater.autoDownload = true; // 发现新版本即后台下载
+  autoUpdater.autoDownload = false; // 改为手动：发现新版本只提示，用户点「立即更新」才下载
   autoUpdater.autoInstallOnAppQuit = true; // 退出时自动安装已下好的更新
   // electron-updater 期望 logger 含 info/warn/error/debug，这里适配项目 logger。
   autoUpdater.logger = {
@@ -144,6 +144,11 @@ export const checkForUpdates = (): void => {
     autoUpdater.forceDevUpdateConfig = true;
   }
   autoUpdater.checkForUpdates().catch((err) => logger.warn('autoUpdate: check failed:', err));
+};
+
+// 手动开始下载更新（由渲染层「立即更新」按钮触发，autoDownload=false 下需显式调用）。
+export const downloadUpdate = (): void => {
+  autoUpdater.downloadUpdate().catch((err) => logger.warn('autoUpdate: downloadUpdate failed:', err));
 };
 
 // 立即退出并安装已下载好的更新（由渲染层「重启更新」按钮触发）。

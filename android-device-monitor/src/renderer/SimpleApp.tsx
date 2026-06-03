@@ -1442,6 +1442,16 @@ function SimpleApp() {
     }
   };
 
+  // 点「立即更新」：手动开始下载新版本（autoDownload 已关，需显式触发）。
+  const handleDownloadUpdate = async () => {
+    if (!hasElectronAPI() || !window.electronAPI?.downloadUpdate) return;
+    try {
+      await window.electronAPI.downloadUpdate();
+    } catch (err) {
+      setError('下载更新失败：' + (err as Error).message);
+    }
+  };
+
   // 立即重启并安装已下载好的新版本。
   const handleInstallUpdate = async () => {
     if (!hasElectronAPI()) return;
@@ -2097,17 +2107,23 @@ function SimpleApp() {
       {updateStatus && !updateDismissed && ['available', 'downloading', 'downloaded', 'error'].includes(updateStatus.state) && (
         <div style={{ position: 'fixed', right: '16px', bottom: '16px', zIndex: 1100, width: '300px', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '10px', padding: '12px 14px', boxShadow: '0 6px 20px rgba(0,0,0,0.45)' }}>
           {updateStatus.state === 'available' && (
-            <div style={{ fontSize: '13px', color: '#cbd5e1' }}>\u53d1\u73b0\u65b0\u7248\u672c {updateStatus.version ? `v${updateStatus.version}` : ''}\uff0c\u6b63\u5728\u51c6\u5907\u4e0b\u8f7d\u2026</div>
-          )}
-          {updateStatus.state === 'available' && updateStatus.releaseNotes && (
-            <div style={{ marginTop: '8px', maxHeight: '120px', overflowY: 'auto', fontSize: '12px', color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', padding: '8px' }}>
-              <div style={{ color: '#9ca3af', marginBottom: '4px' }}>{'\u672c\u6b21\u66f4\u65b0\u8bf4\u660e'}</div>
-              {updateStatus.releaseNotes}
+            <div>
+              <div style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 600, marginBottom: '8px' }}>{`发现新版本${updateStatus.version ? ` v${updateStatus.version}` : ''}`}</div>
+              {updateStatus.releaseNotes && (
+                <div style={{ marginBottom: '8px', maxHeight: '120px', overflowY: 'auto', fontSize: '12px', color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', padding: '8px' }}>
+                  <div style={{ color: '#9ca3af', marginBottom: '4px' }}>{'本次更新说明'}</div>
+                  {updateStatus.releaseNotes}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button onClick={() => setUpdateDismissed(true)} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>{'稍后'}</button>
+                <button onClick={handleDownloadUpdate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: '#16a34a', color: '#fff', cursor: 'pointer' }}>{'立即更新'}</button>
+              </div>
             </div>
           )}
           {updateStatus.state === 'downloading' && (
             <div>
-              <div style={{ fontSize: '13px', color: '#cbd5e1', marginBottom: '6px' }}>\u6b63\u5728\u4e0b\u8f7d\u65b0\u7248\u672c {updateStatus.version ? `v${updateStatus.version}` : ''}\u2026 {updateStatus.percent ?? 0}%</div>
+              <div style={{ fontSize: '13px', color: '#cbd5e1', marginBottom: '6px' }}>{`正在下载新版本${updateStatus.version ? ` v${updateStatus.version}` : ''} … ${updateStatus.percent ?? 0}%`}</div>
               <div style={{ height: '6px', backgroundColor: '#334155', borderRadius: '3px', overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${updateStatus.percent ?? 0}%`, backgroundColor: '#4a90d9', transition: 'width 240ms ease' }} />
               </div>
@@ -2115,23 +2131,23 @@ function SimpleApp() {
           )}
           {updateStatus.state === 'downloaded' && (
             <div>
-              <div style={{ fontSize: '13px', color: '#86efac', fontWeight: 600, marginBottom: '8px' }}>\u65b0\u7248\u672c {updateStatus.version ? `v${updateStatus.version}` : ''} \u5df2\u5c31\u7eea</div>
+              <div style={{ fontSize: '13px', color: '#86efac', fontWeight: 600, marginBottom: '8px' }}>{`新版本${updateStatus.version ? ` v${updateStatus.version}` : ''} 已就绪`}</div>
               {updateStatus.releaseNotes && (
                 <div style={{ marginBottom: '8px', maxHeight: '120px', overflowY: 'auto', fontSize: '12px', color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', padding: '8px' }}>
-                  <div style={{ color: '#9ca3af', marginBottom: '4px' }}>{'\u672c\u6b21\u66f4\u65b0\u8bf4\u660e'}</div>
+                  <div style={{ color: '#9ca3af', marginBottom: '4px' }}>{'本次更新说明'}</div>
                   {updateStatus.releaseNotes}
                 </div>
               )}
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                <button onClick={() => setUpdateDismissed(true)} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>\u7a0d\u540e</button>
-                <button onClick={handleInstallUpdate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: '#16a34a', color: '#fff', cursor: 'pointer' }}>\u7acb\u5373\u91cd\u542f\u66f4\u65b0</button>
+                <button onClick={() => setUpdateDismissed(true)} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>{'稍后'}</button>
+                <button onClick={handleInstallUpdate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: '#16a34a', color: '#fff', cursor: 'pointer' }}>{'立即重启更新'}</button>
               </div>
             </div>
           )}
           {updateStatus.state === 'error' && (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-              <span style={{ flex: 1, fontSize: '12px', color: '#fca5a5', wordBreak: 'break-all' }}>\u68c0\u67e5\u66f4\u65b0\u5931\u8d25\uff1a{updateStatus.error}</span>
-              <button onClick={() => setUpdateDismissed(true)} style={{ flexShrink: 0, padding: '2px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>\u77e5\u9053\u4e86</button>
+              <span style={{ flex: 1, fontSize: '12px', color: '#fca5a5', wordBreak: 'break-all' }}>{`检查更新失败：${updateStatus.error ?? ''}`}</span>
+              <button onClick={() => setUpdateDismissed(true)} style={{ flexShrink: 0, padding: '2px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>{'知道了'}</button>
             </div>
           )}
         </div>

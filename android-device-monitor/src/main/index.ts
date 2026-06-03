@@ -9,7 +9,7 @@ import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
-import { initAutoUpdate, checkForUpdates, quitAndInstallUpdate } from './autoUpdate';
+import { initAutoUpdate, checkForUpdates, downloadUpdate, quitAndInstallUpdate } from './autoUpdate';
 import * as fullLogRecorder from './fullLogRecorder';
 import * as transferJournal from './transferJournal';
 import {
@@ -730,6 +730,16 @@ const setupIpcHandlers = () => {
       return { success: true };
     } catch (error) {
       return toIpcErrorResponse(error, '检查更新失败');
+    }
+  });
+
+  // 手动开始下载更新（autoDownload=false，由「立即更新」按钮触发）。
+  ipcMain.handle(IPC_CHANNELS.UPDATE_DOWNLOAD, async () => {
+    try {
+      downloadUpdate();
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '下载更新失败');
     }
   });
 
