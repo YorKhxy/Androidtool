@@ -1,6 +1,6 @@
 {
   "name": "android-device-monitor",
-  "version": "1.0.5",
+  "version": "1.0.10",
   "description": "安卓设备监控 - 设备监控工具",
   "main": "./dist/main/main/index.js",
   "scripts": {
