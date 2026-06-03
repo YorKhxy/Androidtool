@@ -2105,12 +2105,12 @@ function SimpleApp() {
       overflow: 'hidden'
     }}>
       {updateStatus && !updateDismissed && ['available', 'downloading', 'downloaded', 'error'].includes(updateStatus.state) && (
-        <div style={{ position: 'fixed', right: '16px', bottom: '16px', zIndex: 1100, width: '300px', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '10px', padding: '12px 14px', boxShadow: '0 6px 20px rgba(0,0,0,0.45)' }}>
+        <div style={{ position: 'fixed', right: '16px', bottom: '16px', zIndex: 1100, width: '440px', maxWidth: 'calc(100vw - 32px)', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '10px', padding: '16px 18px', boxShadow: '0 6px 20px rgba(0,0,0,0.45)' }}>
           {updateStatus.state === 'available' && (
             <div>
               <div style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 600, marginBottom: '8px' }}>{`发现新版本${updateStatus.version ? ` v${updateStatus.version}` : ''}`}</div>
               {updateStatus.releaseNotes && (
-                <div style={{ marginBottom: '8px', maxHeight: '120px', overflowY: 'auto', fontSize: '12px', color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', padding: '8px' }}>
+                <div style={{ marginBottom: '10px', maxHeight: '300px', overflowY: 'auto', fontSize: '13px', lineHeight: 1.6, color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', padding: '10px 12px' }}>
                   <div style={{ color: '#9ca3af', marginBottom: '4px' }}>{'本次更新说明'}</div>
                   {updateStatus.releaseNotes}
                 </div>
@@ -2133,7 +2133,7 @@ function SimpleApp() {
             <div>
               <div style={{ fontSize: '13px', color: '#86efac', fontWeight: 600, marginBottom: '8px' }}>{`新版本${updateStatus.version ? ` v${updateStatus.version}` : ''} 已就绪`}</div>
               {updateStatus.releaseNotes && (
-                <div style={{ marginBottom: '8px', maxHeight: '120px', overflowY: 'auto', fontSize: '12px', color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', padding: '8px' }}>
+                <div style={{ marginBottom: '10px', maxHeight: '300px', overflowY: 'auto', fontSize: '13px', lineHeight: 1.6, color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', padding: '10px 12px' }}>
                   <div style={{ color: '#9ca3af', marginBottom: '4px' }}>{'本次更新说明'}</div>
                   {updateStatus.releaseNotes}
                 </div>
