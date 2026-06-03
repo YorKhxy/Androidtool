@@ -151,7 +151,8 @@ export const downloadUpdate = (): void => {
   autoUpdater.downloadUpdate().catch((err) => logger.warn('autoUpdate: downloadUpdate failed:', err));
 };
 
-// 立即退出并安装已下载好的更新（由渲染层「重启更新」按钮触发）。
+// 立即退出并安装已下载好的更新。quitAndInstall(isSilent=true, isForceRunAfter=true)：
+// 静默安装到当前安装目录（不弹 NSIS 向导、不需再次确认/选目录），安装完成后自动重启工具。
 export const quitAndInstallUpdate = (): void => {
-  autoUpdater.quitAndInstall();
+  autoUpdater.quitAndInstall(true, true);
 };

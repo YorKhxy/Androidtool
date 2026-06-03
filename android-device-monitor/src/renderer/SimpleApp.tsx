@@ -163,6 +163,8 @@ function SimpleApp() {
   // 自动更新状态（来自主进程 electron-updater 事件），驱动右下角更新提示条。
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
+  // 点「安装并重启」后显示全屏「正在安装…」遮罩，随后退出安装（文件被锁需退出后由 NSIS 替换）。
+  const [installing, setInstalling] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
   const [customDeviceNames, setCustomDeviceNames] = useState<Record<string, string>>(() => loadStoredDeviceNames());
   const [activeTab, setActiveTab] = useState<TabType>('devices');
@@ -1486,14 +1488,16 @@ function SimpleApp() {
     }
   };
 
-  // 立即重启并安装已下载好的新版本。
+  // 安装并重启：先显示全屏「正在安装」遮罩（留一帧给 UI 渲染），再触发静默安装+自动重启。
   const handleInstallUpdate = async () => {
     if (!hasElectronAPI()) return;
-    try {
-      await window.electronAPI!.quitAndInstallUpdate();
-    } catch (err) {
-      setError('安装更新失败：' + (err as Error).message);
-    }
+    setInstalling(true);
+    window.setTimeout(() => {
+      window.electronAPI!.quitAndInstallUpdate().catch((err) => {
+        setInstalling(false);
+        setError('安装更新失败：' + (err as Error).message);
+      });
+    }, 300);
   };
 
   // 投屏中实时切换音频去向（设备本机 / 电脑）。主进程返回更新后的会话，乐观更新本地状态。
@@ -2138,6 +2142,22 @@ function SimpleApp() {
       color: 'white',
       overflow: 'hidden'
     }}>
+      {installing && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 2000, backgroundColor: 'rgba(10,10,20,0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: '360px', textAlign: 'center', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '12px', padding: '28px 24px' }}>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: '10px' }}>
+              {`正在安装新版本${updateStatus?.version ? ` v${updateStatus.version}` : ''}…`}
+            </div>
+            <div style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: 1.7 }}>
+              {'工具会自动退出、安装到当前目录，'}<br />{'安装完成后自动重启，请稍候…'}
+            </div>
+            <div style={{ marginTop: '16px', height: '6px', backgroundColor: '#334155', borderRadius: '3px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: '40%', backgroundColor: '#4a90d9', borderRadius: '3px', animation: 'admIndeterminate 1.1s ease-in-out infinite' }} />
+            </div>
+          </div>
+          <style>{'@keyframes admIndeterminate{0%{margin-left:-40%}100%{margin-left:100%}}'}</style>
+        </div>
+      )}
       {updateStatus && !updateDismissed && ['available', 'downloading', 'downloaded'].includes(updateStatus.state) && (
         <div style={{ position: 'fixed', right: '16px', bottom: '16px', zIndex: 1100, width: '440px', maxWidth: 'calc(100vw - 32px)', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '10px', padding: '16px 18px', boxShadow: '0 6px 20px rgba(0,0,0,0.45)' }}>
           {updateStatus.state === 'available' && (
@@ -2174,7 +2194,7 @@ function SimpleApp() {
               )}
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                 <button onClick={() => setUpdateDismissed(true)} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>{'稍后'}</button>
-                <button onClick={handleInstallUpdate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: '#16a34a', color: '#fff', cursor: 'pointer' }}>{'立即重启更新'}</button>
+                <button onClick={handleInstallUpdate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: '#16a34a', color: '#fff', cursor: 'pointer' }}>{'立即安装并重启'}</button>
               </div>
             </div>
           )}
