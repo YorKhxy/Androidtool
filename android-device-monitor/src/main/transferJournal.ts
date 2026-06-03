@@ -16,6 +16,10 @@ const getTmpPath = (): string => `${getJournalPath()}.tmp`;
 
 let tasks: TransferTask[] = [];
 let loaded = false;
+// 应用是否正在退出。退出触发的传输中断不应标 failed / 清批次——要把进行中的任务
+// 保留为 transferring（可恢复），否则优雅关闭（任务管理器「结束任务」=WM_CLOSE）会把
+// before-quit 里 SIGTERM 掉的传输当成失败清出 journal，导致重启无可恢复项。
+let quitting = false;
 
 // 首次访问时从磁盘载入；文件不存在或解析失败一律容错为空（参照项目其它持久化的兜底写法）。
 const ensureLoaded = (): void => {
@@ -116,6 +120,13 @@ export const hasActiveTransfers = (): boolean => {
   ensureLoaded();
   return tasks.some((t) => t.status === 'transferring');
 };
+
+// 标记应用进入退出流程。置位后，传输执行器对中断不再标 failed / 清批次，保留为可恢复。
+export const setQuitting = (value: boolean): void => {
+  quitting = value;
+};
+
+export const isQuitting = (): boolean => quitting;
 
 // 清空全部任务（仅用于异常兜底 / 测试）。
 export const clearAll = (): void => {

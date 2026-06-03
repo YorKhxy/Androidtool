@@ -50,6 +50,8 @@ const cleanupBeforeQuit = async () => {
     clearLogQueue();
     scrcpyManager.stopAll();
     if (adbManager) {
+      // 先置位「退出中」：让被 SIGTERM 中断的传输保留为 transferring（可恢复），不被当成失败清出 journal。
+      transferJournal.setQuitting(true);
       // 退出前终止正在跑的传输子进程（SIGTERM）；journal 已逐步落盘，崩溃/强杀靠它兜底恢复。
       adbManager.cancelActiveTransfers();
       await adbManager.cleanup();

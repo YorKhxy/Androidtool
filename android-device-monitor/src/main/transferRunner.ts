@@ -111,6 +111,10 @@ export const runUploadBatch = async (
           uploadId, fileName: task.fileName, index, total, percent: 100, status: 'done',
         });
       } catch (err) {
+        // 应用退出导致的中断：保留为 transferring（可恢复），不标 failed、不继续、不清批次。
+        if (transferJournal.isQuitting()) {
+          return { succeeded, failed };
+        }
         transferJournal.markStatus(task.id, 'failed');
         failed++;
         send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
@@ -122,7 +126,10 @@ export const runUploadBatch = async (
     }
     return { succeeded, failed };
   } finally {
-    transferJournal.removeBatch(batch[0].batchId);
+    // 退出中不清批次，让 transferring/pending 残留进下次启动的恢复队列。
+    if (!transferJournal.isQuitting()) {
+      transferJournal.removeBatch(batch[0].batchId);
+    }
   }
 };
 
@@ -159,6 +166,10 @@ export const runDownloadBatch = async (
           pullId, fileName: task.fileName, index, total, status: 'done',
         });
       } catch (err) {
+        // 应用退出导致的中断：保留为 transferring（可恢复），不标 failed、不继续、不清批次。
+        if (transferJournal.isQuitting()) {
+          return { succeeded, failed };
+        }
         transferJournal.markStatus(task.id, 'failed');
         failed++;
         send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
@@ -168,7 +179,10 @@ export const runDownloadBatch = async (
     }
     return { succeeded, failed };
   } finally {
-    transferJournal.removeBatch(batch[0].batchId);
+    // 退出中不清批次，让 transferring/pending 残留进下次启动的恢复队列。
+    if (!transferJournal.isQuitting()) {
+      transferJournal.removeBatch(batch[0].batchId);
+    }
   }
 };
 
