@@ -2104,7 +2104,7 @@ function SimpleApp() {
       color: 'white',
       overflow: 'hidden'
     }}>
-      {updateStatus && !updateDismissed && ['available', 'downloading', 'downloaded', 'error'].includes(updateStatus.state) && (
+      {updateStatus && !updateDismissed && ['available', 'downloading', 'downloaded'].includes(updateStatus.state) && (
         <div style={{ position: 'fixed', right: '16px', bottom: '16px', zIndex: 1100, width: '440px', maxWidth: 'calc(100vw - 32px)', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '10px', padding: '16px 18px', boxShadow: '0 6px 20px rgba(0,0,0,0.45)' }}>
           {updateStatus.state === 'available' && (
             <div>
