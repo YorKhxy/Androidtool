@@ -152,6 +152,8 @@ const renderBatteryBadge = (device: DeviceInfo) => {
 function SimpleApp() {
   const [adbStatus, setAdbStatus] = useState<AdbStatus | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  // 工具是否初始化完成（IPC 就绪 + 初始数据加载 + 事件订阅完毕）。未就绪时全屏「启动中」遮罩挡住所有操作。
+  const [appReady, setAppReady] = useState(false);
   // 应用版本号（显示在标题栏，便于确认是否已更新到最新版）。
   const [appVersion, setAppVersion] = useState<string>('');
   // 更新日志弹窗：点版本号查看本版本更新内容（来自打进安装包的 release-notes.md）。
@@ -547,6 +549,9 @@ function SimpleApp() {
           });
         });
 
+        // 初始数据加载完、所有 IPC 事件订阅就绪 → 标记 app 就绪，撤掉「启动中」遮罩，放开操作。
+        setAppReady(true);
+
         return () => {
           unsubscribeAdbStatusChanged();
           unsubscribeDeviceListChanged();
@@ -565,6 +570,7 @@ function SimpleApp() {
           apkInstallProgressTimersRef.current.clear();
         };
       }
+      setAppReady(true); // 无 Electron（纯网页环境）也放开操作
     };
 
     const cleanupPromise = initApp();
@@ -581,6 +587,12 @@ function SimpleApp() {
     void window.electronAPI.getAppVersion().then((result) => {
       if (result.success && result.data) setAppVersion(result.data);
     });
+  }, []);
+
+  // 安全兜底：万一初始化某步卡住，最多 15 秒后也撤掉「启动中」遮罩，避免永久锁死。
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAppReady(true), 15000);
+    return () => window.clearTimeout(timer);
   }, []);
 
   // 手动检查更新：标记为手动触发并显示「检查中…」，结果由 onUpdateStatus 回调据 manualCheckRef 给反馈。
@@ -2142,6 +2154,18 @@ function SimpleApp() {
       color: 'white',
       overflow: 'hidden'
     }}>
+      {!appReady && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 3000, backgroundColor: '#1a1a2e', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: '320px', textAlign: 'center' }}>
+            <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff', marginBottom: '6px' }}>{'安卓设备监控'}</div>
+            <div style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '16px' }}>{'工具启动中，请稍候…'}</div>
+            <div style={{ height: '6px', backgroundColor: '#252540', borderRadius: '3px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: '40%', backgroundColor: '#4a90d9', borderRadius: '3px', animation: 'admIndeterminate 1.1s ease-in-out infinite' }} />
+            </div>
+          </div>
+          <style>{'@keyframes admIndeterminate{0%{margin-left:-40%}100%{margin-left:100%}}'}</style>
+        </div>
+      )}
       {installing && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 2000, backgroundColor: 'rgba(10,10,20,0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: '360px', textAlign: 'center', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '12px', padding: '28px 24px' }}>
