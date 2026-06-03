@@ -104,6 +104,12 @@ export interface TransferResumeBatch {
   sampleNames: string[];       // 文件名样例（最多几个，供提示展示）
 }
 
+/** 一批传输（新建或恢复）执行完毕的结果统计。 */
+export interface TransferBatchResult {
+  succeeded: number;
+  failed: number;
+}
+
 export interface ProcessInfo {
   pid: number;
   ppid: number;
@@ -323,6 +329,9 @@ export type IpcChannel =
   | 'adb:push-device-file'
   | 'adb:push-device-file-progress'
   | 'adb:select-upload-files'
+  | 'adb:resume-transfers'
+  | 'adb:discard-transfers'
+  | 'adb:transfer-resume-available'
   | 'adb:sleep-device'
   | 'adb:wake-device'
   | 'adb:unlock-device'

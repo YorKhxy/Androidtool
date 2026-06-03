@@ -46,6 +46,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('adb:push-device-file-progress', listener);
     return () => ipcRenderer.removeListener('adb:push-device-file-progress', listener);
   },
+  resumeTransfers: (batchId, transferId) => ipcRenderer.invoke('adb:resume-transfers', batchId, transferId),
+  discardTransfers: (batchId) => ipcRenderer.invoke('adb:discard-transfers', batchId),
+  onTransferResumeAvailable: (callback) => {
+    const listener = (_, batches) => callback(batches);
+    ipcRenderer.on('adb:transfer-resume-available', listener);
+    return () => ipcRenderer.removeListener('adb:transfer-resume-available', listener);
+  },
   launchApp: (deviceId, packageName) => ipcRenderer.invoke('adb:launch-app', deviceId, packageName),
   forceStopApp: (deviceId, packageName) => ipcRenderer.invoke('adb:force-stop-app', deviceId, packageName),
   sleepDevice: (deviceId) => ipcRenderer.invoke('adb:sleep-device', deviceId),

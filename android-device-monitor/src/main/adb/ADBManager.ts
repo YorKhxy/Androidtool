@@ -4,7 +4,7 @@ import { EventEmitter } from 'events';
 import * as path from 'path';
 import { statSync as nodeFsStatSync, mkdtempSync as nodeFsMkdtempSync, renameSync as nodeFsRenameSync, copyFileSync as nodeFsCopyFileSync, rmSync as nodeFsRmSync } from 'fs';
 import { tmpdir as nodeOsTmpdir } from 'os';
-import type { ExecFileOptions } from 'child_process';
+import type { ExecFileOptions, ChildProcess } from 'child_process';
 import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo } from '../../shared/types';
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
@@ -76,6 +76,8 @@ export class ADBManager extends EventEmitter {
   private batteryLevelCache = new Map<string, { checkedAt: number; batteryLevel?: number }>();
   private deviceMonitorTimer: NodeJS.Timeout | null = null;
   private isDeviceMonitorPolling = false;
+  // 正在进行的传输子进程（push/pull），退出前用于 SIGTERM 终止；进程自然结束时自行移除。
+  private activeTransferChildren = new Set<ChildProcess>();
   private adbStatus: AdbStatus = {
     available: false,
     version: null,
@@ -486,6 +488,9 @@ export class ADBManager extends EventEmitter {
       const child = spawn(adbBinary.path, ['-s', deviceId, 'push', localPath, tempRemotePath], {
         windowsHide: true,
       });
+      // 登记到活动传输集合，退出前可统一 SIGTERM；进程结束时移除。
+      this.activeTransferChildren.add(child);
+      child.once('close', () => this.activeTransferChildren.delete(child));
 
       let stderrText = '';
       let stdoutText = '';
@@ -615,11 +620,45 @@ export class ADBManager extends EventEmitter {
   private async runAdbPull(deviceId: string, remotePath: string, localPath: string): Promise<void> {
     const result = await this.execAdbWithExitCode(
       ['-s', deviceId, 'pull', remotePath, localPath],
-      { timeout: 300000, maxBuffer: 1024 * 1024 * 16 }
+      { timeout: 300000, maxBuffer: 1024 * 1024 * 16 },
+      (child) => {
+        // 登记 pull 子进程，退出前可统一 SIGTERM；结束时移除。
+        this.activeTransferChildren.add(child);
+        child.once('close', () => this.activeTransferChildren.delete(child));
+      }
     );
     const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
     if (result.exitCode !== 0 || output.includes('permission denied') || output.includes('error:')) {
       throw new Error(result.stderr.trim() || result.stdout.trim() || '拉取文件失败');
+    }
+  }
+
+  // 终止当前正在进行的所有传输子进程（push/pull 主进程）。退出前调用，给 adb 子进程发 SIGTERM。
+  // 仅登记 push/pull 主进程；push 落地的 mv、stat 轮询、rm 等毫秒级短命令不在集合内、不被回收。
+  // 仅能拦截优雅退出；进程被 SIGKILL 强杀 / 崩溃时拦不住，最终兜底是 journal 恢复。
+  cancelActiveTransfers(): void {
+    for (const child of this.activeTransferChildren) {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* 子进程可能已退出，忽略 */
+      }
+    }
+    this.activeTransferChildren.clear();
+  }
+
+  // 删除上传残留的临时文件（设备端 .part），用于「丢弃恢复」时清理设备端，失败忽略。
+  async removeRemotePartial(deviceId: string, remoteDir: string, fileName: string): Promise<void> {
+    const normalizedDir = this.normalizeRemoteDir(remoteDir);
+    const tempName = `.${fileName}.part`;
+    const tempPath = normalizedDir === '/' ? `/${tempName}` : `${normalizedDir}/${tempName}`;
+    try {
+      await this.execAdb(
+        ['-s', deviceId, 'shell', 'rm', '-f', this.quoteRemotePath(tempPath)],
+        { timeout: 5000, maxBuffer: 1024 * 64 }
+      );
+    } catch {
+      /* 残留清理失败忽略 */
     }
   }
 
@@ -1771,11 +1810,12 @@ export class ADBManager extends EventEmitter {
 
   private async execAdbWithExitCode(
     args: string[],
-    options?: ExecFileOptions
+    options?: ExecFileOptions,
+    onChild?: (child: ChildProcess) => void
   ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     const adbBinary = await this.resolveAdbBinary();
     return await new Promise((resolve, reject) => {
-      execFile(adbBinary.path, args, options, (error, stdout, stderr) => {
+      const child = execFile(adbBinary.path, args, options, (error, stdout, stderr) => {
         const stdoutText = Buffer.isBuffer(stdout) ? stdout.toString() : String(stdout ?? '');
         const stderrText = Buffer.isBuffer(stderr) ? stderr.toString() : String(stderr ?? '');
 
@@ -1809,6 +1849,7 @@ export class ADBManager extends EventEmitter {
         }
         reject(adbError);
       });
+      onChild?.(child);
     });
   }
 

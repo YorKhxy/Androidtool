@@ -18,6 +18,8 @@ import type {
   PullProgress,
   PullFilesResult,
   ProcessInfo,
+  TransferResumeBatch,
+  TransferBatchResult,
 } from '../../shared/types';
 
 export type ElectronResult<T> = {
@@ -68,6 +70,9 @@ export interface ElectronAPI {
   selectUploadFiles: () => Promise<ElectronResult<string[]>>;
   pushDeviceFile: (deviceId: string, remoteDir: string, localPaths: string[], uploadId: string) => Promise<ElectronResult<number>>;
   onPushProgress: (callback: (progress: PushProgress) => void) => () => void;
+  resumeTransfers: (batchId: string, transferId: string) => Promise<ElectronResult<TransferBatchResult>>;
+  discardTransfers: (batchId: string) => Promise<ElectronResult<undefined>>;
+  onTransferResumeAvailable: (callback: (batches: TransferResumeBatch[]) => void) => () => void;
   launchApp: (deviceId: string, packageName: string) => Promise<ElectronResult<{ packageName: string; output: string }>>;
   forceStopApp: (deviceId: string, packageName: string) => Promise<ElectronResult<undefined>>;
   sleepDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;

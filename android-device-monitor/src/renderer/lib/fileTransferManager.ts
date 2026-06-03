@@ -1,4 +1,4 @@
-import type { PushProgress, PullProgress, PullFilesResult } from '@/shared/types';
+import type { PushProgress, PullProgress, PullFilesResult, TransferResumeBatch, TransferBatchResult } from '@/shared/types';
 import { hasElectronAPI, ElectronResult } from './electronApi';
 
 // 文件传输（上传 / 批量下载）状态管理器——单例，存活于模块作用域，不随 FilesPanel 卸载而消失。
@@ -100,6 +100,45 @@ export const startPullFiles = async (
   emit();
   try {
     return await window.electronAPI.pullDeviceFiles(deviceId, items, pullId);
+  } finally {
+    activePullId = null;
+    state.pull = null;
+    state.pullDir = null;
+    emit();
+  }
+};
+
+// 恢复一批未完成传输（启动弹窗「继续」时调用）。复用与新建传输同一套 uploadId/pullId 进度通道，
+// 进度条照常显示。目标目录在主进程 journal 中，渲染层摘要无该信息，故进度条不展示「往哪传」。
+export const startResumeTransfer = async (
+  batch: TransferResumeBatch
+): Promise<ElectronResult<TransferBatchResult>> => {
+  ensureInit();
+  if (!hasElectronAPI() || !window.electronAPI) {
+    return { success: false, error: 'Electron 接口不可用' };
+  }
+  const transferId = `resume-${batch.batchId}-${Date.now()}`;
+  state.deviceId = batch.deviceId;
+  if (batch.direction === 'upload') {
+    activeUploadId = transferId;
+    state.uploadDir = null;
+    state.upload = { uploadId: transferId, fileName: '', index: 0, total: batch.remaining, percent: 0, status: 'uploading' };
+    emit();
+    try {
+      return await window.electronAPI.resumeTransfers(batch.batchId, transferId);
+    } finally {
+      activeUploadId = null;
+      state.upload = null;
+      state.uploadDir = null;
+      emit();
+    }
+  }
+  activePullId = transferId;
+  state.pullDir = null;
+  state.pull = { pullId: transferId, fileName: '', index: 0, total: batch.remaining, status: 'downloading' };
+  emit();
+  try {
+    return await window.electronAPI.resumeTransfers(batch.batchId, transferId);
   } finally {
     activePullId = null;
     state.pull = null;

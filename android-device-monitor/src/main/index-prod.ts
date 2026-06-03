@@ -9,6 +9,14 @@ import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
+import * as transferJournal from './transferJournal';
+import {
+  buildUploadBatch,
+  buildDownloadBatch,
+  runUploadBatch,
+  runDownloadBatch,
+  discardBatch,
+} from './transferRunner';
 
 let mainWindow: BrowserWindow | null = null;
 let adbManager: ADBManager;
@@ -42,6 +50,8 @@ const cleanupBeforeQuit = async () => {
     clearLogQueue();
     scrcpyManager.stopAll();
     if (adbManager) {
+      // 退出前终止正在跑的传输子进程（SIGTERM）；journal 已逐步落盘，崩溃/强杀靠它兜底恢复。
+      adbManager.cancelActiveTransfers();
       await adbManager.cleanup();
     }
     isCleanupComplete = true;
@@ -153,6 +163,15 @@ const createWindow = () => {
   const rendererPath = resolveRendererIndexPath();
   console.log('Loading renderer from:', rendererPath);
   mainWindow.loadFile(rendererPath);
+
+  // 渲染层加载完成后，若 journal 有未完成传输（上次崩溃/被杀残留），推送可恢复批次摘要，
+  // 由渲染层弹窗提示「继续/丢弃」。等 did-finish-load 保证渲染层已订阅事件。
+  mainWindow.webContents.once('did-finish-load', () => {
+    const batches = transferJournal.getResumeBatches();
+    if (batches.length > 0) {
+      mainWindow?.webContents.send(IPC_CHANNELS.TRANSFER_RESUME_AVAILABLE, batches);
+    }
+  });
 
   mainWindow.on('closed', () => {
     clearLogQueue();
@@ -429,28 +448,12 @@ const setupIpcHandlers = () => {
           return { success: false, error: '取消下载' };
         }
         const savedDir = dirResult.filePaths[0];
-        const total = items.length;
-        let succeeded = 0;
-        let failed = 0;
-
-        for (let index = 0; index < total; index++) {
-          const item = items[index];
-          mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
-            pullId, fileName: item.name, index, total, status: 'downloading',
-          });
-          try {
-            await adbManager.pullDeviceFile(deviceId, item.path, path.join(savedDir, item.name));
-            succeeded++;
-            mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
-              pullId, fileName: item.name, index, total, status: 'done',
-            });
-          } catch (err) {
-            failed++;
-            mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
-              pullId, fileName: item.name, index, total, status: 'error', error: (err as Error).message,
-            });
-          }
-        }
+        // 先把整批任务落盘（pending），再逐个执行；中途崩溃靠 journal 恢复。
+        const batch = buildDownloadBatch(deviceId, savedDir, items);
+        transferJournal.createBatch(batch);
+        const send = (channel: string, payload: unknown) =>
+          mainWindow?.webContents.send(channel, payload);
+        const { succeeded, failed } = await runDownloadBatch(adbManager, send, batch, pullId);
         return { success: true, data: { savedDir, succeeded, failed } };
       } catch (error) {
         return toIpcErrorResponse(error, '批量下载失败');
@@ -476,34 +479,51 @@ const setupIpcHandlers = () => {
   ipcMain.handle(
     IPC_CHANNELS.PUSH_DEVICE_FILE,
     async (_event, deviceId: string, remoteDir: string, localPaths: string[], uploadId: string) => {
-      const total = localPaths.length;
       try {
-        for (let index = 0; index < total; index++) {
-          const localPath = localPaths[index];
-          const fileName = path.basename(localPath);
-          try {
-            await adbManager.pushDeviceFile(deviceId, localPath, remoteDir, fileName, (percent) => {
-              mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
-                uploadId, fileName, index, total, percent, status: 'uploading',
-              });
-            });
-            mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
-              uploadId, fileName, index, total, percent: 100, status: 'done',
-            });
-          } catch (err) {
-            mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
-              uploadId, fileName, index, total, percent: 0, status: 'error',
-              error: (err as Error).message,
-            });
-            throw err;
-          }
-        }
-        return { success: true, data: total };
+        const batch = buildUploadBatch(deviceId, remoteDir, localPaths);
+        transferJournal.createBatch(batch);
+        const send = (channel: string, payload: unknown) =>
+          mainWindow?.webContents.send(channel, payload);
+        // 新建上传保持「首个失败即中止整批」语义（stopOnError=true）。
+        const { succeeded } = await runUploadBatch(adbManager, send, batch, uploadId, true);
+        return { success: true, data: succeeded };
       } catch (error) {
         return toIpcErrorResponse(error, '上传文件失败');
       }
     }
   );
+
+  // 恢复一批未完成传输：从 journal 取回任务，按方向走对应执行器（跳过已 done）。
+  // transferId 由渲染层传入，作为进度通道的 uploadId/pullId，复用现有进度展示。
+  ipcMain.handle(
+    IPC_CHANNELS.RESUME_TRANSFERS,
+    async (_event, batchId: string, transferId: string) => {
+      try {
+        const batch = transferJournal.getBatch(batchId);
+        if (batch.length === 0) {
+          return { success: false, error: '没有可恢复的任务' };
+        }
+        const send = (channel: string, payload: unknown) =>
+          mainWindow?.webContents.send(channel, payload);
+        const result = batch[0].direction === 'upload'
+          ? await runUploadBatch(adbManager, send, batch, transferId, false)
+          : await runDownloadBatch(adbManager, send, batch, transferId);
+        return { success: true, data: result };
+      } catch (error) {
+        return toIpcErrorResponse(error, '恢复传输失败');
+      }
+    }
+  );
+
+  // 丢弃一批未完成传输：清理残留 .part 并移出 journal，下次启动不再提示。
+  ipcMain.handle(IPC_CHANNELS.DISCARD_TRANSFERS, async (_event, batchId: string) => {
+    try {
+      await discardBatch(adbManager, batchId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '丢弃传输失败');
+    }
+  });
 
   ipcMain.handle(IPC_CHANNELS.UNINSTALL_APP, async (_event, deviceId: string, packageName: string) => {
     try {
