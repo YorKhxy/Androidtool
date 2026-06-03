@@ -405,6 +405,14 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.GET_APP_VERSION, async () => {
+    try {
+      return { success: true, data: app.getVersion() };
+    } catch (error) {
+      return toIpcErrorResponse(error, '获取版本号失败');
+    }
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.PULL_DEVICE_FILE,
     async (_event, deviceId: string, remotePath: string, name: string, isDir: boolean) => {

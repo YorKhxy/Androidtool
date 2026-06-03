@@ -345,6 +345,7 @@ export type IpcChannel =
   | 'adb:pull-device-file-progress'
   | 'adb:delete-device-file'
   | 'app:show-item-in-folder'
+  | 'app:get-version'
   | 'adb:push-device-file'
   | 'adb:push-device-file-progress'
   | 'adb:select-upload-files'

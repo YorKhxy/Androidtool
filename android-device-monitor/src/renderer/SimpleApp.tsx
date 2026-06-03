@@ -152,6 +152,8 @@ const renderBatteryBadge = (device: DeviceInfo) => {
 function SimpleApp() {
   const [adbStatus, setAdbStatus] = useState<AdbStatus | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  // 应用版本号（显示在标题栏，便于确认是否已更新到最新版）。
+  const [appVersion, setAppVersion] = useState<string>('');
   // 自动更新状态（来自主进程 electron-updater 事件），驱动右下角更新提示条。
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -548,7 +550,15 @@ function SimpleApp() {
     };
   }, [applyDeviceList, enqueueLogEntries, removeDeviceLogState]);
 
-  
+  // 启动时取一次应用版本号，显示在标题栏，便于确认是否已更新到最新版。
+  useEffect(() => {
+    if (!hasElectronAPI() || !window.electronAPI?.getAppVersion) return;
+    void window.electronAPI.getAppVersion().then((result) => {
+      if (result.success && result.data) setAppVersion(result.data);
+    });
+  }, []);
+
+
 
   useEffect(() => {
     if (selectedDevice && activeTab === 'performance' && performanceEnabledDeviceIds.has(selectedDevice.id)) {
@@ -2115,7 +2125,10 @@ function SimpleApp() {
         </div>
       )}
       <header style={{ height: '56px', backgroundColor: '#252540', borderBottom: '1px solid #353550', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between' }}>
-        <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+          <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
+          {appVersion && <span style={{ fontSize: '12px', color: '#6b7280' }}>v{appVersion}</span>}
+        </div>
       </header>
       
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
