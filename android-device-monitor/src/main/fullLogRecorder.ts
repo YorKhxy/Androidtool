@@ -3,22 +3,37 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { LogEntry } from '../shared/types';
 import { logger } from './logger';
+import { resolveRuntimeAppRoot } from './performanceSnapshots';
 
-// 完整日志落盘：把 logcat 抓到的每一条（全等级、从监控第一行起）实时写进 userData 下的会话文件。
+// 完整日志落盘：把 logcat 抓到的每一条（全等级、从监控第一行起）实时写进会话文件。
 // 不受渲染层「每设备最多 2 万条」UI 上限影响，也先于主进程→渲染层的背压队列，因此能保证
 // 「从监控开始到结束、一条不丢」。供「导出完整原始日志」使用。每次 startLogcat 开新文件（截断重来）。
+//
+// 落盘位置：exe 所在目录下的 device-logs\（打包时即安装目录，开发时即项目根目录），
+// 文件夹名 device-logs 与工具自身日志区分。若该目录不可写（如装到 Program Files），兜底回 userData。
+
+const DIR_NAME = 'device-logs';
 
 const streams = new Map<string, fs.WriteStream>();
 const filePaths = new Map<string, string>();
 
+// 解析落盘目录：优先 exe 所在目录/device-logs；不可写则回退到 userData/device-logs。
 const getDir = (): string => {
-  const dir = path.join(app.getPath('userData'), 'full-logs');
+  const primary = path.join(resolveRuntimeAppRoot(app), DIR_NAME);
   try {
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(primary, { recursive: true });
+    fs.accessSync(primary, fs.constants.W_OK); // 确认可写（Program Files 等只读目录会抛）
+    return primary;
   } catch {
-    /* 已存在或创建失败（失败时下方 createWriteStream 会报错并被吞） */
+    const fallback = path.join(app.getPath('userData'), DIR_NAME);
+    try {
+      fs.mkdirSync(fallback, { recursive: true });
+    } catch {
+      /* 兜底目录也建失败时，下方 createWriteStream 会报错并被吞 */
+    }
+    logger.warn('fullLogRecorder: exe 目录不可写，完整日志回退到 userData/device-logs');
+    return fallback;
   }
-  return dir;
 };
 
 // deviceId 可能含 ':' '/' 等不能做文件名的字符（如 wifi 的 ip:port），统一替换。

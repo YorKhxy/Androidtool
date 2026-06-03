@@ -69,8 +69,10 @@ describe('project smoke checks', () => {
     const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
     const channels = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
     const preload = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
-    // 落盘文件放 userData，不暴露宿主绝对路径；流式写入，提供导出取路径
-    expect(recorder).toContain("app.getPath('userData')");
+    // 落盘到 exe 所在目录的 device-logs（打包=安装目录/开发=项目根），不可写时回退 userData；流式写入
+    expect(recorder).toContain('resolveRuntimeAppRoot');
+    expect(recorder).toContain("'device-logs'");
+    expect(recorder).toContain("app.getPath('userData')"); // 兜底
     expect(recorder).toContain('createWriteStream');
     expect(recorder).toContain('export const getPath');
     // 在 logcat 回调里先于渲染层队列写盘，保证不丢
