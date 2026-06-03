@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
@@ -152,6 +152,9 @@ const renderBatteryBadge = (device: DeviceInfo) => {
 function SimpleApp() {
   const [adbStatus, setAdbStatus] = useState<AdbStatus | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  // 自动更新状态（来自主进程 electron-updater 事件），驱动右下角更新提示条。
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
   const [customDeviceNames, setCustomDeviceNames] = useState<Record<string, string>>(() => loadStoredDeviceNames());
   const [activeTab, setActiveTab] = useState<TabType>('devices');
@@ -501,6 +504,12 @@ function SimpleApp() {
         const unsubscribeLogBatch = window.electronAPI!.onLogBatch((entries) => {
           enqueueLogEntries(entries);
         });
+        const unsubscribeUpdateStatus = window.electronAPI!.onUpdateStatus((status) => {
+          setUpdateStatus(status);
+          if (status.state === 'available' || status.state === 'downloading' || status.state === 'downloaded') {
+            setUpdateDismissed(false); // 有实质更新动作时重新弹出提示
+          }
+        });
         const unsubscribeMirrorStatus = window.electronAPI!.onMirrorStatus((session) => {
           setMirrorSessionsByDeviceId(prev => ({ ...prev, [session.deviceId]: session }));
           setMirrorStartingDeviceIds(prev => {
@@ -519,6 +528,7 @@ function SimpleApp() {
           unsubscribeLogEntry();
           unsubscribeLogBatch();
           unsubscribeMirrorStatus();
+          unsubscribeUpdateStatus();
           logStatesRef.current.forEach(state => {
             if (state.flushTimer !== null) {
               window.clearTimeout(state.flushTimer);
@@ -1410,6 +1420,16 @@ function SimpleApp() {
     }
   };
 
+  // 立即重启并安装已下载好的新版本。
+  const handleInstallUpdate = async () => {
+    if (!hasElectronAPI()) return;
+    try {
+      await window.electronAPI!.quitAndInstallUpdate();
+    } catch (err) {
+      setError('安装更新失败：' + (err as Error).message);
+    }
+  };
+
   // 投屏中实时切换音频去向（设备本机 / 电脑）。主进程返回更新后的会话，乐观更新本地状态。
   const handleToggleMirrorAudio = async (forward: boolean) => {
     if (!selectedDevice || !hasElectronAPI()) return;
@@ -2039,6 +2059,36 @@ function SimpleApp() {
       color: 'white',
       overflow: 'hidden'
     }}>
+      {updateStatus && !updateDismissed && ['available', 'downloading', 'downloaded', 'error'].includes(updateStatus.state) && (
+        <div style={{ position: 'fixed', right: '16px', bottom: '16px', zIndex: 1100, width: '300px', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '10px', padding: '12px 14px', boxShadow: '0 6px 20px rgba(0,0,0,0.45)' }}>
+          {updateStatus.state === 'available' && (
+            <div style={{ fontSize: '13px', color: '#cbd5e1' }}>\u53d1\u73b0\u65b0\u7248\u672c {updateStatus.version ? `v${updateStatus.version}` : ''}\uff0c\u6b63\u5728\u51c6\u5907\u4e0b\u8f7d\u2026</div>
+          )}
+          {updateStatus.state === 'downloading' && (
+            <div>
+              <div style={{ fontSize: '13px', color: '#cbd5e1', marginBottom: '6px' }}>\u6b63\u5728\u4e0b\u8f7d\u65b0\u7248\u672c {updateStatus.version ? `v${updateStatus.version}` : ''}\u2026 {updateStatus.percent ?? 0}%</div>
+              <div style={{ height: '6px', backgroundColor: '#334155', borderRadius: '3px', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${updateStatus.percent ?? 0}%`, backgroundColor: '#4a90d9', transition: 'width 240ms ease' }} />
+              </div>
+            </div>
+          )}
+          {updateStatus.state === 'downloaded' && (
+            <div>
+              <div style={{ fontSize: '13px', color: '#86efac', fontWeight: 600, marginBottom: '8px' }}>\u65b0\u7248\u672c {updateStatus.version ? `v${updateStatus.version}` : ''} \u5df2\u5c31\u7eea</div>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button onClick={() => setUpdateDismissed(true)} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>\u7a0d\u540e</button>
+                <button onClick={handleInstallUpdate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: '#16a34a', color: '#fff', cursor: 'pointer' }}>\u7acb\u5373\u91cd\u542f\u66f4\u65b0</button>
+              </div>
+            </div>
+          )}
+          {updateStatus.state === 'error' && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+              <span style={{ flex: 1, fontSize: '12px', color: '#fca5a5', wordBreak: 'break-all' }}>\u68c0\u67e5\u66f4\u65b0\u5931\u8d25\uff1a{updateStatus.error}</span>
+              <button onClick={() => setUpdateDismissed(true)} style={{ flexShrink: 0, padding: '2px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>\u77e5\u9053\u4e86</button>
+            </div>
+          )}
+        </div>
+      )}
       <header style={{ height: '56px', backgroundColor: '#252540', borderBottom: '1px solid #353550', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between' }}>
         <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
       </header>

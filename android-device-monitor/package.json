@@ -15,6 +15,7 @@
     "start": "electron .",
     "pack": "npm run adb:prepare && npm run scrcpy:prepare && electron-builder --dir",
     "dist": "npm run adb:prepare && npm run scrcpy:prepare && electron-builder",
+    "serve:updates": "node ./scripts/serve-updates.js",
     "release": "powershell -ExecutionPolicy Bypass -File ./scripts/build-and-package.ps1",
     "release-bat": "scripts\\build-and-package.bat",
     "test": "jest"
@@ -47,6 +48,7 @@
   },
   "dependencies": {
     "adbkit": "^2.11.1",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^0.290.0",
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
@@ -57,6 +59,12 @@
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://127.0.0.1:8384/"
+      }
+    ],
     "files": [
       "dist/main/**/*",
       "dist/renderer/**/*",

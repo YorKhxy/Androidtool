@@ -20,6 +20,7 @@ import type {
   ProcessInfo,
   TransferResumeBatch,
   TransferBatchResult,
+  UpdateStatus,
 } from '../../shared/types';
 
 export type ElectronResult<T> = {
@@ -55,6 +56,9 @@ export interface ElectronAPI {
   startMirror: (deviceId: string, options?: MirrorStartOptions) => Promise<ElectronResult<MirrorSession>>;
   stopMirror: (deviceId: string) => Promise<ElectronResult<undefined>>;
   setMirrorAudio: (deviceId: string, forward: boolean) => Promise<ElectronResult<MirrorSession>>;
+  checkForUpdate: () => Promise<ElectronResult<undefined>>;
+  quitAndInstallUpdate: () => Promise<ElectronResult<undefined>>;
+  onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
   onMirrorStatus: (callback: (session: MirrorSession) => void) => () => void;
   selectApkFiles: () => Promise<ElectronResult<string[]>>;
   installApk: (deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean }) => Promise<ElectronResult<ApkInstallResult>>;

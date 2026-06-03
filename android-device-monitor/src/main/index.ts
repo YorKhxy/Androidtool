@@ -9,6 +9,7 @@ import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
+import { initAutoUpdate, checkForUpdates, quitAndInstallUpdate } from './autoUpdate';
 import * as transferJournal from './transferJournal';
 import {
   buildUploadBatch,
@@ -674,6 +675,26 @@ const setupIpcHandlers = () => {
     }
   });
 
+  // 手动触发检查更新（设置里「检查更新」按钮可用）。
+  ipcMain.handle(IPC_CHANNELS.UPDATE_CHECK, async () => {
+    try {
+      checkForUpdates();
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '检查更新失败');
+    }
+  });
+
+  // 立即重启并安装已下载好的更新。
+  ipcMain.handle(IPC_CHANNELS.UPDATE_QUIT_AND_INSTALL, async () => {
+    try {
+      quitAndInstallUpdate();
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '安装更新失败');
+    }
+  });
+
   scrcpyManager.onStatus((session) => {
     mainWindow?.webContents.send(IPC_CHANNELS.MIRROR_STATUS, session);
   });
@@ -702,6 +723,10 @@ app.whenReady().then(() => {
   setupIpcHandlers();
   adbManager.startDeviceMonitoring();
   void adbManager.getAdbStatus(true);
+
+  // 自动更新：初始化事件转发，并在启动后检查一次（开发期默认跳过）。
+  initAutoUpdate(() => mainWindow);
+  checkForUpdates();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -306,6 +306,17 @@ export interface MirrorStartOptions {
   forwardAudio?: boolean;
 }
 
+/** 自动更新状态机。checking=检查中，available=发现新版本，not-available=已最新，
+ *  downloading=下载中（带 percent），downloaded=下好待重启安装，error=出错。 */
+export type UpdateState = 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+
+export interface UpdateStatus {
+  state: UpdateState;
+  version?: string; // available / downloaded 时的新版本号
+  percent?: number; // downloading 时的进度百分比（0-100，整数）
+  error?: string;   // error 时的错误信息
+}
+
 export type IpcChannel =
   | 'adb:get-status'
   | 'adb:get-devices'
@@ -347,6 +358,9 @@ export type IpcChannel =
   | 'mirror:stop'
   | 'mirror:status'
   | 'mirror:set-audio'
+  | 'update:status'
+  | 'update:check'
+  | 'update:quit-and-install'
   | 'log:export'
   | 'log:entry'
   | 'log:batch'
