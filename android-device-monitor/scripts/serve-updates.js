@@ -44,14 +44,16 @@ const stamp = () => {
   const p = (n) => String(n).padStart(2, '0');
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 };
-// 按请求路径标注客户端动作：取 latest.yml = 检查更新；取安装包/blockmap = 下载更新（即在热更）。
-const actionLabel = (urlPath) => {
+// 按请求路径+状态码标注客户端动作。注意：旧版 .blockmap 的 404 是 electron-updater 增量更新
+// 探测旧版块图未命中、随后自动回退完整下载的正常现象，单独标注以免误以为出错。
+const actionLabel = (urlPath, code) => {
+  if (code === 404 && /\.blockmap$/i.test(urlPath)) return '   <= 增量探测未命中（正常，回退完整下载）';
   if (/latest.*\.yml$/i.test(urlPath)) return '   <= 检查更新';
   if (/\.exe$/i.test(urlPath) || /\.blockmap$/i.test(urlPath)) return '   <= 下载更新（热更中）';
   return '';
 };
 const logReq = (req, code, urlPath, extra) => {
-  console.log(`[${stamp()}] ${clientIp(req)}  ${code} ${urlPath}${extra || ''}${actionLabel(urlPath)}`);
+  console.log(`[${stamp()}] ${clientIp(req)}  ${code} ${urlPath}${extra || ''}${actionLabel(urlPath, code)}`);
 };
 
 const server = http.createServer((req, res) => {
