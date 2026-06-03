@@ -292,6 +292,7 @@ export interface MirrorSession {
   crop?: string; // scrcpy --crop 参数，Pico 单眼裁切，如 "1920:1920:0:0"
   maxSize?: number; // scrcpy --max-size 分辨率上限
   bitRate?: string; // scrcpy --video-bit-rate 码率，如 "8M"
+  audioForwarded?: boolean; // 当前是否把设备声音转到电脑（由独立音频进程承载，可投屏中实时切换）
 }
 
 /** 启动投屏的可选参数。 */
@@ -300,8 +301,8 @@ export interface MirrorStartOptions {
   isPico?: boolean; // Pico 设备自动附加单眼裁切
   maxSize?: number; // --max-size
   bitRate?: string; // --video-bit-rate，如 "8M"
-  // 是否把设备声音转到电脑播放。默认 false：附加 --no-audio，声音留在设备本机输出；
-  // 设为 true 才让 scrcpy 转发音频（此时设备本机静音，声音从电脑出，scrcpy 默认行为）。
+  // 投屏启动时是否就把设备声音转到电脑。默认 false：声音留在设备本机输出。
+  // 音频由独立的「纯音频」scrcpy 进程承载，投屏过程中可随时起停切换（见 setMirrorAudio）。
   forwardAudio?: boolean;
 }
 
@@ -345,6 +346,7 @@ export type IpcChannel =
   | 'mirror:start'
   | 'mirror:stop'
   | 'mirror:status'
+  | 'mirror:set-audio'
   | 'log:export'
   | 'log:entry'
   | 'log:batch'

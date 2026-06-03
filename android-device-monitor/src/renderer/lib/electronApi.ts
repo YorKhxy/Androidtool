@@ -54,6 +54,7 @@ export interface ElectronAPI {
   getNetworkRequests: (deviceId: string, packageName?: string) => Promise<ElectronResult<NetworkRequest[]>>;
   startMirror: (deviceId: string, options?: MirrorStartOptions) => Promise<ElectronResult<MirrorSession>>;
   stopMirror: (deviceId: string) => Promise<ElectronResult<undefined>>;
+  setMirrorAudio: (deviceId: string, forward: boolean) => Promise<ElectronResult<MirrorSession>>;
   onMirrorStatus: (callback: (session: MirrorSession) => void) => () => void;
   selectApkFiles: () => Promise<ElectronResult<string[]>>;
   installApk: (deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean }) => Promise<ElectronResult<ApkInstallResult>>;

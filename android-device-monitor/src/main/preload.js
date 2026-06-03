@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getNetworkRequests: (deviceId, packageName) => ipcRenderer.invoke('adb:get-network-requests', deviceId, packageName),
   startMirror: (deviceId, options) => ipcRenderer.invoke('mirror:start', deviceId, options),
   stopMirror: (deviceId) => ipcRenderer.invoke('mirror:stop', deviceId),
+  setMirrorAudio: (deviceId, forward) => ipcRenderer.invoke('mirror:set-audio', deviceId, forward),
   onMirrorStatus: (callback) => {
     const listener = (_, session) => callback(session);
     ipcRenderer.on('mirror:status', listener);

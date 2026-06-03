@@ -10,6 +10,7 @@ type MirrorPanelProps = {
   starting: boolean;
   onStart: (params: MirrorStartParams) => void;
   onStop: () => void;
+  onToggleAudio: (forward: boolean) => void; // 投屏中实时切换音频去向
 };
 
 const STATUS_META: Record<MirrorSessionStatus, { label: string; color: string; background: string }> = {
@@ -52,14 +53,16 @@ const isActive = (session: MirrorSession | null, starting: boolean): boolean => 
   return session?.status === 'starting' || session?.status === 'running';
 };
 
-export function MirrorPanel({ deviceName, isPico, session, starting, onStart, onStop }: MirrorPanelProps) {
+export function MirrorPanel({ deviceName, isPico, session, starting, onStart, onStop, onToggleAudio }: MirrorPanelProps) {
   const [maxSize, setMaxSize] = useState<number | undefined>(undefined);
   const [bitRate, setBitRate] = useState<string>('8M');
   const [showShortcuts, setShowShortcuts] = useState(false);
-  // 是否把设备声音转到电脑播放。默认 false：声音留在设备本机输出。
+  // 启动时是否把声音转到电脑（未投屏时由此控制初值）。默认 false：声音留在设备本机输出。
   const [forwardAudio, setForwardAudio] = useState(false);
 
   const active = isActive(session, starting);
+  // 复选框的真值：投屏中以主进程会话的实际音频状态为准，未投屏时用本地初值。
+  const audioOn = active ? Boolean(session?.audioForwarded) : forwardAudio;
   const status: MirrorSessionStatus = starting ? 'starting' : session?.status ?? 'stopped';
   const meta = STATUS_META[status];
 
@@ -154,19 +157,23 @@ export function MirrorPanel({ deviceName, isPico, session, starting, onStart, on
           </select>
         </label>
         <label
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#cbd5e1', cursor: active ? 'not-allowed' : 'pointer', opacity: active ? 0.6 : 1 }}
-          title="默认声音留在设备本机播放；勾选后投屏时把设备声音转到电脑（设备本机会静音）"
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#cbd5e1', cursor: starting ? 'not-allowed' : 'pointer', opacity: starting ? 0.6 : 1 }}
+          title="默认声音留在设备本机播放；勾选把设备声音转到电脑（设备本机会静音）。投屏过程中可随时切换，不影响画面。"
         >
           <input
             type="checkbox"
-            checked={forwardAudio}
-            disabled={active}
-            onChange={(e) => setForwardAudio(e.target.checked)}
-            style={{ cursor: active ? 'not-allowed' : 'pointer' }}
+            checked={audioOn}
+            disabled={starting}
+            onChange={(e) => {
+              // 投屏中实时切换；未投屏时仅记录启动初值。
+              if (active) onToggleAudio(e.target.checked);
+              else setForwardAudio(e.target.checked);
+            }}
+            style={{ cursor: starting ? 'not-allowed' : 'pointer' }}
           />
-          把设备声音传到电脑
+          把设备声音传到电脑{active ? '（可实时切换）' : ''}
         </label>
-        {active && <span style={{ fontSize: '12px', color: '#6b7280' }}>投屏中不可改参数，停止后可调整</span>}
+        {active && <span style={{ fontSize: '12px', color: '#6b7280' }}>分辨率 / 码率投屏中不可改，声音可随时切换</span>}
       </div>
 
       {isPico && (

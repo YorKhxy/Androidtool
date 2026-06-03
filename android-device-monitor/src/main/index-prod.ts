@@ -655,6 +655,16 @@ const setupIpcHandlers = () => {
     }
   });
 
+  // 投屏中实时切换音频去向（设备本机 / 电脑），不影响主视频窗口。
+  ipcMain.handle(IPC_CHANNELS.MIRROR_SET_AUDIO, async (_event, deviceId: string, forward: boolean) => {
+    try {
+      const session = scrcpyManager.setAudioForward(deviceId, forward);
+      return { success: true, data: session };
+    } catch (error) {
+      return toIpcErrorResponse(error, '切换投屏声音失败');
+    }
+  });
+
   scrcpyManager.onStatus((session) => {
     mainWindow?.webContents.send(IPC_CHANNELS.MIRROR_STATUS, session);
   });

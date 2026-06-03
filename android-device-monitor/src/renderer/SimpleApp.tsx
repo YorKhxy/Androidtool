@@ -1410,6 +1410,22 @@ function SimpleApp() {
     }
   };
 
+  // 投屏中实时切换音频去向（设备本机 / 电脑）。主进程返回更新后的会话，乐观更新本地状态。
+  const handleToggleMirrorAudio = async (forward: boolean) => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    const deviceId = selectedDevice.id;
+    try {
+      const result = await window.electronAPI!.setMirrorAudio(deviceId, forward);
+      if (result.success && result.data) {
+        setMirrorSessionsByDeviceId(prev => ({ ...prev, [deviceId]: result.data! }));
+      } else if (!result.success) {
+        setError(result.error || '切换投屏声音失败');
+      }
+    } catch (err) {
+      setError('切换投屏声音失败：' + (err as Error).message);
+    }
+  };
+
   const loadInstalledPackages = async () => {
     if (!selectedDevice || !hasElectronAPI()) return;
     const targetDeviceId = selectedDevice.id;
@@ -2555,6 +2571,7 @@ function SimpleApp() {
                     starting={mirrorStartingDeviceIds.has(selectedDevice.id)}
                     onStart={handleStartMirror}
                     onStop={handleStopMirror}
+                    onToggleAudio={handleToggleMirrorAudio}
                   />
                 )}
               </div>

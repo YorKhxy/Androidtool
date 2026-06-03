@@ -18,6 +18,7 @@ export const IPC_CHANNELS = {
   MIRROR_START: 'mirror:start',
   MIRROR_STOP: 'mirror:stop',
   MIRROR_STATUS: 'mirror:status',
+  MIRROR_SET_AUDIO: 'mirror:set-audio',
   SELECT_APK_FILES: 'adb:select-apk-files',
   INSTALL_APK: 'adb:install-apk',
   UNINSTALL_APP: 'adb:uninstall-app',
