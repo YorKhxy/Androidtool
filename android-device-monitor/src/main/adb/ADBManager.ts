@@ -460,6 +460,10 @@ export class ADBManager extends EventEmitter {
     const adbBinary = await this.resolveAdbBinary();
     const normalizedDir = this.normalizeRemoteDir(remoteDir);
     const remotePath = normalizedDir === '/' ? `/${fileName}` : `${normalizedDir}/${fileName}`;
+    // 先传到隐藏临时名，传完再 mv 成最终名：保证设备端最终文件名要么不存在、要么完整。
+    // 进程被打断只会留下可识别的 .part，不产生「看着成功实则损坏」的脏文件。
+    const tempName = `.${fileName}.part`;
+    const tempRemotePath = normalizedDir === '/' ? `/${tempName}` : `${normalizedDir}/${tempName}`;
 
     let totalBytes = 0;
     try {
@@ -468,22 +472,33 @@ export class ADBManager extends EventEmitter {
       totalBytes = 0;
     }
 
+    // push 前清理可能残留的旧临时文件，支持中断后重传（清理失败不阻断）。
+    try {
+      await this.execAdb(
+        ['-s', deviceId, 'shell', 'rm', '-f', this.quoteRemotePath(tempRemotePath)],
+        { timeout: 5000, maxBuffer: 1024 * 64 }
+      );
+    } catch {
+      /* 残留清理失败忽略 */
+    }
+
     return new Promise<void>((resolve, reject) => {
-      const child = spawn(adbBinary.path, ['-s', deviceId, 'push', localPath, remotePath], {
+      const child = spawn(adbBinary.path, ['-s', deviceId, 'push', localPath, tempRemotePath], {
         windowsHide: true,
       });
 
       let stderrText = '';
       let stdoutText = '';
       let settled = false;
+      let pushDone = false; // push 进程已成功结束、进入 mv 阶段，不再轮询
 
-      // 轮询设备端已写入大小，换算百分比；本地很快就传完时这条最多触发一两次
+      // 轮询设备端临时文件已写入大小，换算百分比；本地很快就传完时这条最多触发一两次
       let pollTimer: NodeJS.Timeout | null = null;
       if (totalBytes > 0 && onProgress) {
         const poll = async () => {
           try {
             const { stdout } = await this.execAdb(
-              ['-s', deviceId, 'shell', 'stat', '-c', '%s', this.quoteRemotePath(remotePath)],
+              ['-s', deviceId, 'shell', 'stat', '-c', '%s', this.quoteRemotePath(tempRemotePath)],
               { timeout: 5000, maxBuffer: 1024 * 64 }
             );
             const written = parseInt(stdout.trim(), 10);
@@ -494,14 +509,14 @@ export class ADBManager extends EventEmitter {
           } catch {
             // 文件还没创建或 stat 失败，忽略本次轮询
           }
-          if (!settled) {
+          if (!settled && !pushDone) {
             pollTimer = setTimeout(poll, 500);
           }
         };
         pollTimer = setTimeout(poll, 500);
       }
 
-      const finish = (err?: Error) => {
+      const settle = (err?: Error) => {
         if (settled) return;
         settled = true;
         if (pollTimer) clearTimeout(pollTimer);
@@ -513,20 +528,35 @@ export class ADBManager extends EventEmitter {
         }
       };
 
+      // push 成功后把临时名原子改成最终名（同一文件系统内 mv 为原子操作，会覆盖同名旧文件）。
+      const commitUpload = () => {
+        pushDone = true;
+        if (pollTimer) clearTimeout(pollTimer);
+        this.execAdb(
+          [
+            '-s', deviceId, 'shell', 'mv', '-f',
+            this.quoteRemotePath(tempRemotePath), this.quoteRemotePath(remotePath),
+          ],
+          { timeout: 15000, maxBuffer: 1024 * 64 }
+        )
+          .then(() => settle())
+          .catch((mvErr) => settle(new Error(`上传完成但落地重命名失败：${(mvErr as Error).message}`)));
+      };
+
       child.stdout.on('data', (d) => { stdoutText += d.toString(); });
       child.stderr.on('data', (d) => { stderrText += d.toString(); });
-      child.on('error', (err) => finish(err));
+      child.on('error', (err) => settle(err));
       child.on('close', (code) => {
         const combined = `${stdoutText}\n${stderrText}`.toLowerCase();
         if (code === 0 && combined.includes('file pushed') && !combined.includes('error:')) {
-          finish();
+          commitUpload();
         } else if (combined.includes('permission denied') || combined.includes('read-only')) {
-          finish(new Error('目标目录没有写入权限'));
+          settle(new Error('目标目录没有写入权限'));
         } else if (code === 0 && !combined.includes('error:')) {
           // 某些 adb 版本成功也可能不打 "file pushed"，按退出码兜底
-          finish();
+          commitUpload();
         } else {
-          finish(new Error(stderrText.trim() || stdoutText.trim() || '上传失败'));
+          settle(new Error(stderrText.trim() || stdoutText.trim() || '上传失败'));
         }
       });
     });
@@ -541,26 +571,44 @@ export class ADBManager extends EventEmitter {
 
     try {
       if (isDriveRoot) {
+        // 盘根：adb 无法把文件直接写到盘符根目录（如 F:\file.mp4），先 pull 到系统临时目录再移动。
         const tempDir = nodeFsMkdtempSync(path.join(nodeOsTmpdir(), 'adm-pull-'));
         const tempPath = path.join(tempDir, parsed.base);
         try {
           await this.runAdbPull(deviceId, remotePath, tempPath);
-          // 跨卷移动用复制+删除兜底（rename 跨盘会失败）
-          try {
-            nodeFsRenameSync(tempPath, localPath);
-          } catch {
-            nodeFsCopyFileSync(tempPath, localPath);
-            nodeFsRmSync(tempPath, { force: true });
-          }
+          this.commitPulledFile(tempPath, localPath);
         } finally {
           nodeFsRmSync(tempDir, { recursive: true, force: true });
         }
       } else {
-        await this.runAdbPull(deviceId, remotePath, localPath);
+        // 非盘根：先拉到目标同目录的隐藏 .part，完成后再 rename 成最终名，
+        // 保证本地最终文件名要么不存在、要么完整；被打断只留下可识别的 .part。
+        const tempPath = path.join(parsed.dir, `.${parsed.base}.part`);
+        // 清理可能残留的旧临时文件，支持中断后重传（不存在则忽略）。
+        try { nodeFsRmSync(tempPath, { recursive: true, force: true }); } catch { /* 忽略 */ }
+        try {
+          await this.runAdbPull(deviceId, remotePath, tempPath);
+          this.commitPulledFile(tempPath, localPath);
+        } catch (err) {
+          try { nodeFsRmSync(tempPath, { recursive: true, force: true }); } catch { /* 忽略 */ }
+          throw err;
+        }
       }
     } catch (error) {
       logger.error('ADBManager: pullDeviceFile failed:', error);
       throw this.wrapOperationError('下载设备文件失败', error);
+    }
+  }
+
+  // 把拉取到临时位置的文件原子落地到最终路径：先清理目标同名残留，再尝试 rename（同卷原子），
+  // 跨卷 rename 失败时用复制+删除兜底（仅文件，盘根下载场景适用）。
+  private commitPulledFile(tempPath: string, localPath: string): void {
+    try { nodeFsRmSync(localPath, { recursive: true, force: true }); } catch { /* 目标不存在则忽略 */ }
+    try {
+      nodeFsRenameSync(tempPath, localPath);
+    } catch {
+      nodeFsCopyFileSync(tempPath, localPath);
+      nodeFsRmSync(tempPath, { force: true });
     }
   }
 
