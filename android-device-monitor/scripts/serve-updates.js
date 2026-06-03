@@ -65,6 +65,29 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // 客户端更新状态上报端点（不走文件服务，仅记录到控制台），用于判断朋友更新成功/失败。
+  if (urlPath === '/__report') {
+    let q;
+    try {
+      q = new URL(req.url, 'http://x').searchParams;
+    } catch {
+      q = new URLSearchParams();
+    }
+    const v = q.get('v') || '?';
+    const e = q.get('e') || '?';
+    const to = q.get('to');
+    const msg = q.get('msg');
+    let label;
+    if (e === 'startup') label = `运行中 版本=${v}`;
+    else if (e === 'downloaded') label = `已下载新版 目标=${to || '?'}（待重启安装）`;
+    else if (e === 'error') label = `更新失败：${msg || ''}`;
+    else label = `${e} 版本=${v}`;
+    console.log(`[${stamp()}] ${clientIp(req)}  * 上报 ${label}`);
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    return;
+  }
+
   // 解析到服务目录内，拒绝目录穿越（解析结果必须仍在 root 下）。
   const resolved = path.resolve(root, '.' + urlPath);
   if (resolved !== root && !resolved.startsWith(root + path.sep)) {
