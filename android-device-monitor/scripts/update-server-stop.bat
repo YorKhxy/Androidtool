@@ -20,4 +20,4 @@ if defined KILLED (
     echo No update server was running on port %PORT%.
 )
 
-timeout /t 3 >nul
+%SystemRoot%\System32\ping.exe -n 4 127.0.0.1 >nul

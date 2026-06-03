@@ -8,7 +8,7 @@ rem Remember to bump "version" in package.json before each release.
 
 cd /d "%~dp0.."
 
-rem 透传参数：例如 make-update-package.bat -NoVersionBump 可跳过自动自增版本号。
+rem Pass-through args: e.g. make-update-package.bat -NoVersionBump  (skip auto version bump)
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0make-update-package.ps1" %*
 if errorlevel 1 (
     echo.

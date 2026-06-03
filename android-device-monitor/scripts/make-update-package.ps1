@@ -1,4 +1,4 @@
-param(
+﻿param(
     # 默认每次打包自动把版本号 patch +1（1.0.0 -> 1.0.1），省得忘了改导致客户端不更新。
     # 已手动改好版本、不想自增时，加 -NoVersionBump。
     [switch]$NoVersionBump
