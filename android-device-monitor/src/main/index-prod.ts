@@ -10,6 +10,7 @@ import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performance
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
 import { initAutoUpdate, checkForUpdates, quitAndInstallUpdate } from './autoUpdate';
+import * as fullLogRecorder from './fullLogRecorder';
 import * as transferJournal from './transferJournal';
 import {
   buildUploadBatch,
@@ -49,6 +50,7 @@ const cleanupBeforeQuit = async () => {
 
   cleanupPromise = (async () => {
     clearLogQueue();
+    fullLogRecorder.stopAll();
     scrcpyManager.stopAll();
     if (adbManager) {
       // 先置位「退出中」：让被 SIGTERM 中断的传输保留为 transferring（可恢复），不被当成失败清出 journal。
@@ -230,11 +232,15 @@ const setupIpcHandlers = () => {
 
   ipcMain.handle(IPC_CHANNELS.START_LOGCAT, async (_event, deviceId: string, minLevel: 'V' | 'D' | 'I' | 'W' | 'E' | 'F' = 'D', packageName?: string, pid?: string) => {
     try {
+      // 先开完整日志落盘文件（覆盖旧会话），再启动采集，保证第一行起就被记录。
+      fullLogRecorder.start(deviceId);
       await adbManager.startLogcat(deviceId, (entry) => {
+        fullLogRecorder.write(deviceId, entry); // 完整落盘（不受渲染层 2 万条上限/背压影响）
         enqueueLogForRenderer(entry);
       }, minLevel, packageName, pid);
       return { success: true };
     } catch (error) {
+      fullLogRecorder.stop(deviceId);
       return toIpcErrorResponse(error, '启动日志采集失败');
     }
   });
@@ -242,6 +248,7 @@ const setupIpcHandlers = () => {
   ipcMain.handle(IPC_CHANNELS.STOP_LOGCAT, async (_event, deviceId: string) => {
     try {
       await adbManager.stopLogcat(deviceId);
+      fullLogRecorder.stop(deviceId);
       return { success: true };
     } catch (error) {
       return toIpcErrorResponse(error, '停止日志采集失败');
@@ -616,6 +623,29 @@ const setupIpcHandlers = () => {
       return { success: true, data: result.filePath };
     } catch (error) {
       return toIpcErrorResponse(error, '导出日志失败');
+    }
+  });
+
+  // 导出完整原始日志：把该设备本次监控落盘的全量日志文件另存到用户选择的位置。
+  // 不受渲染层 2 万条上限/筛选影响，是从监控第一行到当前的完整记录。
+  ipcMain.handle(IPC_CHANNELS.EXPORT_FULL_LOGS, async (_event, deviceId: string) => {
+    try {
+      const src = fullLogRecorder.getPath(deviceId);
+      if (!src || !nodeFs.existsSync(src)) {
+        return { success: false, error: '没有可导出的完整日志，请先开始日志采集' };
+      }
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: '导出完整日志',
+        defaultPath: `android-full-logs-${Date.now()}.log`,
+        filters: [{ name: '日志文件', extensions: ['log', 'txt'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: '取消导出' };
+      }
+      await fs.copyFile(src, result.filePath);
+      return { success: true, data: result.filePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '导出完整日志失败');
     }
   });
 

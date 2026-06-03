@@ -365,6 +365,7 @@ export type IpcChannel =
   | 'update:check'
   | 'update:quit-and-install'
   | 'log:export'
+  | 'log:export-full'
   | 'log:entry'
   | 'log:batch'
   | 'device:list-changed';

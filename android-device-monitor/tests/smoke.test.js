@@ -64,6 +64,24 @@ describe('project smoke checks', () => {
     expect(serveSource).toContain('Content-Range');
   });
 
+  test('full log recorder captures all entries to disk and is exportable', () => {
+    const recorder = fs.readFileSync(path.join(root, 'src/main/fullLogRecorder.ts'), 'utf-8');
+    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const channels = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const preload = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    // 落盘文件放 userData，不暴露宿主绝对路径；流式写入，提供导出取路径
+    expect(recorder).toContain("app.getPath('userData')");
+    expect(recorder).toContain('createWriteStream');
+    expect(recorder).toContain('export const getPath');
+    // 在 logcat 回调里先于渲染层队列写盘，保证不丢
+    expect(indexSource).toContain('fullLogRecorder.write(deviceId, entry)');
+    expect(indexSource).toContain('fullLogRecorder.start(deviceId)');
+    expect(indexSource).toContain('fullLogRecorder.stopAll()');
+    // IPC 契约：导出完整日志通道齐全
+    expect(channels).toContain("EXPORT_FULL_LOGS: 'log:export-full'");
+    expect(preload).toContain('exportFullLogs');
+  });
+
   test('logcat cleanup has bounded buffers and kills process trees on Windows', () => {
     const source = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
     expect(source).toContain('maxLogcatBufferChars');

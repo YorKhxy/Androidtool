@@ -1544,6 +1544,18 @@ function SimpleApp() {
     }
   };
 
+  // \u5bfc\u51fa\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\uff1a\u4ece\u76d1\u63a7\u7b2c\u4e00\u884c\u5230\u5f53\u524d\u7684\u5168\u91cf\uff08\u5168\u7b49\u7ea7\u3001\u4e0d\u53d7 2 \u4e07\u6761\u4e0a\u9650/\u7b5b\u9009\u5f71\u54cd\uff09\uff0c\u7531\u4e3b\u8fdb\u7a0b\u843d\u76d8\u6587\u4ef6\u53e6\u5b58\u3002
+  const exportFullLogs = async () => {
+    if (!hasElectronAPI() || !selectedDevice) return;
+    const result = await window.electronAPI!.exportFullLogs(selectedDevice.id);
+    if (result.success) {
+      setError('');
+      setLastExportedLogPath(result.data || null);
+    } else if (result.error !== '\u53d6\u6d88\u5bfc\u51fa') {
+      setError(result.error || '\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7\u5931\u8d25');
+    }
+  };
+
   const showCrashAndAnrLogs = () => {
     setFilterLevel('E');
     setUseRegexSearch(false);
@@ -1901,6 +1913,7 @@ function SimpleApp() {
           style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: '#d1d5db', fontSize: '13px', cursor: 'pointer' }}
         >{'\u6e05\u7a7a'}</button>
         <button onClick={exportVisibleLogs} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa'}</button>
+        <button onClick={exportFullLogs} title="\u4ece\u76d1\u63a7\u7b2c\u4e00\u884c\u5230\u5f53\u524d\u7684\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\uff08\u5168\u7b49\u7ea7\uff0c\u4e0d\u53d7 2 \u4e07\u6761\u4e0a\u9650\u4e0e\u7b5b\u9009\u5f71\u54cd\uff09" style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
         {lastExportedLogPath && (
           <button
             onClick={async () => {

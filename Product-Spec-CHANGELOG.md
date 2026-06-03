@@ -86,4 +86,5 @@
   - 实现：主视频窗口永远 `--no-audio`，音频改由独立的「纯音频」scrcpy 进程（`--no-video --no-control --no-window`）承载。勾选起该进程、取消停该进程（声音回设备）。**投屏过程中可随时切换，主画面不闪动**。新增 IPC `mirror:set-audio` 与 `MirrorSession.audioForwarded` 状态。
   - 「传到电脑」优先**两边同时出声**：纯音频进程用 `--audio-source=playback --audio-dup`，设备本机不静音、电脑也出声（需设备 Android 13+）。设备低于 13（多数 Pico）时纯音频进程会快速报错退出，自动降级为 `output` 源（仅电脑出声、设备静音），保证至少有声音。
   - 界面根据**实际生效的音频模式**给提示（`MirrorSession.audioMode`：`both`/`pc-only`）：两边出声显示「🔊 设备与电脑同时出声」，降级时显示「⚠ 该设备不支持两边同时出声（需 Android 13+），已改为仅电脑出声」。用运行时真实结果判定，而非猜测系统版本。
+- 日志新增**「导出完整日志」**：主进程在 logcat 抓取时把每条（全等级、从监控第一行起）实时落盘到 `userData/full-logs/<设备>.log`，先于渲染层背压队列、且不受渲染层「每设备最多 2 万条」UI 上限影响。「导出完整日志」按钮把该文件另存到用户选择位置，得到从监控开始到当前一条不丢的全量。与原「导出」（导出当前可见/筛选后的）并存。
 - 新增**自动更新（热更新）**能力：基于 electron-updater 的 generic provider，朋友端 app 启动时向「自建更新服务器」拉取 `latest.yml`，发现新版本后台增量下载新安装包，右下角提示「立即重启更新」。更新源地址支持环境变量 / userData 配置 / 打包默认三级解析，换 IP/穿透地址无需重打包。配套 `scripts/serve-updates.js`（支持 Range 的静态更新服务器）与 `docs/AUTO-UPDATE.md` 发版指南。免去每次手动传文件给用户。

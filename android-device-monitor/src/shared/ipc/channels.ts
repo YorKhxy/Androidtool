@@ -47,6 +47,7 @@ export const IPC_CHANNELS = {
   UNLOCK_DEVICE: 'adb:unlock-device',
   REBOOT_DEVICE: 'adb:reboot-device',
   EXPORT_LOGS: 'log:export',
+  EXPORT_FULL_LOGS: 'log:export-full',
   LOG_ENTRY: 'log:entry',
   LOG_BATCH: 'log:batch',
   ADB_STATUS_CHANGED: 'adb:status-changed',

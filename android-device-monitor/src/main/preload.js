@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   unlockDevice: (deviceId) => ipcRenderer.invoke('adb:unlock-device', deviceId),
   rebootDevice: (deviceId) => ipcRenderer.invoke('adb:reboot-device', deviceId),
   exportLogs: (logs) => ipcRenderer.invoke('log:export', logs),
+  exportFullLogs: (deviceId) => ipcRenderer.invoke('log:export-full', deviceId),
   exportPerformanceSession: (payload) => ipcRenderer.invoke('performance:export-session', payload),
   onLogEntry: (callback) => {
     const listener = (_, entry) => callback(entry);
