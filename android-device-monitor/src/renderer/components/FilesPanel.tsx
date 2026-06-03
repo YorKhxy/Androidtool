@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { DeviceInfo, DeviceFileEntry } from '@/shared/types';
+import { DeviceInfo, DeviceFileEntry, TransferResumeBatch } from '@/shared/types';
 import { hasElectronAPI } from '@/renderer/lib/electronApi';
-import { getTransferState, subscribeTransfer, startUpload, startPullFiles } from '@/renderer/lib/fileTransferManager';
+import { getTransferState, subscribeTransfer, startUpload, startPullFiles, startResumeTransfer } from '@/renderer/lib/fileTransferManager';
 
 interface FilesPanelProps {
   selectedDevice: DeviceInfo | null;
@@ -68,6 +68,10 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolderBusy, setCreatingFolderBusy] = useState(false);
+  // 进入该设备文件管理时，若上次有未传完的传输（崩溃/被杀残留），就地提示「继续/丢弃」。
+  // 比启动时全局弹窗更合理：此刻设备必然已连上、且用户正处在传输语境里。
+  const [resumeBatches, setResumeBatches] = useState<TransferResumeBatch[]>([]);
+  const [resumeBusyBatchId, setResumeBusyBatchId] = useState<string | null>(null);
 
   const deviceId = selectedDevice?.id ?? null;
   // 仅显示属于当前设备的传输进度（管理器是全局单例，可能记着别的设备的传输）
@@ -212,6 +216,42 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
 
   // 订阅传输管理器：进度变化时刷新本组件展示（管理器常驻，关界面再打开仍能拿到正在进行的进度）
   useEffect(() => subscribeTransfer(() => setTransfer(getTransferState())), []);
+
+  // 拉取当前设备的未完成传输批次（拉取式，无启动时序竞态）。仅保留属于本设备的。
+  const refreshResumeBatches = useCallback(async () => {
+    if (!deviceId || !hasElectronAPI() || !window.electronAPI) {
+      setResumeBatches([]);
+      return;
+    }
+    const result = await window.electronAPI.getResumeBatches();
+    const list = result.success && result.data ? result.data : [];
+    setResumeBatches(list.filter((b) => b.deviceId === deviceId));
+  }, [deviceId]);
+
+  // 进入/切换设备时拉取一次未完成传输
+  useEffect(() => {
+    void refreshResumeBatches();
+  }, [refreshResumeBatches]);
+
+  // 「继续」：恢复该批次，进度复用现有传输进度条；完成后刷新提示（批次清空则消失）。
+  const handleResumeBatch = async (batch: TransferResumeBatch) => {
+    setResumeBatches((prev) => prev.filter((b) => b.batchId !== batch.batchId));
+    await startResumeTransfer(batch);
+    await refreshResumeBatches();
+    if (deviceId) loadDir(currentPath);
+  };
+
+  // 「丢弃」：清理残留 .part 并移出 journal，下次不再提示。
+  const handleDiscardBatch = async (batch: TransferResumeBatch) => {
+    if (!hasElectronAPI() || !window.electronAPI) return;
+    setResumeBusyBatchId(batch.batchId);
+    try {
+      await window.electronAPI.discardTransfers(batch.batchId);
+    } finally {
+      setResumeBusyBatchId(null);
+      setResumeBatches((prev) => prev.filter((b) => b.batchId !== batch.batchId));
+    }
+  };
 
   const uploadFiles = async (localPaths: string[]) => {
     if (!deviceId || !hasElectronAPI() || localPaths.length === 0) return;
@@ -420,6 +460,35 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
           >取消</button>
         </div>
       )}
+
+      {/* 未完成传输恢复提示：进入该设备文件管理时若有上次没传完的批次，就地提示继续/丢弃 */}
+      {resumeBatches.map((batch) => {
+        const busy = resumeBusyBatchId === batch.batchId;
+        const directionLabel = batch.direction === 'upload' ? '上传' : '下载';
+        return (
+          <div key={batch.batchId} style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#3a2e12', border: '1px solid #92710a', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '13px', color: '#fcd34d', fontWeight: 600 }}>
+                上次有 {batch.remaining} 个文件未{directionLabel}完
+              </div>
+              <div style={{ fontSize: '11px', color: '#d6b35f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {batch.sampleNames.join('、')}{batch.remaining > batch.sampleNames.length ? ' …' : ''}
+              </div>
+            </div>
+            <button
+              onClick={() => handleDiscardBatch(batch)}
+              disabled={busy}
+              style={{ flexShrink: 0, padding: '4px 12px', backgroundColor: 'transparent', border: '1px solid #6b7280', borderRadius: '6px', color: '#d1d5db', cursor: busy ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+            >丢弃</button>
+            <button
+              onClick={() => handleResumeBatch(batch)}
+              disabled={busy || transferBusy}
+              title={transferBusy ? '有传输进行中，稍候再继续' : ''}
+              style={{ flexShrink: 0, padding: '4px 12px', backgroundColor: busy || transferBusy ? '#374151' : '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: busy || transferBusy ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+            >继续</button>
+          </div>
+        );
+      })}
 
       {/* 上传进度条 */}
       {upload && (

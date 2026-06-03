@@ -171,15 +171,6 @@ const createWindow = () => {
     mainWindow.loadFile(rendererPath);
   }
 
-  // 渲染层加载完成后，若 journal 有未完成传输（上次崩溃/被杀残留），推送可恢复批次摘要，
-  // 由渲染层弹窗提示「继续/丢弃」。等 did-finish-load 保证渲染层已订阅事件。
-  mainWindow.webContents.once('did-finish-load', () => {
-    const batches = transferJournal.getResumeBatches();
-    if (batches.length > 0) {
-      mainWindow?.webContents.send(IPC_CHANNELS.TRANSFER_RESUME_AVAILABLE, batches);
-    }
-  });
-
   mainWindow.on('closed', () => {
     clearLogQueue();
     mainWindow = null;

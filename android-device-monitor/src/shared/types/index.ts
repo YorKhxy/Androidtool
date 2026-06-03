@@ -332,7 +332,6 @@ export type IpcChannel =
   | 'adb:resume-transfers'
   | 'adb:discard-transfers'
   | 'adb:get-resume-batches'
-  | 'adb:transfer-resume-available'
   | 'adb:sleep-device'
   | 'adb:wake-device'
   | 'adb:unlock-device'

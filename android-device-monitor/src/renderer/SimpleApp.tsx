@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest, TransferResumeBatch } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
@@ -19,7 +19,7 @@ import {
   removeSearchHistory,
   saveSearchHistory,
 } from './lib/searchHistoryStore';
-import { isTransferActive, startResumeTransfer } from './lib/fileTransferManager';
+import { isTransferActive } from './lib/fileTransferManager';
 import {
   BATCH_UPDATE_DELAY,
   BATCH_UPDATE_SIZE,
@@ -152,9 +152,6 @@ const renderBatteryBadge = (device: DeviceInfo) => {
 function SimpleApp() {
   const [adbStatus, setAdbStatus] = useState<AdbStatus | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
-  // 启动时若有未完成传输（上次崩溃/被杀残留），主进程推送可恢复批次，弹窗提示「继续/丢弃」。
-  const [resumeBatches, setResumeBatches] = useState<TransferResumeBatch[]>([]);
-  const [resumeBusyBatchId, setResumeBusyBatchId] = useState<string | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
   const [customDeviceNames, setCustomDeviceNames] = useState<Record<string, string>>(() => loadStoredDeviceNames());
   const [activeTab, setActiveTab] = useState<TabType>('devices');
@@ -513,15 +510,6 @@ function SimpleApp() {
             return next;
           });
         });
-        const unsubscribeTransferResume = window.electronAPI!.onTransferResumeAvailable((batches) => {
-          setResumeBatches(batches);
-        });
-        // 主动拉取一次未完成传输：did-finish-load 的 push 可能早于本订阅注册而丢失，拉取式兜底。
-        void window.electronAPI!.getResumeBatches().then((result) => {
-          if (result.success && result.data && result.data.length > 0) {
-            setResumeBatches(result.data);
-          }
-        });
 
         return () => {
           unsubscribeAdbStatusChanged();
@@ -531,7 +519,6 @@ function SimpleApp() {
           unsubscribeLogEntry();
           unsubscribeLogBatch();
           unsubscribeMirrorStatus();
-          unsubscribeTransferResume();
           logStatesRef.current.forEach(state => {
             if (state.flushTimer !== null) {
               window.clearTimeout(state.flushTimer);
@@ -2025,26 +2012,6 @@ function SimpleApp() {
     </div>
   );
 
-  // \u300c\u7ee7\u7eed\u300d\u6062\u590d\u67d0\u6279\u6b21\uff1a\u4ece\u5f39\u7a97\u79fb\u9664\u540e\u5728\u540e\u53f0\u7eed\u4f20\uff0c\u8fdb\u5ea6\u7167\u5e38\u8fdb FilesPanel \u8fdb\u5ea6\u6761\u3002
-  // \u4ec5\u5f53\u539f\u8bbe\u5907\u5728\u7ebf\u65f6\u624d\u653e\u884c\uff08\u4efb\u52a1\u7ed1\u5b9a\u539f deviceId\uff0c\u4e0d\u5141\u8bb8\u6539\u6295\u5176\u4ed6\u8bbe\u5907\uff09\u3002
-  const handleResumeBatch = (batch: TransferResumeBatch) => {
-    setResumeBatches((prev) => prev.filter((b) => b.batchId !== batch.batchId));
-    void startResumeTransfer(batch);
-  };
-
-  // \u300c\u4e22\u5f03\u300d\u67d0\u6279\u6b21\uff1a\u6e05\u7406\u6b8b\u7559 .part \u5e76\u79fb\u51fa journal\uff0c\u4e0b\u6b21\u542f\u52a8\u4e0d\u518d\u63d0\u793a\u3002
-  const handleDiscardBatch = async (batch: TransferResumeBatch) => {
-    setResumeBusyBatchId(batch.batchId);
-    try {
-      if (hasElectronAPI()) {
-        await window.electronAPI!.discardTransfers(batch.batchId);
-      }
-    } finally {
-      setResumeBusyBatchId(null);
-      setResumeBatches((prev) => prev.filter((b) => b.batchId !== batch.batchId));
-    }
-  };
-
   return (
     <div style={{
       width: '100%',
@@ -2055,50 +2022,6 @@ function SimpleApp() {
       color: 'white',
       overflow: 'hidden'
     }}>
-      {resumeBatches.length > 0 && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: '460px', maxHeight: '80vh', overflowY: 'auto', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '12px', padding: '20px' }}>
-            <h2 style={{ fontSize: '16px', fontWeight: 700, margin: '0 0 4px' }}>{'\u53d1\u73b0\u672a\u5b8c\u6210\u7684\u4f20\u8f93'}</h2>
-            <p style={{ fontSize: '12px', color: '#9ca3af', margin: '0 0 16px' }}>{'\u4e0a\u6b21\u5e94\u7528\u9000\u51fa\u65f6\u8fd8\u6709\u6587\u4ef6\u6ca1\u4f20\u5b8c\uff0c\u53ef\u9009\u62e9\u7ee7\u7eed\u6216\u4e22\u5f03\u3002'}</p>
-            {resumeBatches.map((batch) => {
-              // 「在线」需真正 connected（offline/unauthorized 不算），与 Spec「原设备在线才放行」对齐。
-              const online = devices.some((d) => d.id === batch.deviceId && d.status === 'connected');
-              const busy = resumeBusyBatchId === batch.batchId;
-              const directionLabel = batch.direction === 'upload' ? '\u4e0a\u4f20\u5230\u8bbe\u5907' : '\u4ece\u8bbe\u5907\u4e0b\u8f7d';
-              return (
-                <div key={batch.batchId} style={{ marginBottom: '12px', padding: '12px', backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px' }}>
-                    {directionLabel} \u00b7 {'\u8fd8\u6709 '}{batch.remaining}{' \u4e2a\u6587\u4ef6\u672a\u4f20\u5b8c'}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px', wordBreak: 'break-all' }}>
-                    {batch.sampleNames.join('\u3001')}{batch.remaining > batch.sampleNames.length ? ' \u2026' : ''}
-                  </div>
-                  <div style={{ fontSize: '12px', color: online ? '#86efac' : '#fbbf24', marginBottom: '10px' }}>
-                    {online ? `\u8bbe\u5907 ${batch.deviceId} \u5df2\u8fde\u63a5` : `\u7b49\u5f85\u8bbe\u5907 ${batch.deviceId} \u8fde\u63a5\u2026`}
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                    <button
-                      onClick={() => handleDiscardBatch(batch)}
-                      disabled={busy}
-                      style={{ padding: '6px 14px', fontSize: '12px', borderRadius: '6px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: busy ? 'not-allowed' : 'pointer' }}
-                    >
-                      {'\u4e22\u5f03'}
-                    </button>
-                    <button
-                      onClick={() => handleResumeBatch(batch)}
-                      disabled={busy || !online}
-                      title={online ? '' : '\u539f\u8bbe\u5907\u672a\u8fde\u63a5\uff0c\u63d2\u56de\u540e\u53ef\u7ee7\u7eed'}
-                      style={{ padding: '6px 14px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: online && !busy ? '#22c55e' : '#374151', color: 'white', cursor: online && !busy ? 'pointer' : 'not-allowed' }}
-                    >
-                      {'\u7ee7\u7eed'}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
       <header style={{ height: '56px', backgroundColor: '#252540', borderBottom: '1px solid #353550', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between' }}>
         <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
       </header>

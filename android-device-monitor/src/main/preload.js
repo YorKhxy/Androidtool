@@ -49,11 +49,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resumeTransfers: (batchId, transferId) => ipcRenderer.invoke('adb:resume-transfers', batchId, transferId),
   discardTransfers: (batchId) => ipcRenderer.invoke('adb:discard-transfers', batchId),
   getResumeBatches: () => ipcRenderer.invoke('adb:get-resume-batches'),
-  onTransferResumeAvailable: (callback) => {
-    const listener = (_, batches) => callback(batches);
-    ipcRenderer.on('adb:transfer-resume-available', listener);
-    return () => ipcRenderer.removeListener('adb:transfer-resume-available', listener);
-  },
   launchApp: (deviceId, packageName) => ipcRenderer.invoke('adb:launch-app', deviceId, packageName),
   forceStopApp: (deviceId, packageName) => ipcRenderer.invoke('adb:force-stop-app', deviceId, packageName),
   sleepDevice: (deviceId) => ipcRenderer.invoke('adb:sleep-device', deviceId),
