@@ -51,6 +51,9 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
   const [loading, setLoading] = useState(false);
   const [confirmDeletePath, setConfirmDeletePath] = useState<string | null>(null);
   const [deletingPath, setDeletingPath] = useState<string | null>(null);
+  // 批量删除：confirmBatchDelete 控制二次确认态，batchDeleting 防重复提交
+  const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
   const [notice, setNotice] = useState<string>('');
   // 内联提示的语气：success 绿色（操作成功），warn 琥珀色（目录不存在/访问受限等温和提醒）
   const [noticeKind, setNoticeKind] = useState<'success' | 'warn'>('success');
@@ -186,6 +189,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
   };
 
   const toggleSelect = (path: string) => {
+    setConfirmBatchDelete(false); // 改动选择即取消待确认的批量删除
     setSelectedPaths((prev) => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
@@ -207,6 +211,40 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
     }
     const ok = await runDownload(items);
     if (ok) setSelectedPaths(new Set());
+  };
+
+  // 批量删除选中项（文件与目录均可，目录递归删）。二次确认由 confirmBatchDelete 控制，
+  // 这里只在确认后执行：逐项调 deleteDeviceFile，汇总成功/失败，删完刷新目录、清空选择。
+  const deleteSelected = async () => {
+    if (!deviceId || !hasElectronAPI() || selectedPaths.size === 0) return;
+    setConfirmBatchDelete(false);
+    if (transferBusy) {
+      onError('文件传输进行中，暂时不能删除');
+      return;
+    }
+    const targets = entries.filter((e) => selectedPaths.has(e.path));
+    if (targets.length === 0) return;
+    setBatchDeleting(true);
+    setNotice('');
+    let succeeded = 0;
+    let failed = 0;
+    try {
+      for (const entry of targets) {
+        try {
+          const result = await window.electronAPI!.deleteDeviceFile(deviceId, entry.path, entry.isDir);
+          if (result.success) succeeded++;
+          else failed++;
+        } catch {
+          failed++;
+        }
+      }
+      setNotice(`已删除 ${succeeded} 项${failed > 0 ? `，${failed} 项失败` : ''}`);
+      setNoticeKind(failed > 0 ? 'warn' : 'success');
+      setSelectedPaths(new Set());
+      loadDir(currentPath);
+    } finally {
+      setBatchDeleting(false);
+    }
   };
 
   // 始终用最新目录作为上传目标（拖拽/上传都进当前目录）
@@ -561,21 +599,43 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         )}
       </div>
 
-      {/* 批量下载操作栏：选中文件后出现 */}
+      {/* 批量操作栏：选中文件后出现，支持批量下载与批量删除（删除带二次确认） */}
       {selectedPaths.size > 0 && (
         <div style={{ marginBottom: '12px', padding: '8px 12px', backgroundColor: '#1e293b', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
           <span style={{ fontSize: '13px', color: '#cbd5e1' }}>已选中 {selectedPaths.size} 个文件</span>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
-              onClick={() => setSelectedPaths(new Set())}
-              disabled={Boolean(pull)}
-              style={{ padding: '4px 12px', backgroundColor: '#475569', border: 'none', borderRadius: '6px', color: '#e2e8f0', cursor: pull ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: pull ? 0.6 : 1 }}
+              onClick={() => { setConfirmBatchDelete(false); setSelectedPaths(new Set()); }}
+              disabled={Boolean(pull) || batchDeleting}
+              style={{ padding: '4px 12px', backgroundColor: '#475569', border: 'none', borderRadius: '6px', color: '#e2e8f0', cursor: (pull || batchDeleting) ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: (pull || batchDeleting) ? 0.6 : 1 }}
             >清空</button>
             <button
               onClick={downloadSelected}
-              disabled={Boolean(pull)}
-              style={{ padding: '4px 12px', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: pull ? 'not-allowed' : 'pointer', fontSize: '12px', whiteSpace: 'nowrap', opacity: pull ? 0.6 : 1 }}
+              disabled={Boolean(pull) || batchDeleting}
+              style={{ padding: '4px 12px', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: (pull || batchDeleting) ? 'not-allowed' : 'pointer', fontSize: '12px', whiteSpace: 'nowrap', opacity: (pull || batchDeleting) ? 0.6 : 1 }}
             >⬇ 下载选中 ({selectedPaths.size})</button>
+            {confirmBatchDelete ? (
+              <>
+                <button
+                  onClick={deleteSelected}
+                  disabled={transferBusy || batchDeleting}
+                  title={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
+                  style={{ padding: '4px 12px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', color: '#fff', cursor: (transferBusy || batchDeleting) ? 'not-allowed' : 'pointer', fontSize: '12px', whiteSpace: 'nowrap', opacity: (transferBusy || batchDeleting) ? 0.6 : 1 }}
+                >{batchDeleting ? '删除中…' : `确认删除 ${selectedPaths.size} 项`}</button>
+                <button
+                  onClick={() => setConfirmBatchDelete(false)}
+                  disabled={batchDeleting}
+                  style={{ padding: '4px 12px', backgroundColor: '#475569', border: 'none', borderRadius: '6px', color: '#e2e8f0', cursor: batchDeleting ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+                >取消</button>
+              </>
+            ) : (
+              <button
+                onClick={() => setConfirmBatchDelete(true)}
+                disabled={transferBusy || batchDeleting}
+                title={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
+                style={{ padding: '4px 12px', backgroundColor: '#7f1d1d', border: 'none', borderRadius: '6px', color: '#fecaca', cursor: (transferBusy || batchDeleting) ? 'not-allowed' : 'pointer', fontSize: '12px', whiteSpace: 'nowrap', opacity: (transferBusy || batchDeleting) ? 0.6 : 1 }}
+              >🗑 删除选中 ({selectedPaths.size})</button>
+            )}
           </div>
         </div>
       )}
