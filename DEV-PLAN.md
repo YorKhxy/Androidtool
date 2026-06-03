@@ -623,13 +623,16 @@ Phase 1 基础框架
 - [ ] 新增续传执行函数（主进程内复用）：给定一批未完成任务，跳过 `done`，对 `pending`/`transferring`/被打断的逐个重传（重传即从头，Task 13.2 已保证清理半截 `.part`），过程照常回传 `PUSH_DEVICE_FILE_PROGRESS` / `PULL_DEVICE_FILE_PROGRESS` 进度。
 - [ ] 新增 IPC 通道 `RESUME_TRANSFERS`（`'adb:resume-transfers'`）：入参 batchId（或全部未完成），调用续传执行函数；`DISCARD_TRANSFERS`（`'adb:discard-transfers'`）：`removeBatch` 并清理设备端/本地残留 `.part`。`channels.ts` 加常量、`index.ts`/`index-prod.ts` 注册 handler。
 
-**Task 13.4 — 启动恢复弹窗 + 设备前提（IPC 契约 + 渲染层）**
-- [ ] 主进程启动（窗口 ready 后）调用 `transferJournal.loadUnfinished()`，若非空，通过新事件通道 `TRANSFER_RESUME_AVAILABLE`（`'adb:transfer-resume-available'`）`webContents.send` 推给渲染层，payload 为按 batch 聚合的摘要（`batchId`、`direction`、`deviceId`、未完成文件数、文件名样例）。
-- [ ] IPC 契约三件套同步：`channels.ts` 新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS`/`TRANSFER_RESUME_AVAILABLE`；`preload.js` 暴露 `resumeTransfers(batchId)`/`discardTransfers(batchId)`/`onTransferResumeAvailable(cb)`（返回 unsubscribe）；`electronApi.ts` 类型化封装。
-- [ ] 渲染层弹窗：在 `SimpleApp.tsx`（或 `fileTransferManager.ts` 订阅 + 由 App 渲染）监听 `onTransferResumeAvailable`，弹出确认框「上次有 N 个文件未传完，继续 / 丢弃」。
-  - 「继续」：若该 batch 的 `deviceId` 设备当前在线 → 调 `resumeTransfers(batchId)`，进度复用现有 `fileTransferManager` 进度条展示；若设备不在线 → 弹窗内显示「等待设备 XXX 连接」，监听 `devices` 列表，匹配到该 `deviceId` 在线后才放开「继续」按钮（不允许改投其他设备）。
-  - 「丢弃」：调 `discardTransfers(batchId)`。
-- [ ] `fileTransferManager.ts`：扩展以接纳「恢复中的传输」进度（沿用现有 `activeUploadId`/`activePullId` + `onPushProgress`/`onPullProgress` 订阅机制，恢复传输复用同一套 uploadId/pullId 进度通道）。
+**Task 13.4 — 恢复提示（进入设备文件管理时触发）+ IPC 契约 + 渲染层**
+
+> 设计修订（2026-06-03）：原方案「应用启动即全局弹窗」存在硬伤——WiFi 设备启动时尚未连接（需手动重连），且启动时主进程 `did-finish-load` 推送早于渲染层订阅会丢事件。改为**拉取式 + 进入设备文件管理时就地提示**：用户点开某设备的文件管理时，该设备必然已连上、且正处于传输语境，此刻再提示「继续/丢弃」最自然。废弃 `TRANSFER_RESUME_AVAILABLE` 推送通道，改用 `GET_RESUME_BATCHES` invoke 主动拉取。
+
+- [ ] 新增 IPC 通道 `GET_RESUME_BATCHES`（`'adb:get-resume-batches'`）：返回 `transferJournal.getResumeBatches()`（按 batch 聚合的摘要：`batchId`、`direction`、`deviceId`、未完成文件数、文件名样例）。`index.ts`/`index-prod.ts` 注册 handler。
+- [ ] IPC 契约三件套同步：`channels.ts` 新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS`/`GET_RESUME_BATCHES`；`preload.js` 暴露 `resumeTransfers(batchId, transferId)`/`discardTransfers(batchId)`/`getResumeBatches()`；`electronApi.ts` 类型化封装。
+- [ ] 渲染层提示：在 `FilesPanel.tsx` 中，进入/切换设备时 `getResumeBatches()` 并过滤出本设备的未完成批次，在面板顶部就地展示提示条「上次有 N 个文件未上传/下载完，继续 / 丢弃」。
+  - 「继续」：调 `resumeTransfers(batchId, transferId)`，进度复用现有 `fileTransferManager` 进度条展示；传输进行中时「继续」按钮禁用。任务绑定原 `deviceId`，提示只在该设备的文件管理里出现，天然不改投其他设备。
+  - 「丢弃」：调 `discardTransfers(batchId)`，清理残留 `.part` 并移出 journal。
+- [ ] `fileTransferManager.ts`：扩展 `startResumeTransfer`，复用现有 `activeUploadId`/`activePullId` + `onPushProgress`/`onPullProgress` 订阅机制，恢复传输复用同一套 uploadId/pullId 进度通道。
 
 **Task 13.5 — 优雅关闭兜底 + 残留语义收口**
 - [ ] `index.ts` app `before-quit`（`index-prod.ts` 同步）：若当前有传输在进行，先 `transferJournal` flush（确保最新状态落盘），再向正在跑的 adb 子进程发 SIGTERM。需要 `ADBManager` 暴露「取消/终止当前传输子进程」的能力（如 `cancelActiveTransfers()`，记录 push/pull 的 `child` 引用并 `child.kill('SIGTERM')`）。注意 SIGKILL（强杀/崩溃）拦不住，最终兜底仍是 journal。
@@ -640,22 +643,22 @@ Phase 1 基础框架
 |----------|------|
 | `android-device-monitor/src/main/transferJournal.ts` | 新增：传输日志持久化（userData/transfer-journal.json，原子写盘、未完成任务加载、容错解析） |
 | `android-device-monitor/src/main/adb/ADBManager.ts` | `pushDeviceFile`/`pullDeviceFile`/`runAdbPull` 改临时名+原子 rename；新增 `cancelActiveTransfers()` |
-| `android-device-monitor/src/main/index.ts` / `index-prod.ts` | `PUSH_DEVICE_FILE`/`PULL_DEVICE_FILES` handler 接入 journal 埋点；新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS` handler 与续传执行函数；启动推送 `TRANSFER_RESUME_AVAILABLE`；`before-quit` flush+SIGTERM |
-| `android-device-monitor/src/shared/ipc/channels.ts` | 新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS`/`TRANSFER_RESUME_AVAILABLE` 通道常量 |
-| `android-device-monitor/src/main/preload.js` | 暴露 `resumeTransfers`/`discardTransfers`/`onTransferResumeAvailable` |
-| `android-device-monitor/src/renderer/lib/electronApi.ts` | 恢复相关 API 类型化封装与事件订阅 |
-| `android-device-monitor/src/renderer/lib/fileTransferManager.ts` | 接纳恢复中传输的进度展示，复用现有 uploadId/pullId 进度通道 |
-| `android-device-monitor/src/renderer/SimpleApp.tsx` | 启动恢复弹窗（继续/丢弃）、等待原设备连接的交互 |
-| `android-device-monitor/src/shared/types/index.ts` | 新增 `TransferDirection`/`TransferTaskStatus`/`TransferTask` |
+| `android-device-monitor/src/main/transferRunner.ts` | 新增：双入口共用的批量传输执行核心（buildUploadBatch/buildDownloadBatch/runUploadBatch/runDownloadBatch/discardBatch + journal 埋点） |
+| `android-device-monitor/src/main/index.ts` / `index-prod.ts` | `PUSH_DEVICE_FILE`/`PULL_DEVICE_FILES` handler 接入 journal 埋点；新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS`/`GET_RESUME_BATCHES` handler；`before-quit` cancelActiveTransfers（journal 每步原子落盘即最新状态）+SIGTERM |
+| `android-device-monitor/src/shared/ipc/channels.ts` | 新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS`/`GET_RESUME_BATCHES` 通道常量 |
+| `android-device-monitor/src/main/preload.js` | 暴露 `resumeTransfers`/`discardTransfers`/`getResumeBatches` |
+| `android-device-monitor/src/renderer/lib/electronApi.ts` | 恢复相关 API 类型化封装 |
+| `android-device-monitor/src/renderer/lib/fileTransferManager.ts` | `startResumeTransfer` 复用现有 uploadId/pullId 进度通道 |
+| `android-device-monitor/src/renderer/components/FilesPanel.tsx` | 进入设备文件管理时拉取本设备未完成批次，顶部就地提示「继续/丢弃」 |
+| `android-device-monitor/src/shared/types/index.ts` | 新增 `TransferDirection`/`TransferTaskStatus`/`TransferTask`/`TransferResumeBatch`/`TransferBatchResult` |
 
 **验收标准**
 - `npm run build` 通过；`npm test` 通过
 - 上传/下载进行中强杀进程（任务管理器结束进程），设备端/本地不残留**最终文件名**的半截文件——半截产物均为 `.part`（可识别）
-- 重启应用后，若有未传完任务，启动即弹窗提示「上次有 N 个文件未传完，继续/丢弃」
-- 点「继续」且原设备在线 → 跳过已完成文件，重传被打断的与剩余文件，进度条正常显示，全部完成后 journal 清空
-- 原设备不在线时弹窗显示「等待设备连接」，原设备插回后方可点「继续」；用其他设备不放行
-- 点「丢弃」→ 任务从 journal 移除、残留 `.part` 被清理，下次启动不再提示
-- 用户主动取消的传输、传输报错失败的任务，重启后**不**触发恢复弹窗
+- 重启应用、进入该设备的文件管理 → 顶部提示「上次有 N 个文件未上传/下载完，继续/丢弃」
+- 点「继续」→ 跳过已完成文件，重传被打断的与剩余文件，进度条正常显示，全部完成后 journal 清空、提示消失
+- 点「丢弃」→ 任务从 journal 移除、残留 `.part` 被清理，再进文件管理不再提示
+- 用户主动取消的传输、传输报错失败的任务，重启后进文件管理**不**触发恢复提示
 - 正常退出（关闭窗口/退出应用）时若有传输在跑，journal 为最新状态、adb 子进程被终止
 
 ---
