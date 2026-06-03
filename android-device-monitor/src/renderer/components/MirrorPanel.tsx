@@ -54,8 +54,9 @@ const isActive = (session: MirrorSession | null, starting: boolean): boolean => 
 };
 
 export function MirrorPanel({ deviceName, isPico, session, starting, onStart, onStop, onToggleAudio }: MirrorPanelProps) {
-  const [maxSize, setMaxSize] = useState<number | undefined>(undefined);
-  const [bitRate, setBitRate] = useState<string>('8M');
+  // 默认分辨率上限 1280、码率 4M（流畅优先；可在投屏前下拉调整）。
+  const [maxSize, setMaxSize] = useState<number | undefined>(1280);
+  const [bitRate, setBitRate] = useState<string>('4M');
   const [showShortcuts, setShowShortcuts] = useState(false);
   // 启动时是否把声音转到电脑（未投屏时由此控制初值）。默认 false：声音留在设备本机输出。
   const [forwardAudio, setForwardAudio] = useState(false);
