@@ -168,6 +168,9 @@ export class ScrcpyManager {
     // 先落 meta（再 start/stop）：让纯音频进程的 exit 回调能据此判断是否需要降级重试。
     const meta = this.sessionMeta.get(deviceId) ?? {};
     meta.audioForwarded = forward;
+    if (!forward) {
+      meta.audioMode = undefined;
+    }
     this.sessionMeta.set(deviceId, meta);
     if (forward) {
       this.startAudioForward(deviceId, true);
@@ -197,6 +200,13 @@ export class ScrcpyManager {
     const args = ['-s', deviceId, '--no-video', '--no-control', '--no-window'];
     if (duplicate) {
       args.push('--audio-source=playback', '--audio-dup');
+    }
+    // 记录并广播当前实际音频模式：duplicate 乐观置 'both'，降级时由下方重试置 'pc-only'。
+    const meta = this.sessionMeta.get(deviceId);
+    if (meta) {
+      meta.audioMode = duplicate ? 'both' : 'pc-only';
+      this.sessionMeta.set(deviceId, meta);
+      this.emit({ deviceId, status: 'running', ...meta });
     }
     const child = spawn(scrcpyPath, args, { env, windowsHide: true });
     this.audioSessions.set(deviceId, child);

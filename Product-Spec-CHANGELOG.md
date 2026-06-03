@@ -85,4 +85,5 @@
 - 投屏新增**声音去向实时切换**（镜像模块）：勾选「把设备声音传到电脑」即可在设备本机 / 电脑间切换音频，默认留在设备。解决 Pico 等设备投屏时 scrcpy 默认把音频抢到电脑、设备静音的问题。
   - 实现：主视频窗口永远 `--no-audio`，音频改由独立的「纯音频」scrcpy 进程（`--no-video --no-control --no-window`）承载。勾选起该进程、取消停该进程（声音回设备）。**投屏过程中可随时切换，主画面不闪动**。新增 IPC `mirror:set-audio` 与 `MirrorSession.audioForwarded` 状态。
   - 「传到电脑」优先**两边同时出声**：纯音频进程用 `--audio-source=playback --audio-dup`，设备本机不静音、电脑也出声（需设备 Android 13+）。设备低于 13（多数 Pico）时纯音频进程会快速报错退出，自动降级为 `output` 源（仅电脑出声、设备静音），保证至少有声音。
+  - 界面根据**实际生效的音频模式**给提示（`MirrorSession.audioMode`：`both`/`pc-only`）：两边出声显示「🔊 设备与电脑同时出声」，降级时显示「⚠ 该设备不支持两边同时出声（需 Android 13+），已改为仅电脑出声」。用运行时真实结果判定，而非猜测系统版本。
 - 新增**自动更新（热更新）**能力：基于 electron-updater 的 generic provider，朋友端 app 启动时向「自建更新服务器」拉取 `latest.yml`，发现新版本后台增量下载新安装包，右下角提示「立即重启更新」。更新源地址支持环境变量 / userData 配置 / 打包默认三级解析，换 IP/穿透地址无需重打包。配套 `scripts/serve-updates.js`（支持 Range 的静态更新服务器）与 `docs/AUTO-UPDATE.md` 发版指南。免去每次手动传文件给用户。

@@ -293,6 +293,9 @@ export interface MirrorSession {
   maxSize?: number; // scrcpy --max-size 分辨率上限
   bitRate?: string; // scrcpy --video-bit-rate 码率，如 "8M"
   audioForwarded?: boolean; // 当前是否把设备声音转到电脑（由独立音频进程承载，可投屏中实时切换）
+  // 转到电脑时的实际音频模式：'both'=设备与电脑同时出声（audio-dup，Android 13+）；
+  // 'pc-only'=仅电脑出声、设备静音（设备不支持 audio-dup 时自动降级）。未转发时为 undefined。
+  audioMode?: 'both' | 'pc-only';
 }
 
 /** 启动投屏的可选参数。 */

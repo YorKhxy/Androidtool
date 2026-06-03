@@ -174,6 +174,12 @@ export function MirrorPanel({ deviceName, isPico, session, starting, onStart, on
           把设备声音传到电脑{active ? '（可实时切换）' : ''}
         </label>
         {active && <span style={{ fontSize: '12px', color: '#6b7280' }}>分辨率 / 码率投屏中不可改，声音可随时切换</span>}
+        {active && audioOn && session?.audioMode === 'both' && (
+          <span style={{ fontSize: '12px', color: '#86efac' }}>🔊 设备与电脑同时出声</span>
+        )}
+        {active && audioOn && session?.audioMode === 'pc-only' && (
+          <span style={{ fontSize: '12px', color: '#fbbf24' }}>⚠ 该设备不支持两边同时出声（需 Android 13+），已改为仅电脑出声（设备静音）</span>
+        )}
       </div>
 
       {isPico && (
