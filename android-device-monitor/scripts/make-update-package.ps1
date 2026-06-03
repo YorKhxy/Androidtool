@@ -61,6 +61,12 @@ try {
     npm run build:renderer
     if ($LASTEXITCODE -ne 0) { throw "Renderer process compilation failed" }
 
+    # 国内网络：用 npmmirror 镜像加速 electron 运行时（首次 ~108MB）与 electron-builder 二进制下载。
+    # 用 if (-not ...) 是为了：你若已自己设了环境变量，则尊重你的设置，不覆盖。
+    if (-not $env:ELECTRON_MIRROR) { $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/" }
+    if (-not $env:ELECTRON_BUILDER_BINARIES_MIRROR) { $env:ELECTRON_BUILDER_BINARIES_MIRROR = "https://npmmirror.com/mirrors/electron-builder-binaries/" }
+    Write-Host "  Using mirrors: ELECTRON_MIRROR=$env:ELECTRON_MIRROR" -ForegroundColor DarkGray
+
     Write-Host "[5/5] Packaging NSIS installer + update metadata (electron-builder)..." -ForegroundColor Yellow
     # --publish never：只在本地生成产物（含 latest.yml / .blockmap），不自动上传，由你的更新服务器对外服务。
     npx electron-builder --publish never
