@@ -2153,7 +2153,7 @@ function SimpleApp() {
           <div onClick={(e) => e.stopPropagation()} style={{ width: '460px', maxHeight: '70vh', display: 'flex', flexDirection: 'column', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '12px', padding: '18px 20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
               <h2 style={{ fontSize: '15px', fontWeight: 700, margin: 0 }}>{'\u66f4\u65b0\u65e5\u5fd7'} {appVersion ? `v${appVersion}` : ''}</h2>
-              <button onClick={() => setShowReleaseNotes(false)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>\u00d7</button>
+              <button onClick={() => setShowReleaseNotes(false)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>{'\u00d7'}</button>
             </div>
             <div style={{ overflowY: 'auto', fontSize: '13px', color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6 }}>
               {releaseNotesText.trim() ? releaseNotesText : '\u6682\u65e0\u672c\u7248\u672c\u66f4\u65b0\u8bf4\u660e\u3002'}
