@@ -595,6 +595,71 @@ Phase 1 基础框架
 
 ---
 
+### Phase 13: 文件传输中断恢复
+
+**状态**：待开发
+
+**目标**：让文件批量上传/下载在被进程崩溃、任务管理器强杀打断后，重启应用能识别未完成任务并文件级续传。对齐 Product-Spec 功能需求 2.6「传输中断恢复」。解决两个现存缺陷：(1) 传输被打断时当前文件传成半截、且用最终文件名无法区分完整与损坏；(2) 批量任务清单只在内存（IPC handler 的 for 循环 + 渲染层 `fileTransferManager.ts`），进程一被杀就丢、无法恢复。**不做单文件字节级断点续传**（adb 协议不支持指定偏移续传，成本高收益窄）。
+
+**设计约束（复用现有结构，不另造轮子）**
+- journal 落在**主进程**（传输实际跑在主进程），物理路径用 `app.getPath('userData')` 下的 `transfer-journal.json`，UI 不暴露宿主绝对路径（遵循 CONTEXT.md 与 CLAUDE.md 路径规范，禁止硬编码绝对路径）。
+- 批量循环已在 `index.ts` / `index-prod.ts` 的 `PUSH_DEVICE_FILE`、`PULL_DEVICE_FILES` handler 内逐文件调用 `ADBManager`，journal 的写入埋点就接在这两个循环里，不改动 `ADBManager` 的批量职责划分。
+- 恢复语义 = **仅崩溃/被杀残留**：只有状态停留在 `pending`/`transferring`（没来得及了结就被杀）的任务算需恢复；用户主动取消、传输报错 `failed` 的任务在了结时即从 journal 移除，不进恢复队列、不弹窗。
+- 恢复以**原设备**为前提：任务绑定原 `deviceId`，恢复时原设备未连接则等待，不允许改投其他设备。
+- `index.ts` / `index-prod.ts` 两个入口的 handler 与生命周期钩子必须同步修改（项目既有约定）。
+
+**Task 13.1 — journal 持久化模块（主进程）**
+- [ ] 共享类型：`src/shared/types/index.ts` 新增 `TransferDirection`（`'upload' | 'download'`）、`TransferTaskStatus`（`'pending' | 'transferring' | 'done' | 'failed'`）、`TransferTask`（`id: string`、`batchId: string`、`direction`、`deviceId: string`、`sourcePath: string`（上传=本地路径/下载=设备路径）、`targetPath: string`（上传=设备目录/下载=本地保存目录）、`fileName: string`、`size: number`、`status`、`createdAt: number`、`updatedAt: number`）
+- [ ] 新增 `src/main/transferJournal.ts`：单例，封装对 `path.join(app.getPath('userData'), 'transfer-journal.json')` 的读写。提供 `createBatch(tasks: TransferTask[]): void`（写入一批 `pending` 任务）、`markStatus(taskId, status)`（更新单任务状态与 `updatedAt`）、`removeBatch(batchId)`、`removeTask(taskId)`、`loadUnfinished(): TransferTask[]`（返回 `pending`/`transferring` 的任务，按 batchId 分组用）、`clearAll()`。写盘用**原子方式**：先写 `transfer-journal.json.tmp` 再 `fs.renameSync` 覆盖，避免写一半崩溃损坏 journal。读盘解析失败时容错返回空（参照项目 `historyDeviceStore.ts` / `loadStoredDeviceNames` 的 try/catch 兜底写法）。
+
+**Task 13.2 — 临时名 + 原子落地（ADBManager）**
+- [ ] `ADBManager.pushDeviceFile`：改为先 `adb push` 到设备端临时名（同目录 `.<fileName>.part`），push 成功后 `adb shell mv` 临时名→最终名；任一步失败保留 `.part`（可识别可清理），不污染最终文件名。进度轮询的 `stat` 目标路径同步改成 `.part` 路径。push 前若残留同名 `.part` 先 `rm -f` 清掉再传（支持重传）。
+- [ ] `ADBManager.pullDeviceFile` / `runAdbPull`：统一走「先拉到临时文件再 rename」——把现有「盘根用系统临时目录中转」的方案（`pullDeviceFile` 已有的 `isDriveRoot` 分支）推广到**所有**下载：始终 pull 到目标同目录的 `.<fileName>.part`（盘根场景仍用系统临时目录），完成后校验大小>0 再 rename 成最终名；rename 跨卷失败时沿用现有 copy+rm 兜底。pull 前清理残留 `.part`。
+- [ ] 不改这两个方法的对外签名（`index.ts` 调用处不动），仅内部实现改造。
+
+**Task 13.3 — 批量 handler 接入 journal + 文件级续传 + 恢复入口**
+- [ ] `index.ts` / `index-prod.ts` 的 `PUSH_DEVICE_FILE` handler：进入循环前 `createBatch`（按 `localPaths` 生成 `upload` 任务，`targetPath`=remoteDir）；每个文件传输前 `markStatus(taskId,'transferring')`，成功 `markStatus('done')`，失败 `markStatus('failed')`；整批结束（正常跑完或抛错了结）后把本批 `done`/`failed` 任务 `removeBatch` 清出 journal。
+- [ ] `PULL_DEVICE_FILES` handler：把 `savedDir` 的获取与传输循环**解耦**——新建传输时仍弹 dialog 选目录，并把 `savedDir` 作为每个 `download` 任务的 `targetPath` 写进 journal；恢复传输时**不弹 dialog**，直接用 journal 里记录的 `targetPath`。其余 journal 埋点同上。
+- [ ] 新增续传执行函数（主进程内复用）：给定一批未完成任务，跳过 `done`，对 `pending`/`transferring`/被打断的逐个重传（重传即从头，Task 13.2 已保证清理半截 `.part`），过程照常回传 `PUSH_DEVICE_FILE_PROGRESS` / `PULL_DEVICE_FILE_PROGRESS` 进度。
+- [ ] 新增 IPC 通道 `RESUME_TRANSFERS`（`'adb:resume-transfers'`）：入参 batchId（或全部未完成），调用续传执行函数；`DISCARD_TRANSFERS`（`'adb:discard-transfers'`）：`removeBatch` 并清理设备端/本地残留 `.part`。`channels.ts` 加常量、`index.ts`/`index-prod.ts` 注册 handler。
+
+**Task 13.4 — 启动恢复弹窗 + 设备前提（IPC 契约 + 渲染层）**
+- [ ] 主进程启动（窗口 ready 后）调用 `transferJournal.loadUnfinished()`，若非空，通过新事件通道 `TRANSFER_RESUME_AVAILABLE`（`'adb:transfer-resume-available'`）`webContents.send` 推给渲染层，payload 为按 batch 聚合的摘要（`batchId`、`direction`、`deviceId`、未完成文件数、文件名样例）。
+- [ ] IPC 契约三件套同步：`channels.ts` 新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS`/`TRANSFER_RESUME_AVAILABLE`；`preload.js` 暴露 `resumeTransfers(batchId)`/`discardTransfers(batchId)`/`onTransferResumeAvailable(cb)`（返回 unsubscribe）；`electronApi.ts` 类型化封装。
+- [ ] 渲染层弹窗：在 `SimpleApp.tsx`（或 `fileTransferManager.ts` 订阅 + 由 App 渲染）监听 `onTransferResumeAvailable`，弹出确认框「上次有 N 个文件未传完，继续 / 丢弃」。
+  - 「继续」：若该 batch 的 `deviceId` 设备当前在线 → 调 `resumeTransfers(batchId)`，进度复用现有 `fileTransferManager` 进度条展示；若设备不在线 → 弹窗内显示「等待设备 XXX 连接」，监听 `devices` 列表，匹配到该 `deviceId` 在线后才放开「继续」按钮（不允许改投其他设备）。
+  - 「丢弃」：调 `discardTransfers(batchId)`。
+- [ ] `fileTransferManager.ts`：扩展以接纳「恢复中的传输」进度（沿用现有 `activeUploadId`/`activePullId` + `onPushProgress`/`onPullProgress` 订阅机制，恢复传输复用同一套 uploadId/pullId 进度通道）。
+
+**Task 13.5 — 优雅关闭兜底 + 残留语义收口**
+- [ ] `index.ts` app `before-quit`（`index-prod.ts` 同步）：若当前有传输在进行，先 `transferJournal` flush（确保最新状态落盘），再向正在跑的 adb 子进程发 SIGTERM。需要 `ADBManager` 暴露「取消/终止当前传输子进程」的能力（如 `cancelActiveTransfers()`，记录 push/pull 的 `child` 引用并 `child.kill('SIGTERM')`）。注意 SIGKILL（强杀/崩溃）拦不住，最终兜底仍是 journal。
+- [ ] 收口残留语义：确认「用户主动取消传输」「传输报错 failed」两条路径都会把对应任务从 journal 移除（`removeTask`），只有未及了结即被杀的 `pending`/`transferring` 残留进 `loadUnfinished`。
+
+**关键文件**
+| 文件路径 | 说明 |
+|----------|------|
+| `android-device-monitor/src/main/transferJournal.ts` | 新增：传输日志持久化（userData/transfer-journal.json，原子写盘、未完成任务加载、容错解析） |
+| `android-device-monitor/src/main/adb/ADBManager.ts` | `pushDeviceFile`/`pullDeviceFile`/`runAdbPull` 改临时名+原子 rename；新增 `cancelActiveTransfers()` |
+| `android-device-monitor/src/main/index.ts` / `index-prod.ts` | `PUSH_DEVICE_FILE`/`PULL_DEVICE_FILES` handler 接入 journal 埋点；新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS` handler 与续传执行函数；启动推送 `TRANSFER_RESUME_AVAILABLE`；`before-quit` flush+SIGTERM |
+| `android-device-monitor/src/shared/ipc/channels.ts` | 新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS`/`TRANSFER_RESUME_AVAILABLE` 通道常量 |
+| `android-device-monitor/src/main/preload.js` | 暴露 `resumeTransfers`/`discardTransfers`/`onTransferResumeAvailable` |
+| `android-device-monitor/src/renderer/lib/electronApi.ts` | 恢复相关 API 类型化封装与事件订阅 |
+| `android-device-monitor/src/renderer/lib/fileTransferManager.ts` | 接纳恢复中传输的进度展示，复用现有 uploadId/pullId 进度通道 |
+| `android-device-monitor/src/renderer/SimpleApp.tsx` | 启动恢复弹窗（继续/丢弃）、等待原设备连接的交互 |
+| `android-device-monitor/src/shared/types/index.ts` | 新增 `TransferDirection`/`TransferTaskStatus`/`TransferTask` |
+
+**验收标准**
+- `npm run build` 通过；`npm test` 通过
+- 上传/下载进行中强杀进程（任务管理器结束进程），设备端/本地不残留**最终文件名**的半截文件——半截产物均为 `.part`（可识别）
+- 重启应用后，若有未传完任务，启动即弹窗提示「上次有 N 个文件未传完，继续/丢弃」
+- 点「继续」且原设备在线 → 跳过已完成文件，重传被打断的与剩余文件，进度条正常显示，全部完成后 journal 清空
+- 原设备不在线时弹窗显示「等待设备连接」，原设备插回后方可点「继续」；用其他设备不放行
+- 点「丢弃」→ 任务从 journal 移除、残留 `.part` 被清理，下次启动不再提示
+- 用户主动取消的传输、传输报错失败的任务，重启后**不**触发恢复弹窗
+- 正常退出（关闭窗口/退出应用）时若有传输在跑，journal 为最新状态、adb 子进程被终止
+
+---
+
 ## 4. 当前真实目录结构
 
 ```text
