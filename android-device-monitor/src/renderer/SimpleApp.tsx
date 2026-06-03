@@ -1367,7 +1367,7 @@ function SimpleApp() {
     }
   };
 
-  const handleStartMirror = async (params: { maxSize?: number; bitRate?: string }) => {
+  const handleStartMirror = async (params: { maxSize?: number; bitRate?: string; forwardAudio?: boolean }) => {
     if (!selectedDevice || !hasElectronAPI()) return;
     const deviceId = selectedDevice.id;
     setError('');
@@ -1377,6 +1377,7 @@ function SimpleApp() {
         isPico: isLikelyPicoDevice(selectedDevice),
         maxSize: params.maxSize,
         bitRate: params.bitRate,
+        forwardAudio: params.forwardAudio,
       });
       if (!result.success) {
         setMirrorStartingDeviceIds(prev => {

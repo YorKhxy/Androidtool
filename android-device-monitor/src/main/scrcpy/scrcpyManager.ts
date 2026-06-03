@@ -67,6 +67,11 @@ export class ScrcpyManager {
       if (options.bitRate) {
         args.push('--video-bit-rate', options.bitRate);
       }
+      // 默认不转发音频：附加 --no-audio，声音留在设备本机播放（scrcpy ≥2.0 默认会把音频
+      // 抢到电脑、设备静音）。仅当用户显式开启「把声音传到电脑」才不加该参数。
+      if (!options.forwardAudio) {
+        args.push('--no-audio');
+      }
 
       let crop: string | undefined;
       if (options.isPico) {

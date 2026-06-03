@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { MirrorSession, MirrorSessionStatus } from '../../shared/types';
 
-type MirrorStartParams = { maxSize?: number; bitRate?: string };
+type MirrorStartParams = { maxSize?: number; bitRate?: string; forwardAudio?: boolean };
 
 type MirrorPanelProps = {
   deviceName: string;
@@ -56,6 +56,8 @@ export function MirrorPanel({ deviceName, isPico, session, starting, onStart, on
   const [maxSize, setMaxSize] = useState<number | undefined>(undefined);
   const [bitRate, setBitRate] = useState<string>('8M');
   const [showShortcuts, setShowShortcuts] = useState(false);
+  // 是否把设备声音转到电脑播放。默认 false：声音留在设备本机输出。
+  const [forwardAudio, setForwardAudio] = useState(false);
 
   const active = isActive(session, starting);
   const status: MirrorSessionStatus = starting ? 'starting' : session?.status ?? 'stopped';
@@ -97,7 +99,7 @@ export function MirrorPanel({ deviceName, isPico, session, starting, onStart, on
         </div>
 
         <button
-          onClick={active ? onStop : () => onStart({ maxSize, bitRate })}
+          onClick={active ? onStop : () => onStart({ maxSize, bitRate, forwardAudio })}
           disabled={starting}
           style={{
             padding: '10px 22px',
@@ -150,6 +152,19 @@ export function MirrorPanel({ deviceName, isPico, session, starting, onStart, on
               </option>
             ))}
           </select>
+        </label>
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#cbd5e1', cursor: active ? 'not-allowed' : 'pointer', opacity: active ? 0.6 : 1 }}
+          title="默认声音留在设备本机播放；勾选后投屏时把设备声音转到电脑（设备本机会静音）"
+        >
+          <input
+            type="checkbox"
+            checked={forwardAudio}
+            disabled={active}
+            onChange={(e) => setForwardAudio(e.target.checked)}
+            style={{ cursor: active ? 'not-allowed' : 'pointer' }}
+          />
+          把设备声音传到电脑
         </label>
         {active && <span style={{ fontSize: '12px', color: '#6b7280' }}>投屏中不可改参数，停止后可调整</span>}
       </div>

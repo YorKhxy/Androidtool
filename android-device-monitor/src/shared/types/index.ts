@@ -300,6 +300,9 @@ export interface MirrorStartOptions {
   isPico?: boolean; // Pico 设备自动附加单眼裁切
   maxSize?: number; // --max-size
   bitRate?: string; // --video-bit-rate，如 "8M"
+  // 是否把设备声音转到电脑播放。默认 false：附加 --no-audio，声音留在设备本机输出；
+  // 设为 true 才让 scrcpy 转发音频（此时设备本机静音，声音从电脑出，scrcpy 默认行为）。
+  forwardAudio?: boolean;
 }
 
 export type IpcChannel =
