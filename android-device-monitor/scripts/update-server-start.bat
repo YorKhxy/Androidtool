@@ -11,7 +11,7 @@ cd /d "%~dp0.."
 echo ============================================================
 echo  AndroidTool Update Server
 echo  Serving: update-releases\latest   Port: 8384   Listen: 0.0.0.0
-echo  Friends point their app update URL to:  http://<this-PC-IP>:8384/
+echo  Friends point their app update URL to:  http://YOUR-PC-IP:8384/
 echo  Stop: close this window, press Ctrl+C, or run update-server-stop.bat
 echo ============================================================
 echo.
