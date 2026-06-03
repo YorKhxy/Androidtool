@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   resumeTransfers: (batchId, transferId) => ipcRenderer.invoke('adb:resume-transfers', batchId, transferId),
   discardTransfers: (batchId) => ipcRenderer.invoke('adb:discard-transfers', batchId),
+  getResumeBatches: () => ipcRenderer.invoke('adb:get-resume-batches'),
   onTransferResumeAvailable: (callback) => {
     const listener = (_, batches) => callback(batches);
     ipcRenderer.on('adb:transfer-resume-available', listener);

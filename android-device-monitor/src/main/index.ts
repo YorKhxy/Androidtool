@@ -534,6 +534,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  // 渲染层挂载后主动拉取可恢复批次（拉取式，避免 did-finish-load 推送早于订阅的竞态）。
+  ipcMain.handle(IPC_CHANNELS.GET_RESUME_BATCHES, async () => {
+    try {
+      return { success: true, data: transferJournal.getResumeBatches() };
+    } catch (error) {
+      return toIpcErrorResponse(error, '读取未完成传输失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.UNINSTALL_APP, async (_event, deviceId: string, packageName: string) => {
     try {
       const output = await adbManager.uninstallApp(deviceId, packageName);

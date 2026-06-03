@@ -72,6 +72,7 @@ export interface ElectronAPI {
   onPushProgress: (callback: (progress: PushProgress) => void) => () => void;
   resumeTransfers: (batchId: string, transferId: string) => Promise<ElectronResult<TransferBatchResult>>;
   discardTransfers: (batchId: string) => Promise<ElectronResult<undefined>>;
+  getResumeBatches: () => Promise<ElectronResult<TransferResumeBatch[]>>;
   onTransferResumeAvailable: (callback: (batches: TransferResumeBatch[]) => void) => () => void;
   launchApp: (deviceId: string, packageName: string) => Promise<ElectronResult<{ packageName: string; output: string }>>;
   forceStopApp: (deviceId: string, packageName: string) => Promise<ElectronResult<undefined>>;

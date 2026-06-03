@@ -35,6 +35,7 @@ export const IPC_CHANNELS = {
   SELECT_UPLOAD_FILES: 'adb:select-upload-files',
   RESUME_TRANSFERS: 'adb:resume-transfers',
   DISCARD_TRANSFERS: 'adb:discard-transfers',
+  GET_RESUME_BATCHES: 'adb:get-resume-batches',
   TRANSFER_RESUME_AVAILABLE: 'adb:transfer-resume-available',
   LAUNCH_APP: 'adb:launch-app',
   FORCE_STOP_APP: 'adb:force-stop-app',

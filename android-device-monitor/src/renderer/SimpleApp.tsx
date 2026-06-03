@@ -516,6 +516,12 @@ function SimpleApp() {
         const unsubscribeTransferResume = window.electronAPI!.onTransferResumeAvailable((batches) => {
           setResumeBatches(batches);
         });
+        // 主动拉取一次未完成传输：did-finish-load 的 push 可能早于本订阅注册而丢失，拉取式兜底。
+        void window.electronAPI!.getResumeBatches().then((result) => {
+          if (result.success && result.data && result.data.length > 0) {
+            setResumeBatches(result.data);
+          }
+        });
 
         return () => {
           unsubscribeAdbStatusChanged();
