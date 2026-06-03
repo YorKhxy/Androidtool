@@ -16,6 +16,7 @@
     "pack": "npm run adb:prepare && npm run scrcpy:prepare && electron-builder --dir",
     "dist": "npm run adb:prepare && npm run scrcpy:prepare && electron-builder",
     "serve:updates": "node ./scripts/serve-updates.js",
+    "update:pack": "powershell -ExecutionPolicy Bypass -File ./scripts/make-update-package.ps1",
     "release": "powershell -ExecutionPolicy Bypass -File ./scripts/build-and-package.ps1",
     "release-bat": "scripts\\build-and-package.bat",
     "test": "jest"

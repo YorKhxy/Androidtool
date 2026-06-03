@@ -28,11 +28,16 @@
 1. **改版本号**：把 `package.json` 的 `version` 往上加（如 `1.0.0` → `1.0.1`）。
    > electron-updater 只在「服务器版本 > 本机已安装版本」时才更新，所以版本号必须递增。
 
-2. **打包**：
-   ```bash
-   npm run dist
-   ```
+2. **打热更包**（用专门的脚本，别用 `npm run dist`）：
+
+   **方式 A：双击** `scripts\make-update-package.bat`
+   **方式 B：命令行** `npm run update:pack`
+
+   它会：备好内置 adb/scrcpy → 编译主进程并切到生产入口(index-prod) → 编译渲染层 → electron-builder 出 NSIS 包。
    产物落在 `dist/`：`安卓设备监控 Setup x.y.z.exe`、`latest.yml`、`*.blockmap`（这三类是自动更新必需的）。
+
+   > ⚠️ 不要用 `npm run dist`：它不会先编译 build:main/renderer、也不切生产入口，打出来的包对自动更新不可用。
+   > `build-and-package.ps1`（旧的 portable 打包）同样**不产 latest.yml**，不能用于热更。
 
 3. **启动更新服务器**（在作为「更新服务器」的那台电脑上，一般就是你开发这台）：
 
@@ -120,4 +125,5 @@
 | `src/renderer/SimpleApp.tsx` | 右下角更新提示条（下载进度 / 「立即重启更新」） |
 | `scripts/serve-updates.js` | 极简静态更新服务器（支持 Range，差量下载用） |
 | `scripts/update-server-start.bat` / `update-server-stop.bat` | 双击启动 / 停止更新服务器（停止按端口结束进程） |
+| `scripts/make-update-package.ps1` / `make-update-package.bat` | 打热更包（build + 生产入口 + electron-builder NSIS，产 latest.yml/installer/blockmap）；npm 别名 `update:pack` |
 | `package.json` `build.publish` | generic provider 默认更新源地址 |

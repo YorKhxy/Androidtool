@@ -40,6 +40,29 @@ describe('project smoke checks', () => {
     );
   });
 
+  test('auto-update wiring and update-package scripts are configured', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
+    const updatePackPs1 = fs.readFileSync(path.join(root, 'scripts/make-update-package.ps1'), 'utf-8');
+    const updatePackBat = fs.readFileSync(path.join(root, 'scripts/make-update-package.bat'), 'utf-8');
+    const serveSource = fs.readFileSync(path.join(root, 'scripts/serve-updates.js'), 'utf-8');
+    // electron-updater 依赖与 generic 更新源配置
+    expect(pkg.dependencies['electron-updater']).toBeDefined();
+    expect(pkg.build.publish).toEqual(
+      expect.arrayContaining([expect.objectContaining({ provider: 'generic' })])
+    );
+    // 打热更包脚本：必须先 build 主/渲染、切生产入口、再 electron-builder
+    expect(pkg.scripts['update:pack']).toContain('make-update-package.ps1');
+    expect(updatePackPs1).toContain('npm run build:main');
+    expect(updatePackPs1).toContain('npm run build:renderer');
+    expect(updatePackPs1).toContain('index-prod.js');
+    expect(updatePackPs1).toContain('electron-builder');
+    expect(updatePackBat).toContain('make-update-package.ps1');
+    // 更新服务器脚本支持 Range（差量下载需要）
+    expect(pkg.scripts['serve:updates']).toContain('serve-updates.js');
+    expect(serveSource).toContain('206');
+    expect(serveSource).toContain('Content-Range');
+  });
+
   test('logcat cleanup has bounded buffers and kills process trees on Windows', () => {
     const source = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
     expect(source).toContain('maxLogcatBufferChars');
