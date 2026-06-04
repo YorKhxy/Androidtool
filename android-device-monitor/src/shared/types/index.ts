@@ -251,6 +251,69 @@ export interface PerformanceSessionExportPayload {
   samples: PerformanceSample[];
 }
 
+// —— 性能采集会话（Phase 14：一次「开始采集 → 关闭采集」= 一个会话）——
+
+export type PerformanceCaptureProvider = 'android-screenrecord' | 'pico-screenrecord' | 'pico-sdk';
+
+export type PerformanceCaptureStatus = 'recording' | 'completed' | 'failed';
+
+/** 一段录制视频（≤180s）。多段按 index 顺序缝合为一条连续时间轴。 */
+export interface PerformanceCaptureSegment {
+  index: number;
+  /** 相对会话 video/ 目录的文件名，如 seg-0.mp4 */
+  fileName: string;
+  /** 相对采集起点的毫秒数（本段开始） */
+  startMs: number;
+  /** 相对采集起点的毫秒数（本段结束） */
+  endMs: number;
+  /** 本段视频体积（字节） */
+  sizeBytes: number;
+}
+
+/** 参数过滤标记：某指标按阈值命中的时间点集合，可持久化复用。 */
+export interface PerformanceCaptureMarker {
+  id: string;
+  metricKey: 'fps' | 'cpu' | 'mem' | 'gpu';
+  op: '>' | '=' | '<';
+  threshold: number;
+  /** 命中的时间点（相对会话起点毫秒） */
+  atMs: number[];
+}
+
+export interface PerformanceCaptureSession {
+  id: string;
+  deviceId: string;
+  /** 设备序列号，用于回看列表展示与缺省命名 */
+  deviceSn: string;
+  /** 用户自定义名称，缺省用「SN + 时间 + 时长」 */
+  title?: string;
+  provider: PerformanceCaptureProvider;
+  status: PerformanceCaptureStatus;
+  startedAt: Date;
+  endedAt?: Date;
+  durationMs: number;
+  /** Pico：播放时按单眼区域裁切显示 */
+  singleEyeVideo?: boolean;
+  /** 分段视频（按时序），缝合为连续轴 */
+  videoSegments: PerformanceCaptureSegment[];
+  /** 样本数据文件相对路径（performance-captures/<id>/data/samples.jsonl） */
+  dataRelativePath: string;
+  /** 快捷截图归档子目录相对路径 */
+  screenshotDir?: string;
+  packageName?: string;
+  activityName?: string;
+  /** 视频 + 数据总体积，用于软上限提醒 */
+  sizeBytes?: number;
+  error?: string;
+}
+
+/** loadSession 返回：会话元数据 + 完整样本序列 + 已存过滤标记。 */
+export interface PerformanceCaptureSessionDetail {
+  session: PerformanceCaptureSession;
+  samples: PerformanceSample[];
+  markers: PerformanceCaptureMarker[];
+}
+
 export interface AdbStatus {
   available: boolean;
   version: string | null;

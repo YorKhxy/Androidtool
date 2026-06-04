@@ -546,8 +546,8 @@ describe('project smoke checks', () => {
     expect(mediaSource).toContain("export const PERFORMANCE_MEDIA_SCHEME = 'adm-media'");
     expect(mediaSource).toContain('registerPerformanceMediaScheme');
     expect(mediaSource).toContain('registerPerformanceMediaProtocol');
-    expect(mediaSource).toContain("relativePath.startsWith('performance-recordings/')");
-    expect(mediaSource).toContain('path.relative(recordingsRoot, resolvedPath)');
+    expect(mediaSource).toContain('performance-recordings');
+    expect(mediaSource).toContain('path.relative(mediaRoot, resolvedPath)');
     expect(managerSource).toContain('PerformanceRecordingManager');
     expect(managerSource).toContain('isPico: this.isLikelyPicoDevice(deviceId)');
     expect(recordingSource).toContain("'screenrecord'");
@@ -646,6 +646,54 @@ describe('project smoke checks', () => {
     expect(recorderSource).toContain('if (state.stopRequested)');
     // 不在录制阶段做单眼裁切（播放时裁切）
     expect(recorderSource).not.toContain('--crop');
+  });
+
+  test('capture session store archives video/data/screenshots separately under tool root', () => {
+    const storePath = path.join(root, 'src/main/performanceCaptureStore.ts');
+    expect(fs.existsSync(storePath)).toBe(true);
+    const storeSource = fs.readFileSync(storePath, 'utf-8');
+    const typeSource = fs.readFileSync(path.join(root, 'src/shared/types/index.ts'), 'utf-8');
+    const mediaSource = fs.readFileSync(path.join(root, 'src/main/performanceMedia.ts'), 'utf-8');
+
+    // 会话类型
+    expect(typeSource).toContain('interface PerformanceCaptureSession');
+    expect(typeSource).toContain('interface PerformanceCaptureSegment');
+    expect(typeSource).toContain('interface PerformanceCaptureMarker');
+    expect(typeSource).toContain('interface PerformanceCaptureSessionDetail');
+    expect(typeSource).toContain('deviceSn: string');
+    expect(typeSource).toContain('videoSegments: PerformanceCaptureSegment[]');
+
+    // 目录结构：根目录锚点 + video/data/screenshots 分离
+    expect(storeSource).toContain("CAPTURES_DIR = 'performance-captures'");
+    expect(storeSource).toContain('resolveAppRoot');
+    expect(storeSource).not.toContain("app.getPath('userData')");
+    expect(storeSource).toContain("'video'");
+    expect(storeSource).toContain("'data'");
+    expect(storeSource).toContain("'screenshots'");
+    // 流式落盘 jsonl（防崩溃），manifest，标记
+    expect(storeSource).toContain("SAMPLES_FILE = 'samples.jsonl'");
+    expect(storeSource).toContain('appendSamples');
+    expect(storeSource).toContain('fs.appendFile');
+    expect(storeSource).toContain('MANIFEST_FILE');
+    // 生命周期与回看
+    expect(storeSource).toContain('createSession');
+    expect(storeSource).toContain('appendSegment');
+    expect(storeSource).toContain('finalizeSession');
+    expect(storeSource).toContain('listSessions');
+    expect(storeSource).toContain('loadSession');
+    expect(storeSource).toContain('renameSession');
+    expect(storeSource).toContain('saveMarkers');
+    // 删除：递归删整个会话文件夹
+    expect(storeSource).toContain('deleteSession');
+    expect(storeSource).toContain('recursive: true, force: true');
+    // manifest 读改写串行化，防并发丢更新
+    expect(storeSource).toContain('mutateManifest');
+    // sessionId 路径穿越校验（14.4 经 IPC 暴露后即外部可控）
+    expect(storeSource).toContain('非法的采集会话 ID');
+    expect(storeSource).toContain('path.relative(root, resolved)');
+    // 媒体协议放行新会话目录
+    expect(mediaSource).toContain('performance-captures');
+    expect(mediaSource).toContain('performance-recordings');
   });
 
   test('network tab does not auto-trigger capture or show loading as an error toast', () => {
