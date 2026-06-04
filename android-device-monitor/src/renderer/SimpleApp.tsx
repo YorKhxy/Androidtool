@@ -2595,36 +2595,41 @@ function SimpleApp() {
             <div
               style={{
                 marginBottom: '16px',
-                padding: '12px',
-                borderRadius: '8px',
-                backgroundColor: adbStatus.available ? '#1f3b2d' : '#3f1d24',
-                border: `1px solid ${adbStatus.available ? '#2f855a' : '#7f1d1d'}`,
+                padding: '11px 13px',
+                borderRadius: 'var(--r-md)',
+                background: adbStatus.available ? 'var(--success-soft)' : 'var(--danger-soft)',
+                border: `1px solid ${adbStatus.available ? '#54C08455' : '#E0746C55'}`,
               }}
             >
-              <div style={{ fontSize: '13px', fontWeight: 600, color: adbStatus.available ? '#86efac' : '#fda4af', marginBottom: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '13px', fontWeight: 600, color: adbStatus.available ? 'var(--success)' : 'var(--danger)', marginBottom: '4px' }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: adbStatus.available ? 'var(--success)' : 'var(--danger)', flexShrink: 0 }} />
                 {adbStatus.available
                   ? `${adbStatus.source === 'bundled' ? '内置' : '系统'} ADB 已就绪${adbStatus.version ? ` · ${adbStatus.version}` : ''}`
                   : 'ADB 不可用'}
               </div>
-              <div style={{ fontSize: '12px', color: '#d1d5db', lineHeight: 1.5 }}>{adbStatus.message}</div>
+              <div style={{ fontSize: '12px', color: 'var(--fg-secondary)', lineHeight: 1.5 }}>{adbStatus.message}</div>
               {adbStatus.hint && !adbStatus.available && (
-                <div style={{ marginTop: '6px', fontSize: '12px', color: '#fecdd3', lineHeight: 1.5 }}>{adbStatus.hint}</div>
+                <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--danger)', lineHeight: 1.5 }}>{adbStatus.hint}</div>
               )}
               {adbStatus.path && (
-                <div style={{ marginTop: '6px', fontSize: '11px', color: '#94a3b8', wordBreak: 'break-all' }}>{adbStatus.path}</div>
+                <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--fg-tertiary)', wordBreak: 'break-all' }}>{adbStatus.path}</div>
               )}
             </div>
           )}
 
           <div style={{ order: 2 }}>
-          <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u8bbe\u5907\u5217\u8868'}</h2>
+          <div className="seclabel">{'\u8bbe\u5907\u5217\u8868'}</div>
           <div style={{ display: 'flex', gap: '8px', margin: '0 0 12px 0' }}>
-            <button onClick={loadDevices} style={{ flex: 1, padding: '6px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px' }}>刷新设备</button>
-            <button onClick={connectUSBDevice} style={{ flex: 1, padding: '6px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px' }}>连接 USB</button>
+            <button onClick={loadDevices} className="btn secondary" style={{ flex: 1, justifyContent: 'center' }}>
+              <Icon name="refresh-cw" />刷新设备
+            </button>
+            <button onClick={connectUSBDevice} className="btn secondary" style={{ flex: 1, justifyContent: 'center' }}>
+              <Icon name="usb" />连接 USB
+            </button>
           </div>
           
           {devices.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px 0', color: '#666' }}>
+            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--fg-tertiary)' }}>
               <p style={{ fontSize: '14px' }}>
                 {adbStatus && !adbStatus.available ? 'ADB 不可用，暂时无法读取设备' : '\u672a\u8fde\u63a5\u8bbe\u5907'}
               </p>
@@ -2637,105 +2642,119 @@ function SimpleApp() {
                 return (
                 <div
                   key={device.id}
-                  style={{ 
-                    padding: '12px', 
-                    borderRadius: '8px', 
+                  style={{
+                    padding: '15px',
+                    borderRadius: 'var(--r-md)',
                     cursor: 'pointer',
-                    backgroundColor: selectedDevice?.id === device.id ? '#4a90d9' : '#353550',
-                    border: selectedDevice?.id === device.id ? '1px solid #60a5fa' : 'none'
+                    background: 'var(--bg-panel)',
+                    border: `1px solid ${selectedDevice?.id === device.id ? 'var(--border-selected)' : 'var(--border-default)'}`,
+                    boxShadow: selectedDevice?.id === device.id ? '0 0 0 1px var(--border-selected)' : 'none'
                   }}
                   onClick={() => setSelectedDevice(device)}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                    <span>{device.connectionType === 'wifi' ? 'WiFi' : 'USB'}</span>
-                    <span style={{ fontWeight: '500', fontSize: '14px' }}>{getDeviceLabel(device)}</span>
+                    <span style={{ fontWeight: 600, fontSize: '15px', color: 'var(--fg-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getDeviceLabel(device)}</span>
+                    {device.connectionType === 'wifi'
+                      ? <Badge tone="info" icon="wifi">WiFi</Badge>
+                      : <Badge tone="neutral" icon="usb">USB</Badge>}
                     </div>
-                    <span style={{ padding: '2px 8px', borderRadius: '999px', fontSize: '11px', backgroundColor: statusMeta.background, color: statusMeta.color, flexShrink: 0 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: statusMeta.color, flexShrink: 0 }}>
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: statusMeta.color, flexShrink: 0 }} />
                       {statusMeta.label}
                     </span>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '2px' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--fg-tertiary)', marginBottom: '2px' }}>
                     {'SN'}: {device.serialNo || '--'}
                   </div>
                   {device.connectionType === 'wifi' && (
-                    <div style={{ fontSize: '12px', color: '#aaa' }}>{device.id}</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--fg-tertiary)' }}>{device.id}</div>
                   )}
-                  <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <div style={{ marginTop: '10px', paddingBottom: '10px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
                       {renderBatteryBadge(device)}
                       {renderScreenStateBadge(device)}
                     </div>
                     {wifiLatencyLabel && (
-                      <span style={{ fontSize: '12px', color: device.latencyStatus === 'timeout' ? '#fbbf24' : '#93c5fd' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: device.latencyStatus === 'timeout' ? 'var(--warning)' : 'var(--info)' }}>
+                        <Icon name="activity" size={12} color={device.latencyStatus === 'timeout' ? 'var(--warning)' : 'var(--info)'} />
                         {wifiLatencyLabel}
                       </span>
                     )}
                   </div>
                   {runningLogDeviceIds.has(device.id) && (
-                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#86efac' }}>
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--success)' }}>
                       {pausedLogDeviceIds.has(device.id) ? '\u65e5\u5fd7\u5df2\u6682\u505c' : '\u65e5\u5fd7\u91c7\u96c6\u4e2d'}
                     </div>
                   )}
-                  <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);handleSleepDevice(device); }}
-                      disabled={Boolean(busyDeviceAction)}
-                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#d1d5db', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
-                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'sleep' ? '息屏中…' : '息屏'}</button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);handleWakeDevice(device); }}
-                      disabled={Boolean(busyDeviceAction)}
-                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#86efac', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
-                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'wake' ? '唤醒中…' : '唤醒'}</button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);handleUnlockDevice(device); }}
-                      disabled={Boolean(busyDeviceAction)}
-                      title="唤醒并上滑解锁；有 PIN/密码/手势的设备请在设备上手动输入"
-                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#93c5fd', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
-                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'unlock' ? '解锁中…' : '解锁'}</button>
-                    {confirmRebootId === device.id ? (
-                      <>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); handleRebootDevice(device); }}
-                          style={{ padding: '4px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
-                        >确认重启</button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); }}
-                          style={{ padding: '4px 8px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
-                        >取消</button>
-                      </>
-                    ) : (
+                  {confirmRebootId === device.id ? (
+                    <div style={{ marginTop: '10px', display: 'flex', gap: '6px' }}>
                       <button
-                        onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmDisconnectId(null); setConfirmRebootId(device.id); }}
-                        disabled={Boolean(busyDeviceAction)}
-                        style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
-                      >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'reboot' ? '重启中…' : '重启'}</button>
-                    )}
+                        onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); handleRebootDevice(device); }}
+                        className="btn sm" style={{ flex: 1, justifyContent: 'center', background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }}
+                      >确认重启</button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); }}
+                        className="btn secondary sm" style={{ flex: 1, justifyContent: 'center' }}
+                      >取消</button>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: '10px', display: 'flex', border: '1px solid var(--border-default)', borderRadius: 'var(--r-sm)', overflow: 'hidden', background: 'var(--bg-elevated)' }}>
+                      {([
+                        { key: 'sleep', icon: 'moon', label: '息屏', busy: '息屏中…', onClick: () => handleSleepDevice(device) },
+                        { key: 'wake', icon: 'sun', label: '唤醒', busy: '唤醒中…', onClick: () => handleWakeDevice(device) },
+                        { key: 'unlock', icon: 'lock-open', label: '解锁', busy: '解锁中…', onClick: () => handleUnlockDevice(device), title: '唤醒并上滑解锁；有 PIN/密码/手势的设备请在设备上手动输入' },
+                        { key: 'reboot', icon: 'rotate-cw', label: '重启', busy: '重启中…', onClick: () => { setConfirmDisconnectId(null); setConfirmRebootId(device.id); } },
+                      ] as const).map((act, idx) => (
+                        <button
+                          key={act.key}
+                          onClick={(e) => { e.stopPropagation(); setSelectedDevice(device); act.onClick(); }}
+                          disabled={Boolean(busyDeviceAction)}
+                          title={'title' in act ? act.title : undefined}
+                          style={{
+                            flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                            padding: '6px 4px', background: 'transparent', border: 'none',
+                            borderLeft: idx === 0 ? 'none' : '1px solid var(--border-default)',
+                            color: 'var(--fg-secondary)', fontSize: '12px',
+                            cursor: busyDeviceAction ? 'not-allowed' : 'pointer', opacity: busyDeviceAction ? 0.6 : 1,
+                            transition: 'background var(--dur-fast)'
+                          }}
+                          onMouseEnter={(e) => { if (!busyDeviceAction) e.currentTarget.style.background = 'var(--bg-active)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          <Icon name={act.icon} size={14} />
+                          {busyDeviceAction?.id === device.id && busyDeviceAction.action === act.key ? act.busy : act.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setFileBrowserDevice(device); }}
+                      title="浏览设备文件、下载到电脑、上传文件到设备"
+                      className="btn secondary sm" style={{ flex: 1, justifyContent: 'center' }}
+                    ><Icon name="folder" color="var(--gold)" />文件管理</button>
                     {confirmDisconnectId === device.id ? (
                       <>
                         <button
                           onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmDisconnectId(null); disconnectDevice(device); }}
-                          style={{ padding: '4px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+                          className="btn sm" style={{ justifyContent: 'center', background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }}
                         >确认断开</button>
                         <button
                           onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmDisconnectId(null); }}
-                          style={{ padding: '4px 8px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                          className="btn secondary sm" style={{ justifyContent: 'center' }}
                         >取消</button>
                       </>
                     ) : (
                       <button
                         onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); setConfirmDisconnectId(device.id); }}
-                        style={{ padding: '4px 8px', backgroundColor: '#555', border: 'none', borderRadius: '4px', color: '#ff6b6b', cursor: 'pointer', fontSize: '12px' }}
-                      >断开设备</button>
+                        title="断开设备连接"
+                        className="btn sm iconbtn"
+                        style={{ color: 'var(--danger)' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--danger-soft)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                      ><Icon name="unplug" color="var(--danger)" /></button>
                     )}
-                  </div>
-                  <div style={{ marginTop: '6px' }}>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setFileBrowserDevice(device); }}
-                      title="浏览设备文件、下载到电脑、上传文件到设备"
-                      style={{ width: '100%', padding: '6px 8px', backgroundColor: '#2a3550', border: '1px solid #3b4a6b', borderRadius: '4px', color: '#fcd34d', cursor: 'pointer', fontSize: '12px' }}
-                    >📁 文件管理</button>
                   </div>
                 </div>
               )})}
@@ -2743,86 +2762,74 @@ function SimpleApp() {
           )}
           </div>
 
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 1 }}>
-            <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'WiFi \u8fde\u63a5'}</h2>
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)', order: 1 }}>
+            <div className="seclabel">{'WiFi \u8fde\u63a5'}</div>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                type="text"
-                placeholder={'\u8bbe\u5907 IP \u5730\u5740:\u7aef\u53e3'}
-                value={wifiIp}
-                onChange={(e) => setWifiIp(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    connectWiFiDevice();
-                  }
-                }}
-                style={{ 
-                  flex: 1, 
-                  padding: '8px 12px', 
-                  backgroundColor: '#353550', 
-                  border: '1px solid #454560', 
-                  borderRadius: '8px', 
-                  color: 'white', 
-                  fontSize: '14px',
-                  outline: 'none'
-                }}
-              />
-              <button 
+              <div className="field" style={{ flex: 1 }}>
+                <input
+                  type="text"
+                  placeholder={'\u8bbe\u5907 IP \u5730\u5740:\u7aef\u53e3'}
+                  value={wifiIp}
+                  onChange={(e) => setWifiIp(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      connectWiFiDevice();
+                    }
+                  }}
+                />
+              </div>
+              <button
                 onClick={connectWiFiDevice}
-                style={{ 
-                  padding: '0 16px', 
-                  backgroundColor: '#4a90d9', 
-                  border: 'none', 
-                  borderRadius: '8px', 
-                  color: 'white', 
-                  cursor: 'pointer'
-                }}
+                className="btn primary"
               >{'\u8fde\u63a5'}</button>
             </div>
 
             <div style={{ marginTop: '8px' }}>
-              <button
+              <span
+                className="link"
                 onClick={() => setShowPairForm((v) => !v)}
-                style={{ background: 'none', border: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: '12px', padding: 0 }}
-              >{showPairForm ? '\u6536\u8d77\u914d\u5bf9' : 'Android 11+ \u65e0\u7ebf\u8c03\u8bd5\uff1f\u70b9\u6b64\u914d\u5bf9'}</button>
+                style={{ fontSize: '12px' }}
+              >{showPairForm ? '\u6536\u8d77\u914d\u5bf9' : 'Android 11+ \u65e0\u7ebf\u8c03\u8bd5\uff1f\u70b9\u6b64\u914d\u5bf9'}</span>
             </div>
 
             {showPairForm && (
-              <div style={{ marginTop: '8px', padding: '10px', backgroundColor: '#2a2a40', borderRadius: '8px' }}>
-                <div style={{ fontSize: '11px', color: '#9ca3af', lineHeight: '1.6', marginBottom: '8px' }}>
+              <div className="subpanel" style={{ marginTop: '8px', padding: '10px' }}>
+                <div style={{ fontSize: '11px', color: 'var(--fg-secondary)', lineHeight: '1.6', marginBottom: '8px' }}>
                   {'\u8bbe\u5907\uff1a\u8bbe\u7f6e \u2192 \u5f00\u53d1\u8005\u9009\u9879 \u2192 \u65e0\u7ebf\u8c03\u8bd5 \u2192 \u300c\u4f7f\u7528\u914d\u5bf9\u7801\u914d\u5bf9\u8bbe\u5907\u300d\uff0c\u586b\u4e0b\u65b9\u5f39\u7a97\u91cc\u7684\u914d\u5bf9\u5730\u5740\uff08IP:\u7aef\u53e3\uff09\u548c 6 \u4f4d\u914d\u5bf9\u7801\u3002\u914d\u5bf9\u6210\u529f\u540e\u4f1a\u81ea\u52a8\u8fde\u63a5\u8bbe\u5907\uff0c\u65e0\u9700\u518d\u624b\u52a8\u586b\u7aef\u53e3\u3002'}
                 </div>
-                <input
-                  type="text"
-                  placeholder={'\u914d\u5bf9\u5730\u5740 IP:\u7aef\u53e3\uff08\u5982 192.168.1.75:37123\uff09'}
-                  value={pairAddress}
-                  onChange={(e) => setPairAddress(e.target.value)}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none', marginBottom: '8px' }}
-                />
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="field" style={{ marginBottom: '8px' }}>
                   <input
                     type="text"
-                    inputMode="numeric"
-                    placeholder={'6 \u4f4d\u914d\u5bf9\u7801'}
-                    value={pairCode}
-                    onChange={(e) => setPairCode(e.target.value)}
-                    onKeyPress={(e) => { if (e.key === 'Enter') { pairWiFiDevice(); } }}
-                    style={{ flex: 1, minWidth: 0, padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
+                    placeholder={'\u914d\u5bf9\u5730\u5740 IP:\u7aef\u53e3\uff08\u5982 192.168.1.75:37123\uff09'}
+                    value={pairAddress}
+                    onChange={(e) => setPairAddress(e.target.value)}
                   />
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <div className="field" style={{ flex: 1 }}>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder={'6 \u4f4d\u914d\u5bf9\u7801'}
+                      value={pairCode}
+                      onChange={(e) => setPairCode(e.target.value)}
+                      onKeyPress={(e) => { if (e.key === 'Enter') { pairWiFiDevice(); } }}
+                    />
+                  </div>
                   <button
                     onClick={pairWiFiDevice}
                     disabled={pairing}
-                    style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 16px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', cursor: pairing ? 'not-allowed' : 'pointer', fontSize: '13px', opacity: pairing ? 0.6 : 1 }}
+                    className="btn primary"
                   >{pairing ? '\u914d\u5bf9\u4e2d\u2026' : '\u914d\u5bf9'}</button>
                 </div>
               </div>
             )}
           </div>
 
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 4 }}>
-            <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u5386\u53f2\u8bbe\u5907'}</h2>
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)', order: 4 }}>
+            <div className="seclabel">{'\u5386\u53f2\u8bbe\u5907'}</div>
             {offlineHistoryDevices.length === 0 ? (
-              <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
+              <div style={{ fontSize: '12px', color: 'var(--fg-tertiary)', lineHeight: 1.6 }}>
                 {historyDevices.length === 0
                   ? '\u6682\u65e0\u5386\u53f2 WiFi \u8bbe\u5907\uff0c\u6210\u529f\u8fde\u63a5\u4e00\u6b21\u540e\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\uff0c\u4e0b\u6b21\u53ef\u4e00\u952e\u5feb\u901f\u91cd\u8fde\u3002'
                   : '\u5386\u53f2 WiFi \u8bbe\u5907\u5df2\u5168\u90e8\u8fde\u63a5\uff0c\u65ad\u5f00\u6216\u91cd\u542f\u540e\u4f1a\u56de\u5230\u8fd9\u91cc\u3002'}
@@ -2837,35 +2844,36 @@ function SimpleApp() {
                   // 回退写入时存的显示名，再回退型号。
                   const displayName = customDeviceNames[item.lastAddress]?.trim() || item.name || item.model;
                   return (
-                    <div key={item.serialNo} style={{ padding: '10px', backgroundColor: '#2a2a40', borderRadius: '8px', border: '1px solid #353550' }}>
+                    <div key={item.serialNo} style={{ padding: '12px 14px', background: 'var(--bg-panel)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-default)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ color: '#fff', fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayName}>{displayName}</span>
-                        <span style={{ flexShrink: 0, fontSize: '11px', color: '#9ca3af', backgroundColor: '#9ca3af22', padding: '2px 8px', borderRadius: '10px' }}>{'\u672a\u8fde\u63a5'}</span>
+                        <span style={{ color: 'var(--fg-primary)', fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayName}>{displayName}</span>
+                        <span style={{ flexShrink: 0, fontSize: '11px', color: 'var(--fg-tertiary)', border: '1px solid var(--border-default)', padding: '2px 8px', borderRadius: 'var(--r-pill)' }}>{'\u672a\u8fde\u63a5'}</span>
                       </div>
-                      <div style={{ marginTop: '6px', fontSize: '11px', color: '#9ca3af', lineHeight: 1.7 }}>
+                      <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--fg-tertiary)', lineHeight: 1.7 }}>
                         <div style={{ wordBreak: 'break-all' }}>{'SN\uff1a'}{item.serialNo}</div>
                         <div>{'\u4e0a\u6b21\u5730\u5740\uff1a'}{item.lastAddress}</div>
                         <div>{'\u4e0a\u6b21\u8fde\u63a5\uff1a'}{formatHistoryTime(item.lastConnectedAt)}</div>
                       </div>
                       {editing && (
                         <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
-                          <input
-                            type="text"
-                            placeholder={'\u8bbe\u5907 IP \u5730\u5740:\u7aef\u53e3'}
-                            value={inlineEditValue}
-                            onChange={(e) => setInlineEditValue(e.target.value)}
-                            onKeyPress={(e) => { if (e.key === 'Enter' && !connecting) { handleInlineReconnectHistory(item); } }}
-                            style={{ flex: 1, minWidth: 0, padding: '6px 8px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '12px', outline: 'none' }}
-                          />
+                          <div className="field" style={{ flex: 1 }}>
+                            <input
+                              type="text"
+                              placeholder={'\u8bbe\u5907 IP \u5730\u5740:\u7aef\u53e3'}
+                              value={inlineEditValue}
+                              onChange={(e) => setInlineEditValue(e.target.value)}
+                              onKeyPress={(e) => { if (e.key === 'Enter' && !connecting) { handleInlineReconnectHistory(item); } }}
+                            />
+                          </div>
                           <button
                             onClick={() => handleInlineReconnectHistory(item)}
                             disabled={connecting}
-                            style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 12px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', cursor: connecting ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: connecting ? 0.6 : 1 }}
+                            className="btn primary sm"
                           >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : '\u91cd\u8fde'}</button>
                         </div>
                       )}
                       {cardError && (
-                        <div style={{ marginTop: '6px', fontSize: '11px', color: '#fca5a5', lineHeight: 1.5 }}>{cardError}</div>
+                        <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--danger)', lineHeight: 1.5 }}>{cardError}</div>
                       )}
                       <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                         {!editing && (
@@ -2873,31 +2881,31 @@ function SimpleApp() {
                             onClick={() => handleQuickConnectHistory(item)}
                             disabled={connecting}
                             title={'\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5'}
-                            style={{ padding: '4px 10px', backgroundColor: '#2f6fb0', border: 'none', borderRadius: '4px', color: '#fff', cursor: connecting ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: connecting ? 0.6 : 1 }}
+                            className="btn primary sm"
                           >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : '\u5feb\u901f\u8fde\u63a5'}</button>
                         )}
                         {editing && (
                           <button
                             onClick={() => { setInlineEditSerial(null); setInlineEditValue(''); clearHistoryError(item.serialNo); }}
-                            style={{ padding: '4px 10px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                            className="btn secondary sm"
                           >{'\u6536\u8d77'}</button>
                         )}
                         {confirmRemoveSerial === item.serialNo ? (
                           <>
                             <button
                               onClick={() => handleRemoveHistory(item.serialNo)}
-                              style={{ padding: '4px 10px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+                              className="btn sm" style={{ background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }}
                             >{'\u786e\u8ba4\u79fb\u9664'}</button>
                             <button
                               onClick={() => setConfirmRemoveSerial(null)}
-                              style={{ padding: '4px 10px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                              className="btn secondary sm"
                             >{'\u53d6\u6d88'}</button>
                           </>
                         ) : (
                           <button
                             onClick={() => setConfirmRemoveSerial(item.serialNo)}
                             title={'\u4ece\u5386\u53f2\u5217\u8868\u79fb\u9664\u8be5\u8bbe\u5907\uff08\u4e0d\u5f71\u54cd\u5f53\u524d\u5df2\u5efa\u7acb\u7684\u8fde\u63a5\uff09'}
-                            style={{ padding: '4px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: 'pointer', fontSize: '12px' }}
+                            className="btn outline o-red sm"
                           >{'\u79fb\u9664'}</button>
                         )}
                       </div>
@@ -2909,47 +2917,48 @@ function SimpleApp() {
           </div>
 
           {selectedDevice && (
-            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 3 }}>
-              <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u8bbe\u5907\u4fe1\u606f'}</h2>
-              <div style={{ fontSize: '12px', color: '#888' }}>
+            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)', order: 3 }}>
+              <div className="seclabel">{'\u8bbe\u5907\u4fe1\u606f'}</div>
+              <div style={{ fontSize: '12px', color: 'var(--fg-secondary)' }}>
                 <div style={{ marginBottom: '10px' }}>
-                  <div style={{ marginBottom: '6px' }}>{'\u81ea\u5b9a\u4e49\u540d\u79f0'}</div>
+                  <div style={{ marginBottom: '6px', color: 'var(--fg-tertiary)' }}>{'\u81ea\u5b9a\u4e49\u540d\u79f0'}</div>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      value={customDeviceNames[selectedDevice.id] || ''}
-                      onChange={(e) => updateCustomDeviceName(selectedDevice.id, e.target.value)}
-                      placeholder={selectedDevice.name || selectedDevice.model || selectedDevice.id}
-                      style={{ flex: 1, padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
-                    />
+                    <div className="field" style={{ flex: 1 }}>
+                      <input
+                        value={customDeviceNames[selectedDevice.id] || ''}
+                        onChange={(e) => updateCustomDeviceName(selectedDevice.id, e.target.value)}
+                        placeholder={selectedDevice.name || selectedDevice.model || selectedDevice.id}
+                      />
+                    </div>
                     <button
                       onClick={() => updateCustomDeviceName(selectedDevice.id, '')}
-                      style={{ padding: '0 10px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: '#d1d5db', cursor: 'pointer', fontSize: '12px' }}
+                      className="btn secondary sm"
                     >{'\u6062\u590d\u9ed8\u8ba4'}</button>
                   </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span>{'\u578b\u53f7'}</span>
-                  <span style={{ color: '#fff' }}>{selectedDevice.model}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{'\u578b\u53f7'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{selectedDevice.model}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', gap: '12px' }}>
-                  <span style={{ flexShrink: 0 }}>{'\u8bbe\u5907\u5e8f\u5217\u53f7'}</span>
-                  <span style={{ color: '#fff', wordBreak: 'break-all', textAlign: 'right' }}>{selectedDevice.serialNo || '--'}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12.5px', gap: '12px' }}>
+                  <span style={{ flexShrink: 0, color: 'var(--fg-tertiary)' }}>{'\u8bbe\u5907\u5e8f\u5217\u53f7'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)', wordBreak: 'break-all', textAlign: 'right' }}>{selectedDevice.serialNo || '--'}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span>{'\u5382\u5546'}</span>
-                  <span style={{ color: '#fff' }}>{selectedDevice.manufacturer}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{'\u5382\u5546'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{selectedDevice.manufacturer}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span>{'Android \u7248\u672c'}</span>
-                  <span style={{ color: '#fff' }}>{selectedDevice.androidVersion}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{'Android \u7248\u672c'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{selectedDevice.androidVersion}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span>{'API \u7b49\u7ea7'}</span>
-                  <span style={{ color: '#fff' }}>{selectedDevice.apiLevel}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{'API \u7b49\u7ea7'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{selectedDevice.apiLevel}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{'\u8fde\u63a5\u65b9\u5f0f'}</span>
-                  <span style={{ color: selectedDevice.connectionType === 'wifi' ? '#4ade80' : '#60a5fa' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{'\u8fde\u63a5\u65b9\u5f0f'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: selectedDevice.connectionType === 'wifi' ? 'var(--success)' : 'var(--info)' }}>
                     {selectedDevice.connectionType === 'wifi' ? 'WiFi' : 'USB'}
                   </span>
                 </div>
