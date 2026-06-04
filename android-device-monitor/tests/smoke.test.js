@@ -641,6 +641,10 @@ describe('project smoke checks', () => {
     expect(filterSource).toContain('AND');
     expect(filterSource).toContain("['fps', 'cpu', 'mem', 'gpu']"); // Pico
     expect(filterSource).toContain("['fps', 'cpu', 'mem']"); // 非 Pico 无 GPU
+    // 阈值输入可留空/删空（默认 NaN 而非删不掉的 0），求值时跳过未填阈值的条件
+    expect(filterSource).toContain('threshold: NaN');
+    expect(filterSource).toContain("e.target.value === '' ? NaN : Number(e.target.value)");
+    expect(formatSource).toContain('conditions.filter((condition) => Number.isFinite(condition.threshold))');
 
     // 曲线命中标记（独立样式）+ 点击回调
     expect(chartSource).toContain('markerHits');

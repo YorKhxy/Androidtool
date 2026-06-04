@@ -103,7 +103,8 @@ export const computeMarkers = (
   samples: PerformanceSample[],
   sessionStartedAt: Date
 ): PerformanceCaptureMarker[] =>
-  conditions.map((condition) => ({
+  // 跳过未填阈值（NaN）的条件，避免空条件让 AND 交集恒为空。
+  conditions.filter((condition) => Number.isFinite(condition.threshold)).map((condition) => ({
     id: `${condition.metricKey}-${condition.op}-${condition.threshold}`,
     metricKey: condition.metricKey,
     op: condition.op,

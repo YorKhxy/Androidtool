@@ -40,10 +40,12 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
 
   const removeCondition = (id: string) => onChange(conditions.filter((condition) => condition.id !== id));
 
+  // 新条件阈值留空（NaN）而非 0：避免受控 number 输入里那个删不掉、老挡在前面的默认 0。
   const addCondition = () =>
-    onChange([...conditions, { id: makeConditionId(), metricKey: 'fps', op: '>', threshold: 0 }]);
+    onChange([...conditions, { id: makeConditionId(), metricKey: 'fps', op: '>', threshold: NaN }]);
 
-  const canApply = conditions.length > 0;
+  // 至少有一条「填了有效阈值」的条件才可过滤。
+  const canApply = conditions.some((c) => Number.isFinite(c.threshold));
 
   return (
     <div style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -80,8 +82,10 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
               </select>
               <input
                 type="number"
-                value={Number.isFinite(condition.threshold) ? condition.threshold : 0}
-                onChange={(e) => updateCondition(condition.id, { threshold: Number(e.target.value) })}
+                inputMode="decimal"
+                placeholder="阈值"
+                value={Number.isFinite(condition.threshold) ? condition.threshold : ''}
+                onChange={(e) => updateCondition(condition.id, { threshold: e.target.value === '' ? NaN : Number(e.target.value) })}
                 style={{ ...selectStyle, width: '88px' }}
                 aria-label="阈值"
               />
