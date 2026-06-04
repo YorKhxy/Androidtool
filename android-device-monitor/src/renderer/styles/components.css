@@ -107,6 +107,10 @@ select.nat { height: 34px; background: var(--bg-input); border: 1px solid var(--
 /* card sub-panels */
 .subpanel { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: var(--r-md); }
 
+/* 已安装应用 / 列表行 hover */
+.app-row { transition: background var(--dur-fast); }
+.app-row:hover { background: var(--bg-hover); }
+
 /* scrim/modal */
 .scrim { position: fixed; inset: 0; background: var(--bg-scrim); display: flex; align-items: center;
   justify-content: center; z-index: 50; }

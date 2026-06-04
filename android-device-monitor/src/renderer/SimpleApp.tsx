@@ -4,7 +4,7 @@ import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
 import { FilesPanel } from './components/FilesPanel';
-import { Icon } from './components/ui';
+import { Icon, AppAvatar, Badge } from './components/ui';
 import { ElectronResult, hasElectronAPI } from './lib/electronApi';
 import {
   buildHistoryEntryFromDevice,
@@ -2988,27 +2988,29 @@ function SimpleApp() {
                     </div>
 
                   {/* 已安装应用：放左侧（order 1），占更宽，列表内部滚动 */}
-                  <div style={{ order: 1, flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#252540', borderRadius: '8px', padding: '16px', overflow: 'hidden' }}>
+                  <div className="subpanel" style={{ order: 1, flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-panel)', padding: '16px', overflow: 'hidden' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '12px', flexShrink: 0 }}>
-                      <h2 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
+                      <h2 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--fg-primary)', whiteSpace: 'nowrap' }}>
                         {'已安装应用'}
-                        <span style={{ fontSize: '13px', color: '#888', marginLeft: '8px', fontWeight: 400 }}>
+                        <span style={{ fontSize: '12.5px', color: 'var(--fg-tertiary)', marginLeft: '8px', fontWeight: 400 }}>
                           {installedPackagesLoading ? '加载中…' : `共 ${installedPackages.length} 个`}
                         </span>
                       </h2>
                       <div style={{ display: 'flex', gap: '8px', flex: 1, maxWidth: '420px' }}>
-                        <input
-                          type="text"
-                          placeholder={'搜索包名'}
-                          value={appFilter}
-                          onChange={(e) => setAppFilter(e.target.value)}
-                          style={{ flex: 1, padding: '8px 12px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
-                        />
+                        <div className="field" style={{ flex: 1, minWidth: 0 }}>
+                          <Icon name="search" />
+                          <input
+                            type="text"
+                            placeholder={'搜索包名'}
+                            value={appFilter}
+                            onChange={(e) => setAppFilter(e.target.value)}
+                          />
+                        </div>
                         <button
+                          className="btn secondary sm"
                           onClick={loadInstalledPackages}
                           disabled={installedPackagesLoading}
-                          style={{ padding: '8px 16px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: installedPackagesLoading ? 'not-allowed' : 'pointer', opacity: installedPackagesLoading ? 0.7 : 1 }}
-                        >{'刷新'}</button>
+                        ><Icon name="refresh-cw" />{'刷新'}</button>
                       </div>
                     </div>
 
@@ -3030,60 +3032,49 @@ function SimpleApp() {
                         return <div style={{ padding: '24px', textAlign: 'center', color: '#666', fontSize: '13px' }}>{'没有匹配的应用'}</div>;
                       }
                       return (
-                        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          {filtered.map(pkg => (
-                            <div
-                              key={pkg}
-                              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', gap: '12px' }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                                <span style={{ fontSize: '13px', color: '#e5e7eb', fontFamily: 'monospace', wordBreak: 'break-all' }}>{pkg}</span>
+                        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                          {filtered.map(pkg => {
+                            const isBusy = busyPackage === pkg;
+                            const isRunning = runningPackages.has(pkg);
+                            return (
+                              <div
+                                key={pkg}
+                                className="app-row"
+                                style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '8px 12px', borderTop: '1px solid var(--border-subtle)' }}
+                              >
+                                <AppAvatar name={pkg} size={32} />
+                                <span style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '12.5px', color: 'var(--fg-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pkg}</span>
                                 {deviceNew.has(pkg) && (
-                                  <span title={'本次新安装'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', padding: '2px 7px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', color: '#7dd3fc', backgroundColor: '#0ea5e91f', border: '1px solid #38bdf855', borderRadius: '999px' }}>{'NEW'}</span>
+                                  <span title={'本次新安装'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', height: 20, padding: '0 7px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--info)', background: 'var(--info-soft)', border: '1px solid var(--accent-soft-bd)', borderRadius: 'var(--r-pill)' }}>{'NEW'}</span>
                                 )}
-                                {runningPackages.has(pkg) && (
-                                  <span title={'应用正在运行'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 600, color: '#86efac', backgroundColor: '#22c55e1f', border: '1px solid #22c55e55', borderRadius: '999px' }}>
-                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#22c55e', boxShadow: '0 0 4px #22c55e' }} />{'运行中'}
-                                  </span>
-                                )}
+                                {isRunning && <Badge tone="success" dot>运行中</Badge>}
+                                <div style={{ flexShrink: 0, display: 'flex', gap: '6px' }}>
+                                  <button
+                                    className="btn sm outline o-green"
+                                    onClick={() => handleLaunchApp(pkg)}
+                                    disabled={isBusy || isRunning}
+                                    title={isRunning ? '应用已在运行，无需重复启动' : undefined}
+                                  >
+                                    {isBusy && busyAction === 'launch' ? '启动中…' : '启动'}
+                                  </button>
+                                  <button
+                                    className="btn sm outline o-amber"
+                                    onClick={() => handleForceStopApp(pkg)}
+                                    disabled={isBusy}
+                                  >
+                                    {isBusy && busyAction === 'stop' ? '关闭中…' : '关闭'}
+                                  </button>
+                                  <button
+                                    className="btn sm outline o-red"
+                                    onClick={() => handleUninstallApp(pkg)}
+                                    disabled={isBusy}
+                                  >
+                                    {isBusy && busyAction === 'uninstall' ? '卸载中…' : '卸载'}
+                                  </button>
+                                </div>
                               </div>
-                              {(() => {
-                                const isBusy = busyPackage === pkg;
-                                const isRunning = runningPackages.has(pkg);
-                                const busyStyle = (base: React.CSSProperties): React.CSSProperties => ({
-                                  ...base,
-                                  cursor: isBusy ? 'not-allowed' : 'pointer',
-                                  opacity: isBusy ? 0.5 : 1,
-                                });
-                                return (
-                                  <div style={{ flexShrink: 0, display: 'flex', gap: '6px' }}>
-                                    <button
-                                      onClick={() => handleLaunchApp(pkg)}
-                                      disabled={isBusy || isRunning}
-                                      title={isRunning ? '应用已在运行，无需重复启动' : undefined}
-                                      style={{ padding: '5px 12px', fontSize: '12px', color: '#86efac', backgroundColor: '#22c55e22', border: '1px solid #22c55e55', borderRadius: '6px', cursor: (isBusy || isRunning) ? 'not-allowed' : 'pointer', opacity: (isBusy || isRunning) ? 0.4 : 1 }}
-                                    >
-                                      {isBusy && busyAction === 'launch' ? '启动中…' : '启动'}
-                                    </button>
-                                    <button
-                                      onClick={() => handleForceStopApp(pkg)}
-                                      disabled={isBusy}
-                                      style={busyStyle({ padding: '5px 12px', fontSize: '12px', color: '#fcd34d', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b55', borderRadius: '6px' })}
-                                    >
-                                      {isBusy && busyAction === 'stop' ? '关闭中…' : '关闭'}
-                                    </button>
-                                    <button
-                                      onClick={() => handleUninstallApp(pkg)}
-                                      disabled={isBusy}
-                                      style={busyStyle({ padding: '5px 12px', fontSize: '12px', color: '#fca5a5', backgroundColor: '#ef444422', border: '1px solid #ef444455', borderRadius: '6px' })}
-                                    >
-                                      {isBusy && busyAction === 'uninstall' ? '卸载中…' : '卸载'}
-                                    </button>
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       );
                     })()}
