@@ -12,6 +12,7 @@ android-device-monitor/out/
 # Runtime artifacts
 android-device-monitor/performance-snapshots/
 android-device-monitor/performance-recordings/
+android-device-monitor/performance-captures/
 android-device-monitor/device-logs/
 android-device-monitor/.playwright-cli/
 android-device-monitor/.electron_cache/
