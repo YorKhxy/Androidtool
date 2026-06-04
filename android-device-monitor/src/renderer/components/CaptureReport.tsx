@@ -1,15 +1,16 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import type { PerformanceCaptureSession, PerformanceSample } from '../../shared/types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceSample } from '../../shared/types';
 import { CaptureChart } from './CaptureChart';
+import { CaptureFilterPanel } from './CaptureFilterPanel';
+import { findNearestSample, getSingleEyeWrapperStyle, renderMetricOverlay } from './captureReportHelpers';
 import {
+  andHitTimes,
   buildSegmentMediaUrl,
   captureTotalMs,
+  computeMarkers,
   formatClock,
-  formatMemoryMb,
-  formatMetricReading,
-  getGpuValue,
-  sampleElapsedMs,
   shouldCropCaptureVideo,
+  type FilterCondition,
 } from './perfFormat';
 
 type CaptureReportProps = {
@@ -19,59 +20,36 @@ type CaptureReportProps = {
   live: boolean;
   /** 采集中已用时长（毫秒），用于占位块显示。 */
   elapsedMs?: number;
+  /** 加载历史会话时带入的已存过滤标记（实时/刚停止时为空）。 */
+  markers?: PerformanceCaptureMarker[];
+  /** 过滤后持久化标记到会话（SimpleApp 走 saveCaptureMarkers）。 */
+  onSaveMarkers?: (sessionId: string, markers: PerformanceCaptureMarker[]) => void;
 };
 
-const getSingleEyeWrapperStyle = (naturalSize: { width: number; height: number }): CSSProperties => ({
-  position: 'relative',
-  height: '100%',
-  maxWidth: '100%',
-  aspectRatio: `${Math.max(1, Math.floor(naturalSize.width / 2))} / ${Math.max(1, naturalSize.height)}`,
-  overflow: 'hidden',
-  backgroundColor: '#000',
-  flexShrink: 0,
-});
-
-const findNearestSample = (samples: PerformanceSample[], startedAt: Date, targetMs: number) =>
-  samples.reduce<{ sample: PerformanceSample; delta: number } | null>((best, sample) => {
-    const delta = Math.abs(sampleElapsedMs(sample, startedAt) - targetMs);
-    return !best || delta < best.delta ? { sample, delta } : best;
-  }, null)?.sample ?? null;
-
-const renderMetricOverlay = (sample: PerformanceSample | null) => {
-  if (!sample) return null;
-  const pico = sample.metrics.picoMetrics;
-  const lines = [
-    `FPS ${pico?.fps ? formatMetricReading(pico.fps) : sample.metrics.fps}`,
-    `CPU ${sample.metrics.cpuUsage.toFixed(1)}%`,
-    `MEM ${formatMemoryMb(sample.metrics.memoryUsage)}MB`,
-    `GPU ${pico?.gpuUtil ? formatMetricReading(pico.gpuUtil) : (getGpuValue(sample) ?? '--')}%`,
-  ];
-  return (
-    <div style={{ position: 'absolute', left: '12px', bottom: '12px', backgroundColor: 'rgba(2, 6, 23, 0.76)', border: '1px solid rgba(148, 163, 184, 0.35)', borderRadius: '8px', padding: '8px 10px', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, auto))', gap: '4px 12px', pointerEvents: 'none', boxShadow: '0 8px 20px rgba(0,0,0,0.3)' }}>
-      {lines.map((line) => (
-        <span key={line} style={{ color: '#cbd5e1', fontSize: '12px', whiteSpace: 'nowrap' }}>{line}</span>
-      ))}
-    </div>
-  );
-};
-
-export function CaptureReport({ session, samples, live, elapsedMs }: CaptureReportProps) {
+export function CaptureReport({ session, samples, live, elapsedMs, markers, onSaveMarkers }: CaptureReportProps) {
   const [selectedSeriesKeys, setSelectedSeriesKeys] = useState<Set<string>>(new Set());
   const [playheadMs, setPlayheadMs] = useState(0);
   const [activeSegmentIndex, setActiveSegmentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
+  const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([]);
+  const [appliedMarkers, setAppliedMarkers] = useState<PerformanceCaptureMarker[]>([]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pendingSeekOffsetRef = useRef<number | null>(null);
+  // markers prop 可能每次渲染换新引用；只在切会话时播种，故经 ref 读取避免反复复位过滤态。
+  const markersPropRef = useRef(markers);
+  markersPropRef.current = markers;
 
   const sessionId = session?.id ?? null;
-  // 切换会话 / 重新采集时复位播放态，避免沿用上一会话的播放头与单眼比例。
+  // 切换会话 / 重新采集时复位播放态与过滤态，避免沿用上一会话的播放头、单眼比例与标记。
   useEffect(() => {
     setPlayheadMs(0);
     setActiveSegmentIndex(0);
     setIsPlaying(false);
     setVideoSize(null);
     pendingSeekOffsetRef.current = null;
+    setFilterConditions([]);
+    setAppliedMarkers(markersPropRef.current ?? []);
   }, [sessionId, live]);
 
   if (!session) {
@@ -151,6 +129,27 @@ export function CaptureReport({ session, samples, live, elapsedMs }: CaptureRepo
     } else {
       void video.play().then(() => setIsPlaying(true)).catch(() => undefined);
     }
+  };
+
+  // 点过滤命中标记：播放头与曲线游标对齐到该时间点，并暂停视频。
+  const seekAndPause = (ms: number) => {
+    if (videoRef.current) videoRef.current.pause();
+    setIsPlaying(false);
+    seekTo(ms);
+  };
+
+  const hitTimes = useMemo(() => andHitTimes(appliedMarkers), [appliedMarkers]);
+
+  const applyFilter = () => {
+    const next = computeMarkers(filterConditions, samples, session.startedAt);
+    setAppliedMarkers(next);
+    onSaveMarkers?.(session.id, next);
+  };
+
+  const clearFilter = () => {
+    setFilterConditions([]);
+    setAppliedMarkers([]);
+    onSaveMarkers?.(session.id, []);
   };
 
   const activeSegment = segments[activeSegmentIndex];
@@ -234,19 +233,36 @@ export function CaptureReport({ session, samples, live, elapsedMs }: CaptureRepo
     );
   };
 
+  const showFilter = !live && samples.length > 0;
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: '16px', alignItems: 'start' }}>
-      <CaptureChart
-        session={session}
-        samples={samples}
-        totalMs={totalMs}
-        selectedSeriesKeys={selectedSeriesKeys}
-        onToggleSeries={toggleSeries}
-        playheadMs={playheadMs}
-        showPlayhead={!live && segments.length > 0}
-        onSeekToMs={!live && segments.length > 0 ? seekTo : undefined}
-      />
-      {renderVideoArea()}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: '16px', alignItems: 'start' }}>
+        <CaptureChart
+          session={session}
+          samples={samples}
+          totalMs={totalMs}
+          selectedSeriesKeys={selectedSeriesKeys}
+          onToggleSeries={toggleSeries}
+          playheadMs={playheadMs}
+          showPlayhead={!live && (segments.length > 0 || hitTimes.length > 0)}
+          onSeekToMs={!live && segments.length > 0 ? seekTo : undefined}
+          markerHits={hitTimes}
+          onMarkerClick={!live ? seekAndPause : undefined}
+        />
+        {renderVideoArea()}
+      </div>
+      {showFilter && (
+        <CaptureFilterPanel
+          conditions={filterConditions}
+          onChange={setFilterConditions}
+          onApply={applyFilter}
+          onClear={clearFilter}
+          isPico={session.provider.startsWith('pico')}
+          hitCount={hitTimes.length}
+          applied={appliedMarkers.length > 0}
+        />
+      )}
     </div>
   );
 }

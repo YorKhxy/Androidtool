@@ -612,6 +612,50 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('reportSessionByDeviceId');
   });
 
+  test('capture filter marks AND-combined hits, persists markers, and jumps+pauses on marker click', () => {
+    const formatSource = fs.readFileSync(path.join(root, 'src/renderer/components/perfFormat.ts'), 'utf-8');
+    const filterSource = fs.readFileSync(path.join(root, 'src/renderer/components/CaptureFilterPanel.tsx'), 'utf-8');
+    const chartSource = fs.readFileSync(path.join(root, 'src/renderer/components/CaptureChart.tsx'), 'utf-8');
+    const reportSource = fs.readFileSync(path.join(root, 'src/renderer/components/CaptureReport.tsx'), 'utf-8');
+    const panelSource = fs.readFileSync(path.join(root, 'src/renderer/components/PerformancePanel.tsx'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    expect(fs.existsSync(path.join(root, 'src/renderer/components/CaptureFilterPanel.tsx'))).toBe(true);
+
+    // 求值与标记计算：指标取值 + 运算符 + 逐点求值 + AND 交集
+    expect(formatSource).toContain('metricValueOf');
+    expect(formatSource).toContain('evalCondition');
+    expect(formatSource).toContain('computeMarkers');
+    expect(formatSource).toContain('andHitTimes'); // AND 组合 = 各条件命中点交集
+    expect(formatSource).toContain("case '>'");
+    expect(formatSource).toContain("case '<'");
+    expect(formatSource).toContain("case '='");
+
+    // 过滤面板：指标/运算符/阈值 + 多条件 + GPU 仅 Pico + AND 说明
+    expect(filterSource).toContain('添加条件');
+    expect(filterSource).toContain('过滤');
+    expect(filterSource).toContain('清除');
+    expect(filterSource).toContain('AND');
+    expect(filterSource).toContain("['fps', 'cpu', 'mem', 'gpu']"); // Pico
+    expect(filterSource).toContain("['fps', 'cpu', 'mem']"); // 非 Pico 无 GPU
+
+    // 曲线命中标记（独立样式）+ 点击回调
+    expect(chartSource).toContain('markerHits');
+    expect(chartSource).toContain('onMarkerClick');
+    expect(chartSource).toContain('#fbbf24'); // 琥珀色，区别波峰波谷
+
+    // 报告：应用过滤→持久化、清除、命中点击 seek+暂停
+    expect(reportSource).toContain('computeMarkers');
+    expect(reportSource).toContain('onSaveMarkers');
+    expect(reportSource).toContain('seekAndPause');
+    expect(reportSource).toContain('<CaptureFilterPanel');
+    expect(reportSource).toContain('.pause()'); // 命中跳转时暂停视频
+
+    // 接线：面板透传 + SimpleApp 持久化
+    expect(panelSource).toContain('onSaveCaptureMarkers');
+    expect(simpleAppSource).toContain('saveCaptureMarkers');
+  });
+
   test('continuous capture recorder segments at 180s, finalizes via SIGINT and pulls each segment', () => {
     const recorderPath = path.join(root, 'src/main/adb/captureRecorder.ts');
     expect(fs.existsSync(recorderPath)).toBe(true);

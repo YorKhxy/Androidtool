@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceCaptureSession, PerformanceSample, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceCaptureSession, PerformanceCaptureMarker, PerformanceSample, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
@@ -1241,6 +1241,17 @@ function SimpleApp() {
       delete next[deviceId];
       return next;
     });
+
+  // 过滤标记持久化到会话（写 data/markers.json），失败给错误提示，不阻塞 UI。
+  const saveCaptureMarkers = async (sessionId: string, markers: PerformanceCaptureMarker[]) => {
+    if (!hasElectronAPI()) return;
+    try {
+      const result = await window.electronAPI!.saveCaptureMarkers(sessionId, markers);
+      if (!result.success) setError(result.error || '保存过滤标记失败');
+    } catch (err) {
+      setError('保存过滤标记失败：' + (err as Error).message);
+    }
+  };
 
   const exportPerformanceSession = async () => {
     if (!selectedDevice || !hasElectronAPI()) return;
@@ -3074,6 +3085,7 @@ function SimpleApp() {
                     softLimitNotice={selectedSoftLimitNotice}
                     onToggleCapture={toggleCaptureSession}
                     onDismissSoftLimit={() => selectedDeviceId && dismissSoftLimit(selectedDeviceId)}
+                    onSaveCaptureMarkers={saveCaptureMarkers}
                     onExportSession={exportPerformanceSession}
                   />
                 )}

@@ -1,4 +1,4 @@
-import type { DeviceInfo, PerformanceCaptureSession, PerformanceMetrics, PerformanceSample, PicoMetricsState } from '../../shared/types';
+import type { DeviceInfo, PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceMetrics, PerformanceSample, PicoMetricsState } from '../../shared/types';
 import { CaptureReport } from './CaptureReport';
 import { formatClock, formatMemoryMb } from './perfFormat';
 
@@ -14,8 +14,11 @@ type PerformancePanelProps = {
   elapsedMs: number;
   /** 软上限提醒文本（达 30 分钟 / 2GB），null 表示不显示。 */
   softLimitNotice: string | null;
+  /** 当前会话已存的过滤标记（加载历史会话时带入）。 */
+  captureMarkers?: PerformanceCaptureMarker[];
   onToggleCapture: () => void;
   onDismissSoftLimit: () => void;
+  onSaveCaptureMarkers: (sessionId: string, markers: PerformanceCaptureMarker[]) => void;
   onExportSession: () => void;
 };
 
@@ -101,8 +104,10 @@ export function PerformancePanel({
   isCaptureBusy,
   elapsedMs,
   softLimitNotice,
+  captureMarkers,
   onToggleCapture,
   onDismissSoftLimit,
+  onSaveCaptureMarkers,
   onExportSession,
 }: PerformancePanelProps) {
   const isPicoView = performance?.provider === 'pico' || (!performance && isLikelyPicoDevice(device));
@@ -193,7 +198,14 @@ export function PerformancePanel({
           <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{isCapturing ? '实时采集' : '采集报告'}</div>
           <div style={{ fontSize: '12px', color: '#94a3b8' }}>{`采样 ${captureSamples.length} 条`}</div>
         </div>
-        <CaptureReport session={captureSession} samples={captureSamples} live={isCapturing} elapsedMs={elapsedMs} />
+        <CaptureReport
+          session={captureSession}
+          samples={captureSamples}
+          live={isCapturing}
+          elapsedMs={elapsedMs}
+          markers={captureMarkers}
+          onSaveMarkers={onSaveCaptureMarkers}
+        />
       </div>
     </div>
   );

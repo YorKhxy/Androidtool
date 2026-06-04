@@ -23,6 +23,9 @@ type CaptureChartProps = {
   playheadMs: number;
   showPlayhead: boolean;
   onSeekToMs?: (ms: number) => void;
+  /** 参数过滤命中的相对时间点（AND 结果），在曲线上打独立标记。 */
+  markerHits?: number[];
+  onMarkerClick?: (ms: number) => void;
 };
 
 const SERIES: ChartSeries[] = [
@@ -41,6 +44,8 @@ export function CaptureChart({
   playheadMs,
   showPlayhead,
   onSeekToMs,
+  markerHits,
+  onMarkerClick,
 }: CaptureChartProps) {
   const [hoverPoint, setHoverPoint] = useState<HoverPoint | null>(null);
   const scrubbingRef = useRef(false);
@@ -174,6 +179,26 @@ export function CaptureChart({
               <text x={valley.x} y={valley.y + 20} fill={series.color} fontSize="10" fontWeight="600" textAnchor="middle">{Math.round(minV)}</text>
             </g>,
           ];
+        })}
+        {/* 参数过滤命中标记：琥珀色竖带 + 底部可点菱形，区别于曲线上的波峰波谷三角。 */}
+        {(markerHits ?? []).map((ms, i) => {
+          const mx = xForMs(ms);
+          const baseY = chartPadding.top + plotHeight;
+          return (
+            <g
+              key={`hit-${ms}-${i}`}
+              onPointerDown={(e) => {
+                if (!onMarkerClick) return;
+                e.stopPropagation();
+                onMarkerClick(ms);
+              }}
+              style={{ cursor: onMarkerClick ? 'pointer' : 'default' }}
+            >
+              <line x1={mx} y1={chartPadding.top} x2={mx} y2={baseY} stroke="#fbbf24" strokeWidth="1" opacity={0.5} />
+              <rect x={mx - 6} y={baseY - 2} width="12" height="12" fill="transparent" />
+              <polygon points={`${mx},${baseY + 1} ${mx - 4},${baseY + 6} ${mx},${baseY + 11} ${mx + 4},${baseY + 6}`} fill="#fbbf24" />
+            </g>
+          );
         })}
         {showPlayhead && (
           <g>
