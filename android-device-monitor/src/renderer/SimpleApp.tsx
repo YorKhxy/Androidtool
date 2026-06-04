@@ -166,6 +166,9 @@ const renderScreenStateBadge = (device: DeviceInfo) => {
   );
 };
 
+// 复用的空集合：作为「该设备暂无 NEW」的稳定默认值，避免每次渲染新建 Set。
+const EMPTY_PACKAGE_SET: Set<string> = new Set();
+
 function SimpleApp() {
   const [adbStatus, setAdbStatus] = useState<AdbStatus | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -204,6 +207,9 @@ function SimpleApp() {
   const [appFilter, setAppFilter] = useState('');
   // 当前设备上在运行的应用包名集合：用于已安装列表标「运行中」并禁止重复启动。轮询刷新，反映真实状态。
   const [runningPackages, setRunningPackages] = useState<Set<string>>(new Set());
+  // 刚通过工具新装上的包名，按设备分别存（批量装多台时切设备查看各自的 NEW，互不清除）。
+  // 每台设备在自己安装前后各拉一次包列表 diff 得到，与「当前选中设备」无关。
+  const [newlyInstalledByDevice, setNewlyInstalledByDevice] = useState<Record<string, Set<string>>>({});
   const [busyPackage, setBusyPackage] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<'launch' | 'stop' | 'uninstall' | null>(null);
   // 应用内确认弹窗：取代原生 window.confirm —— 后者在 Electron 渲染层关闭后会让网页文档丢键盘焦点，
@@ -267,6 +273,8 @@ function SimpleApp() {
   const [apkInstallStates, setApkInstallStates] = useState<Record<string, DeviceApkInstallState>>({});
   const [pendingApks, setPendingApks] = useState<{ path: string; fileName: string }[]>([]);
   const [isApkDragOver, setIsApkDragOver] = useState(false); // 拖拽 APK 到待安装区时高亮
+  // 安装过程日志：每条带时间戳，最新在上。展示在「安装详情」模块里。
+  const [installLog, setInstallLog] = useState<{ text: string; level: 'info' | 'success' | 'error' }[]>([]);
   const [installTargets, setInstallTargets] = useState<Set<string>>(new Set());
   const [installConcurrency, setInstallConcurrency] = useState(4);
   const [installAllowDowngrade, setInstallAllowDowngrade] = useState(false);
@@ -302,6 +310,19 @@ function SimpleApp() {
     const customName = customDeviceNames[device.id]?.trim();
     return customName || device.name || device.model || device.id;
   }, [customDeviceNames]);
+
+  // 列表/日志里用的显示名：基名相同（如两台都改成同一自定义名）时补区分符，避免分不清是哪台。
+  // WiFi 用 IP，USB 用 SN 尾号；都取不到就退回设备 id。
+  const getDeviceLabel = useCallback((device: DeviceInfo) => {
+    const base = getDeviceDisplayName(device);
+    const collision = devices.some((d) => d.id !== device.id && getDeviceDisplayName(d) === base);
+    if (!collision) return base;
+    const snTail = device.serialNo && device.serialNo !== 'Unknown' ? device.serialNo.slice(-4) : '';
+    const distinguisher = device.connectionType === 'wifi'
+      ? ((device.id || '').split(':')[0] || snTail || device.id)
+      : (snTail || device.id);
+    return `${base}（${distinguisher}）`;
+  }, [getDeviceDisplayName, devices]);
 
   const updateCustomDeviceName = useCallback((deviceId: string, value: string) => {
     setCustomDeviceNames(prev => {
@@ -548,6 +569,13 @@ function SimpleApp() {
             return nextDevices;
           });
           removeDeviceLogState(deviceId);
+          // 设备断开：清掉它的「NEW」记录（设备没了，标识也无意义，顺便不留过期数据）。
+          setNewlyInstalledByDevice((prev) => {
+            if (!(deviceId in prev)) return prev;
+            const next = { ...prev };
+            delete next[deviceId];
+            return next;
+          });
         });
         
         const unsubscribeLogEntry = window.electronAPI!.onLogEntry((entry) => {
@@ -699,6 +727,7 @@ function SimpleApp() {
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
   useEffect(() => {
+    // 切设备只是切换显示哪台，NEW 按设备存（newlyInstalledByDevice），不清除——否则批量装多台后切看就丢标识。
     if (selectedDevice?.id) {
       setInstalledPackages([]);
       setAppFilter('');
@@ -1338,8 +1367,28 @@ function SimpleApp() {
   };
 
   // 给指定设备安装一组 items（items 直接传入，避免读取尚未刷新的队列状态）。
+  // 往安装日志追加一条（带本地时间戳，最新在最上面，最多留 200 条）。
+  const appendInstallLog = (text: string, level: 'info' | 'success' | 'error' = 'info') => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const ts = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    setInstallLog((prev) => [{ text: `[${ts}] ${text}`, level }, ...prev].slice(0, 200));
+  };
+
   const installItemsOnDevice = async (deviceId: string, items: ApkInstallQueueItem[]) => {
+    const deviceLabel = (() => {
+      const d = devices.find((x) => x.id === deviceId);
+      return d ? getDeviceLabel(d) : deviceId;
+    })();
+    const installFlags = installAllowDowngrade ? '-r -d' : '-r';
+    // 安装前快照本设备的包集合，用于装完后 diff 出新增的包标「NEW」（每台设备各自算，与当前选中无关）。
+    const beforeRes = await window.electronAPI!.listInstalledPackages(deviceId).catch(() => null);
+    const baseline = new Set(beforeRes && beforeRes.success && beforeRes.data ? beforeRes.data : []);
     for (const item of items) {
+      const startedAt = Date.now();
+      appendInstallLog(
+        `${deviceLabel} ▶ 开始安装 ${item.fileName}\n    命令: adb install ${installFlags}\n    源文件: ${item.path}`
+      );
       updateDeviceApkInstallState(deviceId, (previousState) => ({
         ...previousState,
         queue: previousState.queue.map((q) =>
@@ -1350,25 +1399,57 @@ function SimpleApp() {
       try {
         const result = await window.electronAPI!.installApk(deviceId, item.path, { allowDowngrade: installAllowDowngrade });
         stopApkInstallProgressTimer(item.id);
+        const failMsg = result.success ? undefined : formatOperationError(result, '安装失败');
+        // 进度卡只存「一句话原因」（result.error 的标题，不含建议/adb 原文）；完整详情交给下方安装日志，避免两处重复。
         updateDeviceApkInstallState(deviceId, (previousState) => ({
           ...previousState,
           queue: previousState.queue.map((q) =>
             q.id === item.id
-              ? { ...q, status: result.success ? 'success' : 'failed', progress: 100, output: result.data?.output, error: result.success ? undefined : formatOperationError(result, '安装失败') }
+              ? { ...q, status: result.success ? 'success' : 'failed', progress: 100, output: undefined, error: result.success ? undefined : (result.error || '安装失败') }
               : q
           ),
         }));
+        const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+        const indent = (text: string) => text.trim().split(/\r?\n/).filter(Boolean).map((l) => `    ${l}`).join('\n');
+        if (result.success) {
+          const out = (result.data?.output || '').trim();
+          appendInstallLog(
+            `${deviceLabel} ✓ ${item.fileName} 安装成功 · 耗时 ${elapsed}s` + (out ? `\n${indent(out)}` : ''),
+            'success'
+          );
+        } else {
+          const details = (result.details || '').trim();
+          appendInstallLog(
+            `${deviceLabel} ✗ ${item.fileName} 安装失败 · 耗时 ${elapsed}s\n    ${failMsg}` + (details ? `\n    ── adb 原始输出 ──\n${indent(details)}` : ''),
+            'error'
+          );
+        }
       } catch (err) {
         stopApkInstallProgressTimer(item.id);
+        const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+        const msg = (err as Error).message;
         updateDeviceApkInstallState(deviceId, (previousState) => ({
           ...previousState,
-          queue: previousState.queue.map((q) => (q.id === item.id ? { ...q, status: 'failed', progress: 100, error: (err as Error).message } : q)),
+          queue: previousState.queue.map((q) => (q.id === item.id ? { ...q, status: 'failed', progress: 100, error: msg } : q)),
         }));
+        appendInstallLog(`${deviceLabel} ✗ ${item.fileName} 安装异常 · 耗时 ${elapsed}s\n    ${msg}`, 'error');
       }
     }
     updateDeviceApkInstallState(deviceId, (previousState) => ({ ...previousState, isInstalling: false }));
-    if (selectedDeviceRef.current?.id === deviceId) {
-      void loadInstalledPackages();
+    // 装完再拉一次本设备包列表：diff 出新增的包记成该设备的「NEW」（累加，按设备存）；顺便刷新可见列表。
+    const afterRes = await window.electronAPI!.listInstalledPackages(deviceId).catch(() => null);
+    if (afterRes && afterRes.success && afterRes.data) {
+      const after = afterRes.data;
+      const newly = after.filter((p) => !baseline.has(p));
+      if (newly.length > 0) {
+        setNewlyInstalledByDevice((prev) => ({
+          ...prev,
+          [deviceId]: new Set([...(prev[deviceId] || []), ...newly]),
+        }));
+      }
+      if (selectedDeviceRef.current?.id === deviceId) {
+        setInstalledPackages(after);
+      }
     }
   };
 
@@ -1377,6 +1458,14 @@ function SimpleApp() {
     if (isUnifiedInstalling || !hasElectronAPI()) return;
     const targetIds = Array.from(installTargets).filter((id) => devices.find((d) => d.id === id)?.status === 'connected');
     if (pendingApks.length === 0 || targetIds.length === 0) return;
+
+    appendInstallLog(`开始安装 ${pendingApks.length} 个 APK 到 ${targetIds.length} 台设备（并发 ${installConcurrency > 0 ? installConcurrency : '不限'}${installAllowDowngrade ? '，允许降级' : ''}）`);
+    // 新批次：重置本次目标设备的「NEW」——只标最新这一批装上的（批次内含重试会继续累加）。
+    setNewlyInstalledByDevice((prev) => {
+      const next = { ...prev };
+      targetIds.forEach((id) => { delete next[id]; });
+      return next;
+    });
 
     const perDeviceItems: Record<string, ApkInstallQueueItem[]> = {};
     targetIds.forEach((id) => {
@@ -1837,11 +1926,12 @@ function SimpleApp() {
     const selectedOnlineCount = Array.from(installTargets).filter((id) => onlineDevices.some((d) => d.id === id)).length;
     const canStart = pendingApks.length > 0 && selectedOnlineCount > 0 && !isUnifiedInstalling;
     const activeDeviceIds = devices.map((d) => d.id).filter((id) => (apkInstallStates[id]?.queue.length || 0) > 0);
+    const hasInstallDetail = activeDeviceIds.length > 0 || installLog.length > 0;
 
     return (
-      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* 标题行：标题在左，并发数/降级收到右侧，省掉单独一行配置 */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', flexShrink: 0 }}>
           <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{'应用安装'}</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#9ca3af' }}>并发数
@@ -1855,7 +1945,9 @@ function SimpleApp() {
           </div>
         </div>
 
-        {/* 拖放区：无文件时收成细单行（图标+文字一行），有文件时展开放 chip */}
+        {/* 操作区（占比 3）：选 APK + 目标设备 + 安装按钮 */}
+        <div style={{ flex: 3, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto' }}>
+        {/* 拖放区：无文件时图标提示，有文件时放 chip */}
         <div
           onClick={() => { if (!isUnifiedInstalling) selectApkFiles(); }}
           onDragOver={(e) => { e.preventDefault(); if (!isUnifiedInstalling) setIsApkDragOver(true); }}
@@ -1864,7 +1956,7 @@ function SimpleApp() {
           onDrop={handleApkDrop}
           style={{
             flex: 1,
-            minHeight: '180px',
+            minHeight: '90px',
             display: 'flex',
             flexDirection: 'column',
             border: `1.5px dashed ${isApkDragOver ? '#4a90d9' : '#3a3a55'}`,
@@ -1915,7 +2007,7 @@ function SimpleApp() {
               return (
                 <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', cursor: online && !isUnifiedInstalling ? 'pointer' : 'not-allowed', opacity: online ? 1 : 0.5 }}>
                   <input type="checkbox" checked={installTargets.has(d.id)} disabled={!online || isUnifiedInstalling} onChange={() => toggleInstallTarget(d.id)} />
-                  <span style={{ fontSize: '13px', color: '#e5e7eb' }}>{getDeviceDisplayName(d)}</span>
+                  <span style={{ fontSize: '13px', color: '#e5e7eb' }}>{getDeviceLabel(d)}</span>
                   <span style={{ fontSize: '12px', color: d.connectionType === 'wifi' ? '#4ade80' : '#60a5fa' }}>{d.connectionType === 'wifi' ? 'WiFi' : 'USB'}</span>
                   {!online && <span style={{ fontSize: '12px', color: '#9ca3af' }}>离线</span>}
                 </label>
@@ -1927,7 +2019,20 @@ function SimpleApp() {
         <button onClick={startUnifiedInstall} disabled={!canStart} style={{ alignSelf: 'flex-start', padding: '10px 24px', fontSize: '14px', fontWeight: 600, color: '#fff', backgroundColor: canStart ? '#4a90d9' : '#3a3a55', border: 'none', borderRadius: '8px', cursor: canStart ? 'pointer' : 'not-allowed' }}>
           {isUnifiedInstalling ? '安装中…' : `安装到所选设备${selectedOnlineCount > 0 ? `（${selectedOnlineCount}）` : ''}`}
         </button>
+        </div>
 
+        {/* 安装详情（占比 7）：进度 + 错误 + 安装日志 */}
+        <div style={{ flex: 7, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+            <span style={{ fontSize: '14px', fontWeight: 600, color: '#cbd5e1' }}>{'安装详情'}</span>
+            {installLog.length > 0 && (
+              <button onClick={() => setInstallLog([])} style={{ fontSize: '12px', color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}>{'清空日志'}</button>
+            )}
+          </div>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: '#1b1b2e', border: '1px solid #353550', borderRadius: '8px', padding: '10px' }}>
+            {!hasInstallDetail && (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '13px' }}>{'安装进度、结果与日志会显示在这里'}</div>
+            )}
         {activeDeviceIds.map((deviceId) => {
           const device = devices.find((d) => d.id === deviceId);
           const queue = apkInstallStates[deviceId]?.queue || [];
@@ -1937,7 +2042,7 @@ function SimpleApp() {
           return (
             <div key={deviceId} style={{ border: '1px solid #353550', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{device ? getDeviceDisplayName(device) : deviceId}</span>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{device ? getDeviceLabel(device) : deviceId}</span>
                 <span style={{ fontSize: '12px', color: '#9ca3af' }}>{finished}/{queue.length} 完成</span>
                 {hasFailed && <button onClick={() => retryDeviceInstall(deviceId)} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#93c5fd', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>重试失败</button>}
                 {hasSuccess && <button onClick={() => clearCompletedApkInstalls(deviceId)} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#60a5fa', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', marginLeft: 'auto' }}>清空成功项</button>}
@@ -1963,8 +2068,8 @@ function SimpleApp() {
                         <div style={{ height: '100%', width: `${item.progress}%`, backgroundColor: item.status === 'failed' ? '#ef4444' : item.status === 'success' ? '#22c55e' : '#60a5fa', transition: 'width 260ms ease' }} />
                       </div>
                     </div>
-                    {(item.error || item.output) && (
-                      <div style={{ marginTop: '6px', color: item.error ? '#fca5a5' : '#86efac', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.error || item.output}</div>
+                    {item.error && (
+                      <div style={{ marginTop: '6px', color: '#fca5a5', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.error}</div>
                     )}
                   </div>
                 );
@@ -1972,6 +2077,18 @@ function SimpleApp() {
             </div>
           );
         })}
+            {installLog.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{'安装日志'}</span>
+                <div style={{ fontFamily: 'Consolas, monospace', fontSize: '12px', lineHeight: 1.7, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  {installLog.map((l, i) => (
+                    <div key={i} style={{ color: l.level === 'success' ? '#86efac' : l.level === 'error' ? '#fca5a5' : '#9ca3af', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.text}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </section>
     );
   };
@@ -2539,7 +2656,7 @@ function SimpleApp() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                     <span>{device.connectionType === 'wifi' ? 'WiFi' : 'USB'}</span>
-                    <span style={{ fontWeight: '500', fontSize: '14px' }}>{getDeviceDisplayName(device)}</span>
+                    <span style={{ fontWeight: '500', fontSize: '14px' }}>{getDeviceLabel(device)}</span>
                     </div>
                     <span style={{ padding: '2px 8px', borderRadius: '999px', fontSize: '11px', backgroundColor: statusMeta.background, color: statusMeta.color, flexShrink: 0 }}>
                       {statusMeta.label}
@@ -2881,13 +2998,13 @@ function SimpleApp() {
               <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
                 {activeTab === 'devices' && (
                   <div style={{ display: 'flex', flexDirection: 'row', gap: '16px', height: '100%', alignItems: 'stretch' }}>
-                    {/* 左栏：应用安装（封顶宽度；卡片撑满左栏高度，让拖放区有空间放大） */}
-                    <div style={{ flex: '1 1 0', minWidth: 0, maxWidth: '460px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    {/* 应用安装：放右侧（order 2），内部分操作区 + 安装详情两段 */}
+                    <div style={{ order: 2, flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                       {renderUnifiedInstallPanel()}
                     </div>
 
-                  {/* 右栏：已安装应用（撑满剩余宽高，列表内部滚动） */}
-                  <div style={{ flex: '1.7 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#252540', borderRadius: '8px', padding: '16px', overflow: 'hidden' }}>
+                  {/* 已安装应用：放左侧（order 1），占更宽，列表内部滚动 */}
+                  <div style={{ order: 1, flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#252540', borderRadius: '8px', padding: '16px', overflow: 'hidden' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '12px', flexShrink: 0 }}>
                       <h2 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
                         {'已安装应用'}
@@ -2913,7 +3030,12 @@ function SimpleApp() {
 
                     {(() => {
                       const keyword = appFilter.trim().toLowerCase();
-                      const filtered = keyword ? installedPackages.filter(pkg => pkg.toLowerCase().includes(keyword)) : installedPackages;
+                      const matched = keyword ? installedPackages.filter(pkg => pkg.toLowerCase().includes(keyword)) : installedPackages;
+                      // 当前选中设备的「NEW」集合（按设备存，切设备不丢）。新装的包浮到列表顶部，稳定排序保留原顺序。
+                      const deviceNew = newlyInstalledByDevice[selectedDevice?.id || ''] || EMPTY_PACKAGE_SET;
+                      const filtered = deviceNew.size > 0
+                        ? [...matched].sort((a, b) => (deviceNew.has(b) ? 1 : 0) - (deviceNew.has(a) ? 1 : 0))
+                        : matched;
                       if (installedPackagesLoading && installedPackages.length === 0) {
                         return <div style={{ padding: '24px', textAlign: 'center', color: '#888', fontSize: '13px' }}>{'正在读取已安装应用…'}</div>;
                       }
@@ -2932,6 +3054,9 @@ function SimpleApp() {
                             >
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
                                 <span style={{ fontSize: '13px', color: '#e5e7eb', fontFamily: 'monospace', wordBreak: 'break-all' }}>{pkg}</span>
+                                {deviceNew.has(pkg) && (
+                                  <span title={'本次新安装'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', padding: '2px 7px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', color: '#7dd3fc', backgroundColor: '#0ea5e91f', border: '1px solid #38bdf855', borderRadius: '999px' }}>{'NEW'}</span>
+                                )}
                                 {runningPackages.has(pkg) && (
                                   <span title={'应用正在运行'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 600, color: '#86efac', backgroundColor: '#22c55e1f', border: '1px solid #22c55e55', borderRadius: '999px' }}>
                                     <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#22c55e', boxShadow: '0 0 4px #22c55e' }} />{'运行中'}

@@ -1147,6 +1147,83 @@ export class ADBManager extends EventEmitter {
     });
   }
 
+  // 把 adb install 的失败输出翻成「精准中文原因 + 可操作建议」。命中已知 INSTALL_FAILED_* 码就给具体提示，
+  // 否则尽量截出原始码兜底。原始完整输出仍放进 AdbCommandError.details 供排查。
+  private classifyInstallFailure(output: string): { message: string; hint: string } {
+    const o = output || '';
+    const has = (re: RegExp) => re.test(o);
+
+    // 从失败输出里抽出冲突应用的包名：优先 "Package com.x.y ..." 明确写法，否则退而找像包名的 token（至少两个点）。
+    // 命中时拼进提示，方便用户直接定位是哪个包冲突。
+    const pkg =
+      o.match(/Package\s+([A-Za-z][\w]*(?:\.[A-Za-z_][\w]*)+)/)?.[1] ||
+      o.match(/\b[A-Za-z][\w]*(?:\.[A-Za-z_][\w]*){2,}\b/)?.[0];
+    const pkgSuffix = pkg ? `（包名 ${pkg}）` : '';
+
+    // 签名不一致：设备已存在同包名应用，但签名与当前 APK 不同 → 无法覆盖（最常见、用户最容易困惑的一种）。
+    if (
+      has(/INSTALL_FAILED_UPDATE_INCOMPATIBLE/i) ||
+      has(/INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES/i) ||
+      has(/INSTALL_FAILED_SHARED_USER_INCOMPATIBLE/i) ||
+      has(/signatures do not match/i)
+    ) {
+      return {
+        message: `签名不一致：设备上已安装同包名应用${pkgSuffix}，但签名与当前 APK 不同，无法覆盖安装`,
+        hint: pkg
+          ? `请先在右侧「已安装应用」卸载设备上的「${pkg}」（会清除该应用数据），再重新安装本 APK。`
+          : '请先在右侧「已安装应用」卸载设备上的旧版本（会清除该应用数据），再重新安装本 APK。',
+      };
+    }
+    if (has(/INSTALL_FAILED_VERSION_DOWNGRADE/i)) {
+      return {
+        message: `版本降级被拒绝：当前 APK 的版本号低于设备上已安装的版本${pkgSuffix}`,
+        hint: '勾选上方「允许降级覆盖」后重试（降级可能导致应用数据异常）。',
+      };
+    }
+    if (has(/INSTALL_FAILED_INSUFFICIENT_STORAGE/i)) {
+      return { message: '设备存储空间不足，无法安装', hint: '清理设备存储空间后重试。' };
+    }
+    if (has(/INSTALL_FAILED_NO_MATCHING_ABIS/i)) {
+      return {
+        message: 'CPU 架构不兼容：APK 内的 so 原生库与设备架构不匹配',
+        hint: '换用与设备架构匹配的 APK（设备为 arm64 就用 arm64 包）。',
+      };
+    }
+    if (has(/INSTALL_FAILED_OLDER_SDK/i)) {
+      return { message: '设备系统版本过低，低于该 APK 要求的最低系统版本', hint: '升级设备系统，或换用兼容更低系统的 APK。' };
+    }
+    if (has(/INSTALL_FAILED_TEST_ONLY/i)) {
+      return { message: '该 APK 被标记为仅供测试（testOnly），常规安装被拒绝', hint: '换用正式发布的 APK，或用测试模式安装。' };
+    }
+    if (has(/INSTALL_FAILED_DUPLICATE_PERMISSION/i)) {
+      return { message: '权限冲突：该 APK 声明的权限与设备上已装的其它应用重复', hint: '卸载冲突的那个应用后再重试。' };
+    }
+    if (has(/INSTALL_PARSE_FAILED_NO_CERTIFICATES/i)) {
+      return { message: 'APK 未签名或证书缺失，无法安装', hint: '使用已正确签名的 APK。' };
+    }
+    if (has(/INSTALL_PARSE_FAILED/i) || has(/INSTALL_FAILED_INVALID_APK/i)) {
+      return { message: 'APK 文件损坏或解析失败', hint: '确认安装包完整未损坏，必要时重新获取该 APK。' };
+    }
+    if (has(/INSTALL_FAILED_USER_RESTRICTED/i)) {
+      return {
+        message: '设备拒绝安装：可能未允许 USB 安装 / 未知来源安装',
+        hint: '在设备「开发者选项」开启「USB 安装」，或在设备弹窗中允许本次安装。',
+      };
+    }
+    if (has(/No such file|failed to stat|can't find|cannot stat/i)) {
+      return { message: 'APK 文件未找到或已被移动', hint: '确认文件仍在原路径，重新选择安装包后再装。' };
+    }
+    if (has(/device offline|device unauthorized|device .* not found/i)) {
+      return { message: '设备连接异常（离线或未授权）', hint: '重新连接设备，并在设备上确认 USB 调试授权。' };
+    }
+
+    const codeMatch = o.match(/INSTALL_[A-Z_]+/);
+    if (codeMatch) {
+      return { message: `安装失败：${codeMatch[0]}`, hint: '展开下方详情可见原始报错。' };
+    }
+    return { message: '安装失败', hint: '请检查设备连接、调试授权、安装权限、版本签名以及设备剩余空间。' };
+  }
+
   async installApk(deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean }): Promise<string> {
     const cleanedApkPath = apkPath.trim();
     if (!cleanedApkPath.toLowerCase().endsWith('.apk')) {
@@ -1174,18 +1251,21 @@ export class ADBManager extends EventEmitter {
         return fallbackOutput;
       }
 
+      const failureOutput = fallbackOutput || primaryOutput || '';
+      const { message, hint } = this.classifyInstallFailure(failureOutput);
       throw new AdbCommandError({
         code: 'ADB_COMMAND_FAILED',
-        message: `安装 APK 失败：${path.basename(cleanedApkPath)}`,
-        hint: '已尝试普通安装和非流式安装，请检查设备存储空间、安装权限、签名兼容性和网络稳定性。',
-        details: fallbackOutput || primaryOutput || 'adb install did not report success.',
+        message: `${message}（${path.basename(cleanedApkPath)}）`,
+        hint,
+        details: failureOutput || 'adb install did not report success.',
       });
     }
 
+    const { message, hint } = this.classifyInstallFailure(primaryOutput);
     throw new AdbCommandError({
       code: 'ADB_COMMAND_FAILED',
-      message: `安装 APK 失败：${path.basename(cleanedApkPath)}`,
-      hint: '请检查设备连接、调试授权、安装权限、版本签名以及设备剩余空间。',
+      message: `${message}（${path.basename(cleanedApkPath)}）`,
+      hint,
       details: primaryOutput || 'adb install did not report success.',
     });
   }
