@@ -732,6 +732,10 @@ describe('project smoke checks', () => {
     expect(recorderSource).toContain('if (state.stopRequested)');
     // 不在录制阶段做单眼裁切（播放时裁切）
     expect(recorderSource).not.toContain('--crop');
+    // 首段失败文案：锁屏/熄屏(Encoder failed err=-38)给出「解锁手机屏幕」可操作指引
+    expect(recorderSource).toContain('describeSegmentFailure');
+    expect(recorderSource).toContain('err=-38');
+    expect(recorderSource).toContain('请先解锁手机屏幕');
   });
 
   test('capture session store archives video/data/screenshots separately under tool root', () => {

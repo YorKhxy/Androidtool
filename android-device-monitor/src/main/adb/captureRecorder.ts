@@ -20,6 +20,23 @@ const DEFAULT_BIT_RATE_MBPS = 8;
 // 首段启动后用于判定「设备端 screenrecord 是否瞬间失败」的探测窗口。
 const FIRST_SEGMENT_PROBE_MS = 700;
 
+// 把设备端 screenrecord 瞬间失败的 stderr 翻译成可操作的中文指引。
+// 实测最常见原因是手机锁屏/熄屏：此时无可编码的显示 surface，screenrecord 会以
+// 「Encoder failed (err=-38)」立即退出（真机 vivo/Android 13 验证）。
+const describeSegmentFailure = (stderr: string): string => {
+  const lower = stderr.toLowerCase();
+  if (lower.includes('encoder failed') || lower.includes('err=-38') || stderr === '') {
+    return (
+      '设备端录屏启动失败，最常见原因是手机处于锁屏或熄屏状态——请先解锁手机屏幕并保持亮屏，再开始采集。' +
+      (stderr ? `（设备返回：${stderr}）` : '')
+    );
+  }
+  if (lower.includes('permission') || lower.includes('denied')) {
+    return `设备端录屏被拒绝，权限不足：${stderr}`;
+  }
+  return `${stderr}（若手机处于锁屏/熄屏状态，请先解锁亮屏再开始采集）`;
+};
+
 export type CaptureSegmentMeta = {
   index: number;
   /** 相对 videoDir 的文件名，如 seg-0.mp4 */
@@ -244,8 +261,7 @@ export class PerformanceCaptureRecorder {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        const detail = segment.getStderr().trim();
-        reject(new Error(detail || '设备端 screenrecord 启动后立即退出，可能不支持录屏或权限不足。'));
+        reject(new Error(describeSegmentFailure(segment.getStderr().trim())));
       };
       const timer = setTimeout(() => {
         if (settled) return;
