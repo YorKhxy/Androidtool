@@ -1,0 +1,26 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.androidtool.piconetworkhelper'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.androidtool.piconetworkhelper'
+        minSdk 29
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+
+        // 仅 Pico/XR2(arm64-v8a)。预编译的 hev tun2socks .so 只提供该 ABI。
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
