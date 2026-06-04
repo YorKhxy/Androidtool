@@ -8,8 +8,6 @@ import type {
   MirrorStartOptions,
   NetworkRequest,
   PerformanceMetrics,
-  PerformanceRecording,
-  PerformanceRecordingOptions,
   PerformanceSessionExportPayload,
   PerformanceCaptureSession,
   PerformanceCaptureSessionDetail,
@@ -50,7 +48,6 @@ export interface ElectronAPI {
   ) => Promise<ElectronResult<undefined>>;
   stopLogcat: (deviceId: string) => Promise<ElectronResult<undefined>>;
   getPerformance: (deviceId: string) => Promise<ElectronResult<PerformanceMetrics>>;
-  startPerformanceRecording: (deviceId: string, options: PerformanceRecordingOptions) => Promise<ElectronResult<PerformanceRecording>>;
   startCaptureSession: (deviceId: string) => Promise<ElectronResult<PerformanceCaptureSession>>;
   stopCaptureSession: (deviceId: string) => Promise<ElectronResult<PerformanceCaptureSession>>;
   listCaptureSessions: () => Promise<ElectronResult<PerformanceCaptureSession[]>>;

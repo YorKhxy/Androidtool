@@ -5,12 +5,11 @@ import * as path from 'path';
 import { statSync as nodeFsStatSync, mkdtempSync as nodeFsMkdtempSync, renameSync as nodeFsRenameSync, copyFileSync as nodeFsCopyFileSync, rmSync as nodeFsRmSync } from 'fs';
 import { tmpdir as nodeOsTmpdir } from 'os';
 import type { ExecFileOptions, ChildProcess } from 'child_process';
-import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo } from '../../shared/types';
+import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, ProcessInfo } from '../../shared/types';
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
 import { ResolvedAdbBinary, getBundledAdbCandidates, resolveBundledAdbBinaryPath } from './adbBinary';
 import { AdbRuntimeInspector } from './runtimeInspector';
-import { PerformanceRecordingManager } from './performanceRecording';
 import { PerformanceCaptureRecorder, type CaptureSegmentMeta } from './captureRecorder';
 import type { PerformanceCaptureProvider } from '../../shared/types';
 
@@ -59,11 +58,6 @@ const execFileAsync = promisify(execFile);
 export class ADBManager extends EventEmitter {
   private readonly runtimeInspector = new AdbRuntimeInspector(
     (args, options) => this.execAdb(args, options)
-  );
-  private readonly performanceRecordingManager = new PerformanceRecordingManager(
-    (args, options) => this.execAdb(args, options),
-    async () => (await this.resolveAdbBinary()).path,
-    (deviceId) => this.getPerformanceMetrics(deviceId)
   );
   // Phase 14 持续分段录制引擎（采集会话用）。
   private readonly captureRecorder = new PerformanceCaptureRecorder(
@@ -1418,19 +1412,6 @@ export class ADBManager extends EventEmitter {
     }
 
     throw this.createRebootError(result);
-  }
-
-  async startPerformanceRecording(
-    deviceId: string,
-    baseDir: string,
-    options: PerformanceRecordingOptions
-  ): Promise<PerformanceRecording> {
-    return this.performanceRecordingManager.startRecording({
-      deviceId,
-      baseDir,
-      options,
-      isPico: this.isLikelyPicoDevice(deviceId),
-    });
   }
 
   // —— Phase 14 采集会话：持续分段录制 —— //

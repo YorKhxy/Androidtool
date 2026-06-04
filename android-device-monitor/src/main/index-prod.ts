@@ -4,7 +4,7 @@ import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
 import { ScrcpyManager } from './scrcpy/scrcpyManager';
-import { LogEntry, MirrorStartOptions, PerformanceRecordingOptions, PerformanceSessionExportPayload } from '../shared/types';
+import { LogEntry, MirrorStartOptions, PerformanceSessionExportPayload } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
 import { resolveRuntimeAppRoot } from './runtimeAppRoot';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
@@ -255,15 +255,6 @@ const setupIpcHandlers = () => {
       return { success: true, data: metrics };
     } catch (error) {
       return toIpcErrorResponse(error, '获取性能数据失败');
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.START_PERFORMANCE_RECORDING, async (_event, deviceId: string, options: PerformanceRecordingOptions) => {
-    try {
-      const recording = await adbManager.startPerformanceRecording(deviceId, resolveRuntimeAppRoot(app), options);
-      return { success: true, data: recording };
-    } catch (error) {
-      return toIpcErrorResponse(error, '性能录制失败');
     }
   });
 

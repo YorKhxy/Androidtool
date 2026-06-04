@@ -114,13 +114,14 @@ describe('project smoke checks', () => {
     }
   });
 
-  test('renderer avoids unbounded pending log and performance polling backlog', () => {
+  test('renderer avoids unbounded pending log and capture sample backlog', () => {
     const source = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
     expect(source).toContain('MAX_PENDING_LOG_BUFFER');
-    expect(source).toContain('performanceRequestInFlightRef');
-    expect(source).toContain('performanceRequestInFlightRef.current.has(deviceId)');
-    expect(source).toContain('performanceEnabledDeviceIds.has(selectedDevice.id)');
-    expect(source).toContain('togglePerformanceMonitoring');
+    // 采样改由主进程编排并经 onCaptureSample 推送，渲染层不再自行轮询 getPerformance。
+    expect(source).not.toContain('performanceRequestInFlightRef');
+    expect(source).toContain('onCaptureSample');
+    // 实时样本累积有上限，防长采集内存膨胀。
+    expect(source).toContain('.slice(-7200)');
   });
 
   test('renderer keeps logcat data in chronological bounded storage', () => {
@@ -507,111 +508,108 @@ describe('project smoke checks', () => {
     expect(managerSource).not.toContain('Network capture failed. tcpdump may be missing or require elevated device permissions');
   });
 
-  test('performance recording uses provider-specific screenrecord flow and surfaces recordings in renderer', () => {
+  test('legacy short performance recording path is fully retired (engine/IPC/types/UI)', () => {
     const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
-    const recordingSource = fs.readFileSync(path.join(root, 'src/main/adb/performanceRecording.ts'), 'utf-8');
     const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
     const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
     const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
-    const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/components/PerformancePanel.tsx'), 'utf-8');
+    const panelSource = fs.readFileSync(path.join(root, 'src/renderer/components/PerformancePanel.tsx'), 'utf-8');
     const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
     const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
     const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
     const typeSource = fs.readFileSync(path.join(root, 'src/shared/types/index.ts'), 'utf-8');
-    const mediaSource = fs.readFileSync(path.join(root, 'src/main/performanceMedia.ts'), 'utf-8');
     const packageSource = fs.readFileSync(path.join(root, 'package.json'), 'utf-8');
 
-    expect(typeSource).toContain("export type PerformanceRecordingProvider = 'android-screenrecord' | 'pico-screenrecord' | 'pico-sdk'");
-    expect(typeSource).toContain('export interface PerformanceRecordingOptions');
-    expect(typeSource).toContain('export interface PerformanceRecording');
-    expect(typeSource).toContain('videoRelativePath?: string');
-    expect(typeSource).toContain('manifestRelativePath?: string');
-    expect(typeSource).not.toContain('processedVideo: boolean');
-    expect(typeSource).not.toContain('metricsBurnedIn: boolean');
-    expect(typeSource).toContain('singleEyeVideo?: boolean');
-    expect(typeSource).not.toContain('videoPath?: string');
-    expect(typeSource).not.toContain('manifestPath?: string');
+    // 旧短录制引擎文件已删除
+    expect(fs.existsSync(path.join(root, 'src/main/adb/performanceRecording.ts'))).toBe(false);
+    // 旧类型已移除
+    expect(typeSource).not.toContain('export interface PerformanceRecording ');
+    expect(typeSource).not.toContain('PerformanceRecordingOptions');
+    expect(typeSource).not.toContain('PerformanceRecordingProvider');
+    expect(typeSource).not.toContain('PerformanceRecordingStatus');
+    // 旧 IPC 通道 / handler / 桥接已移除
+    expect(channelSource).not.toContain('START_PERFORMANCE_RECORDING');
+    expect(indexSource).not.toContain('START_PERFORMANCE_RECORDING');
+    expect(prodSource).not.toContain('START_PERFORMANCE_RECORDING');
+    expect(preloadSource).not.toContain('startPerformanceRecording');
+    expect(electronApiSource).not.toContain('startPerformanceRecording');
+    // 引擎与管理器已退役
+    expect(managerSource).not.toContain('PerformanceRecordingManager');
+    expect(managerSource).not.toContain('startPerformanceRecording');
+    // 渲染层旧短录制状态 / 控件已退役
+    expect(simpleAppSource).not.toContain('performanceRecordings');
+    expect(simpleAppSource).not.toContain('recordingDeviceIds');
+    expect(simpleAppSource).not.toContain('startPerformanceRecording');
+    expect(panelSource).not.toContain('onStartRecording');
+    expect(panelSource).not.toContain('buildRecordingMediaUrl');
+    expect(panelSource).not.toContain('previewRecording');
+    expect(panelSource).not.toContain('性能录制');
+    expect(panelSource).not.toContain('s 录制');
+    // 性能快照（14.1 已移除）仍不得回流
+    expect(simpleAppSource).not.toContain('capturePerformanceSnapshot');
+    expect(panelSource).not.toContain('>性能快照</div>');
+    // 不引入 ffmpeg（持续录制不做本机转码）
     expect(packageSource).not.toContain('"ffmpeg-static"');
     expect(packageSource).not.toContain('"to": "ffmpeg-static"');
-    expect(channelSource).toContain("START_PERFORMANCE_RECORDING: 'adb:start-performance-recording'");
-    expect(preloadSource).toContain('startPerformanceRecording');
-    expect(electronApiSource).toContain('startPerformanceRecording: (deviceId: string, options: PerformanceRecordingOptions)');
-    expect(indexSource).toContain('IPC_CHANNELS.START_PERFORMANCE_RECORDING');
-    expect(indexSource).toContain('startPerformanceRecording(deviceId, resolveRuntimeAppRoot(app), options)');
-    expect(indexSource).toContain('registerPerformanceMediaScheme();');
-    expect(indexSource).toContain('registerPerformanceMediaProtocol(() => resolveRuntimeAppRoot(app))');
-    expect(prodSource).toContain('IPC_CHANNELS.START_PERFORMANCE_RECORDING');
-    expect(prodSource).toContain('registerPerformanceMediaScheme();');
-    expect(prodSource).toContain('registerPerformanceMediaProtocol(() => resolveRuntimeAppRoot(app))');
-    expect(mediaSource).toContain("export const PERFORMANCE_MEDIA_SCHEME = 'adm-media'");
-    expect(mediaSource).toContain('registerPerformanceMediaScheme');
-    expect(mediaSource).toContain('registerPerformanceMediaProtocol');
-    expect(mediaSource).toContain('performance-recordings');
-    expect(mediaSource).toContain('path.relative(mediaRoot, resolvedPath)');
-    expect(managerSource).toContain('PerformanceRecordingManager');
-    expect(managerSource).toContain('isPico: this.isLikelyPicoDevice(deviceId)');
-    expect(recordingSource).toContain("'screenrecord'");
-    expect(recordingSource).toContain("'--time-limit'");
-    expect(recordingSource).toContain("'--bit-rate'");
-    expect(recordingSource).toContain("'pull'");
-    expect(recordingSource).toContain("'performance-recordings'");
-    expect(recordingSource).toContain("'pico-screenrecord'");
-    expect(recordingSource).toContain("'android-screenrecord'");
-    expect(recordingSource).toContain('writeManifest');
-    expect(recordingSource).toContain('collectSamples');
-    expect(recordingSource).toContain('signal.cancelled = true');
-    expect(recordingSource).toContain('toPortablePath');
-    expect(recordingSource).toContain('videoRelativePath,');
-    expect(recordingSource).toContain('manifestRelativePath,');
-    expect(recordingSource).toContain("['-s', input.deviceId, 'pull', remotePath, videoPath]");
-    expect(recordingSource).not.toContain('processPerformanceRecordingVideo');
-    expect(recordingSource).not.toContain('rawVideoFileName');
-    expect(recordingSource).not.toContain('subtitleFileName');
-    expect(recordingSource).not.toContain('cropToSingleEye: input.isPico');
-    expect(recordingSource).not.toContain('metricsBurnedIn: true');
-    expect(recordingSource).not.toContain('singleEyeVideo: input.isPico');
-    expect(recordingSource).toContain('cleanupRemoteRecording');
-    expect(recordingSource).toContain("'pkill', '-2', 'screenrecord'");
-    expect(recordingSource).toContain("'killall', '-2', 'screenrecord'");
-    expect(simpleAppSource).toContain('performanceRecordings');
-    expect(simpleAppSource).toContain('recordingDeviceIds');
-    expect(simpleAppSource).toContain('startPerformanceRecording');
-    expect(simpleAppSource).toContain('bitRateMbps: 8');
-    // 性能快照已在 Phase 14 移除：相关链路不应再出现
-    expect(simpleAppSource).not.toContain('capturePerformanceSnapshot');
-    expect(simpleAppSource).not.toContain('setPerformanceSnapshots');
-    expect(rendererSource).toContain('onStartRecording');
-    expect(rendererSource).toContain('recordings');
-    expect(rendererSource).toContain('Pico SDK');
-    expect(rendererSource).toContain('Pico screenrecord');
-    expect(rendererSource).toContain('Android screenrecord');
-    expect(rendererSource).toContain('buildRecordingMediaUrl');
-    expect(rendererSource).toContain('adm-media://');
-    expect(rendererSource).toContain('videoRelativePath');
-    expect(rendererSource).toContain('manifestRelativePath');
-    expect(rendererSource).toContain('previewRecording');
-    expect(rendererSource).toContain('recordingPlaybackTime');
-    expect(rendererSource).toContain('findRecordingSampleAt');
-    expect(rendererSource).toContain('renderRecordingMetricOverlay');
-    expect(rendererSource).toContain('onTimeUpdate');
-    expect(rendererSource).toContain('setPreviewRecording(recording)');
-    expect(rendererSource).toContain('shouldCropRecordingInTool');
-    expect(rendererSource).not.toContain('shouldOverlayRecordingMetricsInTool');
-    expect(rendererSource).toContain("return isPicoRecording(recording) && !recording.singleEyeVideo");
-    expect(rendererSource).not.toContain('recording.metricsBurnedIn');
-    expect(rendererSource).toContain("style={getRecordingVideoStyle(shouldCropVideo, 'cover')}");
-    expect(rendererSource).toContain("getRecordingVideoStyle(false, 'contain')");
-    expect(rendererSource).toContain('{renderRecordingMetricOverlay(firstSample, true)}');
-    expect(rendererSource).toContain('{renderRecordingMetricOverlay(previewRecordingSample)}');
-    expect(rendererSource).toContain('性能录制播放预览');
-    expect(rendererSource).toContain('关闭录制播放');
-    expect(rendererSource).not.toContain('recording.videoPath &&');
-    expect(rendererSource).not.toContain('recording.manifestPath &&');
-    // 性能快照 UI 已在 Phase 14 移除
-    expect(rendererSource).not.toContain('>性能快照</div>');
-    expect(rendererSource).not.toContain('isCapturingSnapshot');
-    const recordingSectionIndex = rendererSource.indexOf('>性能录制</div>');
-    expect(recordingSectionIndex).toBeGreaterThanOrEqual(0);
+    // 导出会话能力保留
+    expect(channelSource).toContain('EXPORT_PERFORMANCE_SESSION');
+    expect(electronApiSource).toContain('exportPerformanceSession');
+  });
+
+  test('capture report UI: single capture switch, curve fill, merged video, timeline sync, soft-limit', () => {
+    const panelSource = fs.readFileSync(path.join(root, 'src/renderer/components/PerformancePanel.tsx'), 'utf-8');
+    const reportSource = fs.readFileSync(path.join(root, 'src/renderer/components/CaptureReport.tsx'), 'utf-8');
+    const chartSource = fs.readFileSync(path.join(root, 'src/renderer/components/CaptureChart.tsx'), 'utf-8');
+    const formatSource = fs.readFileSync(path.join(root, 'src/renderer/components/perfFormat.ts'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    expect(fs.existsSync(path.join(root, 'src/renderer/components/CaptureReport.tsx'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'src/renderer/components/CaptureChart.tsx'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'src/renderer/components/perfFormat.ts'))).toBe(true);
+
+    // 顶部单一采集开关 + 软上限提示 + 报告挂载
+    expect(panelSource).toContain('开始采集');
+    expect(panelSource).toContain('关闭采集');
+    expect(panelSource).toContain('onToggleCapture');
+    expect(panelSource).toContain('softLimitNotice');
+    expect(panelSource).toContain('<CaptureReport');
+    expect(panelSource).toContain('导出报告');
+
+    // 报告：分段缝合连续时间轴 + 视频 seek 映射 + 反向驱动 + 单眼裁切 + 可拖时间轴
+    expect(reportSource).toContain('buildSegmentMediaUrl');
+    expect(reportSource).toContain('findSegmentIndex');
+    expect(reportSource).toContain('seekTo');
+    expect(reportSource).toContain('pendingSeekOffsetRef');
+    expect(reportSource).toContain('activeSegmentIndex');
+    expect(reportSource).toContain('onTimeUpdate');
+    expect(reportSource).toContain('onEnded');
+    expect(reportSource).toContain('shouldCropCaptureVideo');
+    expect(reportSource).toContain('type="range"');
+    expect(reportSource).toContain('录制中');
+
+    // 曲线：时间轴 x 轴 + 面积填充 + 图例多选/隔离 + 波峰波谷 + 播放头
+    expect(chartSource).toContain('selectedSeriesKeys');
+    expect(chartSource).toContain('onToggleSeries');
+    expect(chartSource).toContain('showPlayhead');
+    expect(chartSource).toContain('-peak');
+    expect(chartSource).toContain('-valley');
+    expect(chartSource).toContain('-area');
+    expect(chartSource).toContain('xForMs');
+
+    // 共享格式化：分段媒体 URL + 单眼裁切判定 + 连续轴总时长
+    expect(formatSource).toContain('buildSegmentMediaUrl');
+    expect(formatSource).toContain('shouldCropCaptureVideo');
+    expect(formatSource).toContain('captureTotalMs');
+    expect(formatSource).toContain('adm-media://');
+
+    // SimpleApp 接线新采集会话流
+    expect(simpleAppSource).toContain('toggleCaptureSession');
+    expect(simpleAppSource).toContain('startCaptureSession');
+    expect(simpleAppSource).toContain('stopCaptureSession');
+    expect(simpleAppSource).toContain('onCaptureSample');
+    expect(simpleAppSource).toContain('onCaptureSizeLimit');
+    expect(simpleAppSource).toContain('activeCaptureByDeviceId');
+    expect(simpleAppSource).toContain('reportSessionByDeviceId');
   });
 
   test('continuous capture recorder segments at 180s, finalizes via SIGINT and pulls each segment', () => {

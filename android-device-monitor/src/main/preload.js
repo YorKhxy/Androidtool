@@ -9,7 +9,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startLogcat: (deviceId, minLevel, packageName, pid) => ipcRenderer.invoke('adb:start-logcat', deviceId, minLevel, packageName, pid),
   stopLogcat: (deviceId) => ipcRenderer.invoke('adb:stop-logcat', deviceId),
   getPerformance: (deviceId) => ipcRenderer.invoke('adb:get-performance', deviceId),
-  startPerformanceRecording: (deviceId, options) => ipcRenderer.invoke('adb:start-performance-recording', deviceId, options),
   startCaptureSession: (deviceId) => ipcRenderer.invoke('capture:start', deviceId),
   stopCaptureSession: (deviceId) => ipcRenderer.invoke('capture:stop', deviceId),
   listCaptureSessions: () => ipcRenderer.invoke('capture:list'),

@@ -218,32 +218,6 @@ export interface PerformanceSample {
   metrics: PerformanceMetrics;
 }
 
-export type PerformanceRecordingProvider = 'android-screenrecord' | 'pico-screenrecord' | 'pico-sdk';
-
-export type PerformanceRecordingStatus = 'completed' | 'failed';
-
-export interface PerformanceRecordingOptions {
-  durationSeconds: 10 | 30 | 60;
-  bitRateMbps?: number;
-}
-
-export interface PerformanceRecording {
-  id: string;
-  deviceId: string;
-  provider: PerformanceRecordingProvider;
-  status: PerformanceRecordingStatus;
-  startedAt: Date;
-  endedAt: Date;
-  durationMs: number;
-  videoRelativePath?: string;
-  manifestRelativePath?: string;
-  singleEyeVideo?: boolean;
-  samples: PerformanceSample[];
-  packageName?: string;
-  activityName?: string;
-  error?: string;
-}
-
 export interface PerformanceSessionExportPayload {
   device: DeviceInfo;
   startedAt: Date;

@@ -8,7 +8,6 @@ export const IPC_CHANNELS = {
   START_LOGCAT: 'adb:start-logcat',
   STOP_LOGCAT: 'adb:stop-logcat',
   GET_PERFORMANCE: 'adb:get-performance',
-  START_PERFORMANCE_RECORDING: 'adb:start-performance-recording',
   EXPORT_PERFORMANCE_SESSION: 'performance:export-session',
   START_CAPTURE_SESSION: 'capture:start',
   STOP_CAPTURE_SESSION: 'capture:stop',

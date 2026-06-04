@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceCaptureSession, PerformanceSample, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
@@ -198,9 +198,13 @@ function SimpleApp() {
   const [performanceByDeviceId, setPerformanceByDeviceId] = useState<Record<string, PerformanceMetrics>>({});
   const [performanceSamplesByDeviceId, setPerformanceSamplesByDeviceId] = useState<Record<string, PerformanceSample[]>>({});
   const [performanceSessionStartedAtByDeviceId, setPerformanceSessionStartedAtByDeviceId] = useState<Record<string, Date>>({});
-  const [performanceEnabledDeviceIds, setPerformanceEnabledDeviceIds] = useState<Set<string>>(() => new Set());
-  const [performanceRecordings, setPerformanceRecordings] = useState<PerformanceRecording[]>([]);
-  const [recordingDeviceIds, setRecordingDeviceIds] = useState<Set<string>>(() => new Set());
+  // —— Phase 14 采集会话状态（按设备）——
+  // 进行中的采集会话（点开始采集时设入，关闭后移除）；停止后 finalize 的报告会话；start/stop 异步进行中集合。
+  const [activeCaptureByDeviceId, setActiveCaptureByDeviceId] = useState<Record<string, PerformanceCaptureSession>>({});
+  const [reportSessionByDeviceId, setReportSessionByDeviceId] = useState<Record<string, PerformanceCaptureSession>>({});
+  const [captureBusyDeviceIds, setCaptureBusyDeviceIds] = useState<Set<string>>(() => new Set());
+  const [captureElapsedByDeviceId, setCaptureElapsedByDeviceId] = useState<Record<string, number>>({});
+  const [softLimitNoticeByDeviceId, setSoftLimitNoticeByDeviceId] = useState<Record<string, string>>({});
   const [installedPackages, setInstalledPackages] = useState<string[]>([]);
   const [installedPackagesLoading, setInstalledPackagesLoading] = useState(false);
   const [appFilter, setAppFilter] = useState('');
@@ -290,7 +294,6 @@ function SimpleApp() {
   const selectedDeviceRef = useRef<DeviceInfo | null>(null);
   const maxLogEntriesRef = useRef(MAX_LOG_ENTRIES);
   const batchUpdateSizeRef = useRef(BATCH_UPDATE_SIZE);
-  const performanceRequestInFlightRef = useRef(new Set<string>());
   const apkInstallProgressTimersRef = useRef(new Map<string, number>());
 
   const resetDeviceRuntimeState = useCallback(() => {
@@ -624,6 +627,25 @@ function SimpleApp() {
             return next;
           });
         });
+        // 采集中实时样本：主进程每秒推一条，累积到该设备样本缓冲（供实时曲线 + 关闭后报告），
+        // 同时刷新指标卡与已用时长。上限 7200 条（约 2 小时）防长采集内存膨胀。
+        const unsubscribeCaptureSample = window.electronAPI!.onCaptureSample((payload) => {
+          setPerformanceByDeviceId(prev => ({ ...prev, [payload.deviceId]: payload.sample.metrics }));
+          setPerformanceSamplesByDeviceId(prev => ({
+            ...prev,
+            [payload.deviceId]: [
+              ...(prev[payload.deviceId] || []),
+              { ...payload.sample, capturedAt: new Date(payload.sample.capturedAt) },
+            ].slice(-7200),
+          }));
+          setCaptureElapsedByDeviceId(prev => ({ ...prev, [payload.deviceId]: payload.elapsedMs }));
+        });
+        const unsubscribeCaptureSizeLimit = window.electronAPI!.onCaptureSizeLimit((payload) => {
+          const text = payload.reason === 'duration'
+            ? '本次采集已录制 30 分钟，可继续，也可手动关闭采集。'
+            : '本次采集录屏已达 2GB，可继续，也可手动关闭采集。';
+          setSoftLimitNoticeByDeviceId(prev => ({ ...prev, [payload.deviceId]: text }));
+        });
 
         // 初始数据加载完、所有 IPC 事件订阅就绪 → 标记 app 就绪，撤掉「启动中」遮罩，放开操作。
         setAppReady(true);
@@ -636,6 +658,8 @@ function SimpleApp() {
           unsubscribeLogEntry();
           unsubscribeLogBatch();
           unsubscribeMirrorStatus();
+          unsubscribeCaptureSample();
+          unsubscribeCaptureSizeLimit();
           unsubscribeUpdateStatus();
           logStatesRef.current.forEach(state => {
             if (state.flushTimer !== null) {
@@ -712,15 +736,8 @@ function SimpleApp() {
 
 
 
-  useEffect(() => {
-    if (selectedDevice && activeTab === 'performance' && performanceEnabledDeviceIds.has(selectedDevice.id)) {
-      void loadPerformance(selectedDevice.id, true);
-      const interval = setInterval(() => {
-        loadPerformance(selectedDevice.id, true);
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-  }, [selectedDevice, activeTab, performanceEnabledDeviceIds]);
+  // 采集中的指标采样由主进程编排（PerformanceCaptureController 每秒一次），经 onCaptureSample
+  // 实时推送到渲染层，渲染层不再自行轮询 getPerformance。
 
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
@@ -1160,96 +1177,76 @@ function SimpleApp() {
     setLogVersion(version => version + 1);
   };
 
-  const loadPerformance = async (deviceId = selectedDevice?.id, recordSample = false) => {
-    if (!deviceId || !hasElectronAPI()) return;
-    if (performanceRequestInFlightRef.current.has(deviceId)) return;
-    performanceRequestInFlightRef.current.add(deviceId);
-    try {
-      const result = await window.electronAPI!.getPerformance(deviceId);
-      if (result.success && result.data) {
-        setPerformanceByDeviceId((previous) => ({ ...previous, [deviceId]: result.data! }));
-        if (recordSample) {
-          const capturedAt = new Date();
-          setPerformanceSamplesByDeviceId((previous) => ({
-            ...previous,
-            [deviceId]: [
-              ...(previous[deviceId] || []),
-              { id: `${deviceId}-${capturedAt.getTime()}`, deviceId, capturedAt, metrics: result.data! },
-            ].slice(-3600),
-          }));
-        }
-      }
-    } catch (err) {
-      console.error('Load performance error:', err);
-    } finally {
-      performanceRequestInFlightRef.current.delete(deviceId);
-    }
-  };
-
-  const togglePerformanceMonitoring = () => {
-    if (!selectedDevice) return;
-    const deviceId = selectedDevice.id;
-    setPerformanceEnabledDeviceIds((previous) => {
-      const next = new Set(previous);
-      if (next.has(deviceId)) {
-        next.delete(deviceId);
-      } else {
-        next.add(deviceId);
-        setPerformanceSamplesByDeviceId((previous) => ({ ...previous, [deviceId]: [] }));
-        setPerformanceSessionStartedAtByDeviceId((previous) => ({ ...previous, [deviceId]: new Date() }));
-        void loadPerformance(deviceId, true);
-      }
-      return next;
-    });
-  };
-
-  const startPerformanceRecording = async (durationSeconds: 10 | 30 | 60) => {
+  // 开始/关闭采集单一开关：点开始 → startCaptureSession（主进程同启采样循环 + 持续分段录制）；
+  // 点关闭 → stopCaptureSession（停采样停录制 + finalize），把 finalize 的会话留作报告渲染。
+  const toggleCaptureSession = async () => {
     if (!selectedDevice || !hasElectronAPI()) return;
     const deviceId = selectedDevice.id;
-    if (recordingDeviceIds.has(deviceId)) {
-      setError('当前设备正在录制性能片段。');
-      return;
-    }
-
-    setRecordingDeviceIds((previous) => new Set(previous).add(deviceId));
-    if (!performanceEnabledDeviceIds.has(deviceId)) {
-      setPerformanceEnabledDeviceIds((previous) => new Set(previous).add(deviceId));
-      setPerformanceSamplesByDeviceId((previous) => ({ ...previous, [deviceId]: previous[deviceId] || [] }));
-      setPerformanceSessionStartedAtByDeviceId((previous) => ({ ...previous, [deviceId]: previous[deviceId] || new Date() }));
-    }
-
+    if (captureBusyDeviceIds.has(deviceId)) return;
+    const isActive = Boolean(activeCaptureByDeviceId[deviceId]);
+    setCaptureBusyDeviceIds((prev) => new Set(prev).add(deviceId));
     try {
-      const result = await window.electronAPI!.startPerformanceRecording(deviceId, { durationSeconds, bitRateMbps: 8 });
-      if (result.success && result.data) {
-        setPerformanceRecordings((previous) => [result.data!, ...previous].slice(0, 12));
-        if (result.data.samples.length > 0) {
-          setPerformanceSamplesByDeviceId((previous) => ({
-            ...previous,
-            [deviceId]: [...(previous[deviceId] || []), ...result.data!.samples].slice(-300),
-          }));
-          const lastSample = result.data.samples[result.data.samples.length - 1];
-          setPerformanceByDeviceId((previous) => ({ ...previous, [deviceId]: lastSample.metrics }));
+      if (isActive) {
+        const result = await window.electronAPI!.stopCaptureSession(deviceId);
+        if (result.success && result.data) {
+          const finalized = result.data;
+          setActiveCaptureByDeviceId((prev) => {
+            const next = { ...prev };
+            delete next[deviceId];
+            return next;
+          });
+          setReportSessionByDeviceId((prev) => ({ ...prev, [deviceId]: finalized }));
+          setError('');
+        } else {
+          setError(result.error || '关闭采集失败');
         }
-        setError('');
       } else {
-        setError(result.error || '性能录制失败');
+        // 开始前清空上次缓冲、报告与提醒，避免新旧会话数据串味。
+        setPerformanceSamplesByDeviceId((prev) => ({ ...prev, [deviceId]: [] }));
+        setReportSessionByDeviceId((prev) => {
+          const next = { ...prev };
+          delete next[deviceId];
+          return next;
+        });
+        setCaptureElapsedByDeviceId((prev) => ({ ...prev, [deviceId]: 0 }));
+        setSoftLimitNoticeByDeviceId((prev) => {
+          const next = { ...prev };
+          delete next[deviceId];
+          return next;
+        });
+        const result = await window.electronAPI!.startCaptureSession(deviceId);
+        if (result.success && result.data) {
+          const session = result.data;
+          setActiveCaptureByDeviceId((prev) => ({ ...prev, [deviceId]: session }));
+          setPerformanceSessionStartedAtByDeviceId((prev) => ({ ...prev, [deviceId]: new Date(session.startedAt) }));
+          setError('');
+        } else {
+          setError(result.error || '开始采集失败');
+        }
       }
     } catch (err) {
-      setError('性能录制失败：' + (err as Error).message);
+      setError((isActive ? '关闭采集失败：' : '开始采集失败：') + (err as Error).message);
     } finally {
-      setRecordingDeviceIds((previous) => {
-        const next = new Set(previous);
+      setCaptureBusyDeviceIds((prev) => {
+        const next = new Set(prev);
         next.delete(deviceId);
         return next;
       });
     }
   };
 
+  const dismissSoftLimit = (deviceId: string) =>
+    setSoftLimitNoticeByDeviceId((prev) => {
+      const next = { ...prev };
+      delete next[deviceId];
+      return next;
+    });
+
   const exportPerformanceSession = async () => {
     if (!selectedDevice || !hasElectronAPI()) return;
     const samples = performanceSamplesByDeviceId[selectedDevice.id] || [];
     if (samples.length === 0) {
-      setError('当前设备还没有性能采样数据，请先开启采集。');
+      setError('当前设备还没有性能采样数据，请先开始采集。');
       return;
     }
 
@@ -1856,11 +1853,14 @@ function SimpleApp() {
   const isSelectedLogPaused = Boolean(selectedDeviceId && pausedLogDeviceIds.has(selectedDeviceId));
   const selectedPerformance = selectedDeviceId ? performanceByDeviceId[selectedDeviceId] || null : null;
   const selectedPerformanceSamples = selectedDeviceId ? performanceSamplesByDeviceId[selectedDeviceId] || [] : [];
-  const isSelectedPerformanceEnabled = Boolean(selectedDeviceId && performanceEnabledDeviceIds.has(selectedDeviceId));
-  const visiblePerformanceRecordings = useMemo(
-    () => performanceRecordings.filter((recording) => recording.deviceId === selectedDeviceId),
-    [performanceRecordings, selectedDeviceId]
-  );
+  const isSelectedCapturing = Boolean(selectedDeviceId && activeCaptureByDeviceId[selectedDeviceId]);
+  // 展示会话：采集中=活动会话，否则=最近一次报告会话（停止后留存）。
+  const selectedCaptureSession = selectedDeviceId
+    ? activeCaptureByDeviceId[selectedDeviceId] || reportSessionByDeviceId[selectedDeviceId] || null
+    : null;
+  const isSelectedCaptureBusy = Boolean(selectedDeviceId && captureBusyDeviceIds.has(selectedDeviceId));
+  const selectedCaptureElapsed = selectedDeviceId ? captureElapsedByDeviceId[selectedDeviceId] || 0 : 0;
+  const selectedSoftLimitNotice = selectedDeviceId ? softLimitNoticeByDeviceId[selectedDeviceId] || null : null;
   const getApkInstallStatusMeta = (status: ApkInstallStatus) => {
     switch (status) {
       case 'installing':
@@ -3066,12 +3066,14 @@ function SimpleApp() {
                   <PerformancePanel
                     device={selectedDevice}
                     performance={selectedPerformance}
-                    samples={selectedPerformanceSamples}
-                    isMonitoringPerformance={isSelectedPerformanceEnabled}
-                    isRecording={Boolean(selectedDeviceId && recordingDeviceIds.has(selectedDeviceId))}
-                    recordings={visiblePerformanceRecordings}
-                    onToggleMonitoring={togglePerformanceMonitoring}
-                    onStartRecording={startPerformanceRecording}
+                    captureSession={selectedCaptureSession}
+                    captureSamples={selectedPerformanceSamples}
+                    isCapturing={isSelectedCapturing}
+                    isCaptureBusy={isSelectedCaptureBusy}
+                    elapsedMs={selectedCaptureElapsed}
+                    softLimitNotice={selectedSoftLimitNotice}
+                    onToggleCapture={toggleCaptureSession}
+                    onDismissSoftLimit={() => selectedDeviceId && dismissSoftLimit(selectedDeviceId)}
                     onExportSession={exportPerformanceSession}
                   />
                 )}
