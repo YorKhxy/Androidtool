@@ -149,6 +149,23 @@ const renderBatteryBadge = (device: DeviceInfo) => {
   );
 };
 
+// 屏幕状态徽标：唤醒（亮绿点）/息屏（暗灰点）/未知。仅已连接且拿到状态时显示。
+const renderScreenStateBadge = (device: DeviceInfo) => {
+  if (device.status !== 'connected' || !device.screenState) return null;
+  const meta =
+    device.screenState === 'on'
+      ? { label: '唤醒', color: '#22c55e', dot: '#22c55e', glow: true }
+      : device.screenState === 'off'
+        ? { label: '息屏', color: '#9ca3af', dot: '#6b7280', glow: false }
+        : { label: '未知', color: '#9ca3af', dot: '#6b7280', glow: false };
+  return (
+    <span title={`屏幕状态：${meta.label}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: meta.color, lineHeight: 1 }}>
+      <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: meta.dot, boxShadow: meta.glow ? '0 0 5px #22c55e' : 'none', flexShrink: 0 }} />
+      {meta.label}
+    </span>
+  );
+};
+
 function SimpleApp() {
   const [adbStatus, setAdbStatus] = useState<AdbStatus | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -187,6 +204,25 @@ function SimpleApp() {
   const [appFilter, setAppFilter] = useState('');
   const [busyPackage, setBusyPackage] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<'launch' | 'stop' | 'uninstall' | null>(null);
+  // 应用内确认弹窗：取代原生 window.confirm —— 后者在 Electron 渲染层关闭后会让网页文档丢键盘焦点，
+  // 导致弹窗取消/确认后输入框（如「搜索包名」）点进去敲不了字。用受控 React 弹窗彻底规避。
+  const [confirmDialog, setConfirmDialog] = useState<{
+    message: string;
+    confirmText: string;
+    danger: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+  const requestConfirm = useCallback(
+    (opts: { message: string; confirmText?: string; danger?: boolean; onConfirm: () => void }) => {
+      setConfirmDialog({
+        message: opts.message,
+        confirmText: opts.confirmText || '确定',
+        danger: opts.danger ?? false,
+        onConfirm: opts.onConfirm,
+      });
+    },
+    []
+  );
   const [networkRequests, setNetworkRequests] = useState<NetworkRequest[]>([]);
   const [selectedNetworkRequestId, setSelectedNetworkRequestId] = useState<string | null>(null);
   const [runningLogDeviceIds, setRunningLogDeviceIds] = useState<Set<string>>(() => new Set());
@@ -540,6 +576,16 @@ function SimpleApp() {
             }
           }
         });
+        // 启动即拉取主进程已知的最近更新状态：补回 whenReady 那次自动检查因 push 早于本订阅而丢失的提示，
+        // 实现「打开工具就自动提示有新版本」，无需手动点「检查更新」。后台拉取，不走手动反馈（不弹「已是最新」）。
+        void window.electronAPI!.getUpdateStatus?.().then((res) => {
+          const status = res?.success ? res.data : null;
+          if (!status) return;
+          setUpdateStatus(status);
+          if (status.state === 'available' || status.state === 'downloading' || status.state === 'downloaded') {
+            setUpdateDismissed(false);
+          }
+        }).catch(() => undefined);
         const unsubscribeMirrorStatus = window.electronAPI!.onMirrorStatus((session) => {
           setMirrorSessionsByDeviceId(prev => ({ ...prev, [session.deviceId]: session }));
           setMirrorStartingDeviceIds(prev => {
@@ -806,11 +852,15 @@ function SimpleApp() {
   // 关闭文件管理：若该设备有文件传输进行中，先确认（关闭后传输仍在后台继续，重开可看回进度）。
   const closeFileBrowser = useCallback(() => {
     if (fileBrowserDevice && isTransferActive(fileBrowserDevice.id)) {
-      const ok = window.confirm('正在传输文件，确定关闭文件管理吗？\n关闭后传输会在后台继续，重新打开可看到进度。');
-      if (!ok) return;
+      requestConfirm({
+        message: '正在传输文件，确定关闭文件管理吗？\n关闭后传输会在后台继续，重新打开可看到进度。',
+        confirmText: '关闭',
+        onConfirm: () => setFileBrowserDevice(null),
+      });
+      return;
     }
     setFileBrowserDevice(null);
-  }, [fileBrowserDevice]);
+  }, [fileBrowserDevice, requestConfirm]);
 
   // 从历史移除一条关键字。
   const removeOneSearchHistory = useCallback((keyword: string) => {
@@ -1594,14 +1644,24 @@ function SimpleApp() {
     }
   };
 
-  const handleUninstallApp = async (packageName: string) => {
-    if (!selectedDevice || !hasElectronAPI() || busyPackage) return;
-    if (!window.confirm(`确定卸载应用「${packageName}」？此操作不可撤销。`)) return;
+  const handleUninstallApp = (packageName: string) => {
+    const device = selectedDevice; // 捕获当前设备：确认期间若切换设备，仍卸载用户当时看到的那台
+    if (!device || !hasElectronAPI() || busyPackage) return;
+    requestConfirm({
+      message: `确定卸载应用「${packageName}」？此操作不可撤销。`,
+      confirmText: '卸载',
+      danger: true,
+      onConfirm: () => { void doUninstallApp(device, packageName); },
+    });
+  };
+
+  const doUninstallApp = async (device: DeviceInfo, packageName: string) => {
+    if (!hasElectronAPI()) return;
     setBusyPackage(packageName);
     setBusyAction('uninstall');
     try {
       setError('');
-      const result = await window.electronAPI!.uninstallApp(selectedDevice.id, packageName);
+      const result = await window.electronAPI!.uninstallApp(device.id, packageName);
       if (result.success) {
         await loadInstalledPackages();
       } else {
@@ -2378,7 +2438,10 @@ function SimpleApp() {
                     <div style={{ fontSize: '12px', color: '#aaa' }}>{device.id}</div>
                   )}
                   <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                    {renderBatteryBadge(device)}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                      {renderBatteryBadge(device)}
+                      {renderScreenStateBadge(device)}
+                    </div>
                     {wifiLatencyLabel && (
                       <span style={{ fontSize: '12px', color: device.latencyStatus === 'timeout' ? '#fbbf24' : '#93c5fd' }}>
                         {wifiLatencyLabel}
@@ -2908,6 +2971,32 @@ function SimpleApp() {
         }}>
           {success}
           <button onClick={() => setSuccess('')} style={{ cursor: 'pointer' }}>{'\u5173\u95ed'}</button>
+        </div>
+      )}
+
+      {confirmDialog && (
+        <div
+          onClick={() => setConfirmDialog(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 4000, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 'min(420px, 92vw)', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '12px', padding: '20px 22px', boxShadow: '0 24px 60px rgba(0,0,0,0.5)' }}
+          >
+            <div style={{ fontSize: '14px', color: '#e5e7eb', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: '18px' }}>
+              {confirmDialog.message}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                onClick={() => setConfirmDialog(null)}
+                style={{ padding: '8px 16px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: '#d1d5db', fontSize: '13px', cursor: 'pointer' }}
+              >{'\u53d6\u6d88'}</button>
+              <button
+                onClick={() => { const cb = confirmDialog.onConfirm; setConfirmDialog(null); cb(); }}
+                style={{ padding: '8px 16px', backgroundColor: confirmDialog.danger ? '#dc2626' : '#2563eb', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer', fontWeight: 600 }}
+              >{confirmDialog.confirmText}</button>
+            </div>
+          </div>
         </div>
       )}
 

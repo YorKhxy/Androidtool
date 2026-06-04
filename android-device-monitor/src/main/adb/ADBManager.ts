@@ -73,6 +73,7 @@ export class ADBManager extends EventEmitter {
   private logcatPidPackageRefreshAt = new Map<string, number>();
   private logcatPidPackageRefreshes = new Map<string, Promise<void>>();
   private wifiLatencyCache = new Map<string, { checkedAt: number; latencyMs?: number; status: 'ok' | 'timeout' | 'unknown' }>();
+  private screenStateCache = new Map<string, { checkedAt: number; screenState: 'on' | 'off' | 'unknown' }>();
   private batteryLevelCache = new Map<string, { checkedAt: number; batteryLevel?: number }>();
   private deviceMonitorTimer: NodeJS.Timeout | null = null;
   private isDeviceMonitorPolling = false;
@@ -93,6 +94,7 @@ export class ADBManager extends EventEmitter {
   private readonly adbStatusCacheMs = 5000;
   private readonly wifiLatencyCacheMs = 3000;
   private readonly batteryLevelCacheMs = 30000;
+  private readonly screenStateCacheMs = 3000; // 屏幕状态变化快，缓存短一些；息屏/唤醒动作还会主动清缓存即时刷新
 
   async getDevices(): Promise<DeviceInfo[]> {
     try {
@@ -131,6 +133,7 @@ export class ADBManager extends EventEmitter {
 
         device = await this.refreshBatteryLevelForDevice(device);
         device = await this.refreshWifiLatencyForDevice(device);
+        device = await this.refreshScreenStateForDevice(device);
         nextCache.set(summary.id, device);
         return device;
       }));
@@ -262,6 +265,30 @@ export class ADBManager extends EventEmitter {
       };
     } catch (error) {
       logger.warn('Failed to get battery level for', device.id, error);
+      return device;
+    }
+  }
+
+  // 屏幕电源状态（息屏/唤醒），带短缓存。复用 runtimeInspector 已有的多版本 dumpsys power 解析。
+  private async getScreenState(deviceId: string): Promise<'on' | 'off' | 'unknown'> {
+    const cached = this.screenStateCache.get(deviceId);
+    if (cached && Date.now() - cached.checkedAt < this.screenStateCacheMs) {
+      return cached.screenState;
+    }
+    const screenState = await this.runtimeInspector.getScreenState(deviceId);
+    this.screenStateCache.set(deviceId, { checkedAt: Date.now(), screenState });
+    return screenState;
+  }
+
+  private async refreshScreenStateForDevice(device: DeviceInfo): Promise<DeviceInfo> {
+    if (device.status !== 'connected') {
+      return device;
+    }
+    try {
+      const screenState = await this.getScreenState(device.id);
+      return { ...device, screenState };
+    } catch (error) {
+      logger.warn('Failed to get screen state for', device.id, error);
       return device;
     }
   }
@@ -773,6 +800,7 @@ export class ADBManager extends EventEmitter {
       this.deviceInfoCache.delete(deviceId);
       this.wifiLatencyCache.delete(deviceId);
       this.batteryLevelCache.delete(deviceId);
+      this.screenStateCache.delete(deviceId);
     } catch (error) {
       throw this.wrapOperationError('Disconnect failed', error);
     }
@@ -1246,12 +1274,14 @@ export class ADBManager extends EventEmitter {
     await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_SLEEP'], {
       timeout: 8000,
     });
+    this.screenStateCache.delete(deviceId); // 主动失效缓存：下次轮询即刷出最新息屏/唤醒状态
   }
 
   async wakeDevice(deviceId: string): Promise<void> {
     await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'], {
       timeout: 8000,
     });
+    this.screenStateCache.delete(deviceId);
   }
 
   async unlockDevice(deviceId: string): Promise<void> {
@@ -1286,6 +1316,7 @@ export class ADBManager extends EventEmitter {
       ['-s', deviceId, 'shell', 'input', 'swipe', String(x), String(startY), String(x), String(endY), '300'],
       { timeout: 8000 }
     );
+    this.screenStateCache.delete(deviceId); // 解锁会点亮屏幕，失效缓存让卡片尽快显示「唤醒」
   }
 
   async rebootDevice(deviceId: string): Promise<void> {
@@ -1296,6 +1327,7 @@ export class ADBManager extends EventEmitter {
     if (result.exitCode === 0 || this.isExpectedRebootDisconnect(result)) {
       this.deviceInfoCache.delete(deviceId);
       this.wifiLatencyCache.delete(deviceId);
+      this.screenStateCache.delete(deviceId);
       return;
     }
 
@@ -2047,23 +2079,29 @@ export class ADBManager extends EventEmitter {
         this.lastDeviceSnapshot = nextSnapshot;
         this.emitDeviceListChanged(devices);
       } else {
-        const connectedWifiDevices = Array.from(this.deviceInfoCache.values())
-          .filter((device) => device.connectionType === 'wifi' && device.status === 'connected');
+        const connectedDevices = Array.from(this.deviceInfoCache.values())
+          .filter((device) => device.status === 'connected');
 
-        if (connectedWifiDevices.length > 0) {
-          const refreshedWifiDevices = await Promise.all(
-            connectedWifiDevices.map(async (device) => {
-              const withBattery = await this.refreshBatteryLevelForDevice(device);
-              return this.refreshWifiLatencyForDevice(withBattery);
+        if (connectedDevices.length > 0) {
+          const refreshedDevices = await Promise.all(
+            connectedDevices.map(async (device) => {
+              // 屏幕状态 USB / WiFi 都周期刷（卡片要显示息屏/唤醒）；电量与延迟仍仅 WiFi 周期刷，保持原有开销。
+              let refreshed = await this.refreshScreenStateForDevice(device);
+              if (refreshed.connectionType === 'wifi') {
+                refreshed = await this.refreshBatteryLevelForDevice(refreshed);
+                refreshed = await this.refreshWifiLatencyForDevice(refreshed);
+              }
+              return refreshed;
             })
           );
           let hasDeviceHealthChanged = false;
-          for (const device of refreshedWifiDevices) {
+          for (const device of refreshedDevices) {
             const previousDevice = this.deviceInfoCache.get(device.id);
             if (
               previousDevice?.batteryLevel !== device.batteryLevel ||
               previousDevice?.latencyMs !== device.latencyMs ||
-              previousDevice?.latencyStatus !== device.latencyStatus
+              previousDevice?.latencyStatus !== device.latencyStatus ||
+              previousDevice?.screenState !== device.screenState
             ) {
               hasDeviceHealthChanged = true;
             }
@@ -2107,6 +2145,7 @@ export class ADBManager extends EventEmitter {
     this.logcatBuffer.clear();
     this.deviceInfoCache.clear();
     this.batteryLevelCache.clear();
+    this.screenStateCache.clear();
     this.lastDeviceSnapshot.clear();
     await this.killAdbServer();
     

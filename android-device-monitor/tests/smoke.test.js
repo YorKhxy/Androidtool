@@ -349,7 +349,9 @@ describe('project smoke checks', () => {
     expect(managerSource).toContain('measureWifiLatency');
     expect(managerSource).toContain('wifiLatencyCacheMs = 3000');
     expect(managerSource).toContain('refreshWifiLatencyForDevice');
-    expect(managerSource).toContain('connectedWifiDevices');
+    // 健康轮询遍历全部已连接设备（屏幕状态 USB/WiFi 都刷），WiFi 延迟/电量仍按 connectionType 仅 WiFi 刷
+    expect(managerSource).toContain('connectedDevices');
+    expect(managerSource).toContain("refreshed.connectionType === 'wifi'");
     expect(managerSource).toContain('hasDeviceHealthChanged');
     expect(managerSource).toContain("this.execAdb(['-s', deviceId, 'get-state']");
     expect(managerSource).not.toContain('net.createConnection');
@@ -367,6 +369,23 @@ describe('project smoke checks', () => {
     expect(managerSource).toContain("this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'battery']");
     expect(managerSource).toContain('hasDeviceHealthChanged');
     expect(managerSource).toContain('previousDevice?.batteryLevel !== device.batteryLevel');
+  });
+
+  test('device card surfaces screen on/off state', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const inspectorSource = fs.readFileSync(path.join(root, 'src/main/adb/runtimeInspector.ts'), 'utf-8');
+    const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+    const typeSource = fs.readFileSync(path.join(root, 'src/shared/types/index.ts'), 'utf-8');
+
+    // 类型 + 多版本解析 + 带缓存采集 + 健康轮询纳入变更判断 + 动作后失效缓存 + 卡片徽标
+    expect(typeSource).toContain("screenState?: 'on' | 'off' | 'unknown'");
+    expect(inspectorSource).toContain('async getScreenState(deviceId: string)');
+    expect(inspectorSource).toContain('mWakefulness=');
+    expect(managerSource).toContain('refreshScreenStateForDevice');
+    expect(managerSource).toContain('screenStateCacheMs = 3000');
+    expect(managerSource).toContain('previousDevice?.screenState !== device.screenState');
+    expect(managerSource).toContain('this.screenStateCache.delete(deviceId)');
+    expect(rendererSource).toContain('renderScreenStateBadge');
   });
 
   test('renderer does not show phone text placeholders in empty states', () => {
@@ -874,8 +893,10 @@ describe('project smoke checks', () => {
       expect(source).toContain('adbManager.listInstalledPackages(deviceId)');
     }
     expect(simpleAppSource).toContain('handleUninstallApp');
-    expect(simpleAppSource).toContain('window.confirm');
-    expect(simpleAppSource).toContain('uninstallApp(selectedDevice.id, packageName)');
+    // 卸载二次确认走应用内自定义弹窗，不用原生 window.confirm（后者在 Electron 取消后会让网页丢键盘焦点）。
+    expect(simpleAppSource).not.toContain('window.confirm(');
+    expect(simpleAppSource).toContain('requestConfirm');
+    expect(simpleAppSource).toContain('uninstallApp(device.id, packageName)');
     expect(simpleAppSource).toContain('loadInstalledPackages');
     expect(simpleAppSource).toContain('已安装应用');
   });

@@ -9,7 +9,7 @@ import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
-import { initAutoUpdate, checkForUpdates, downloadUpdate, quitAndInstallUpdate } from './autoUpdate';
+import { initAutoUpdate, checkForUpdates, downloadUpdate, quitAndInstallUpdate, getLastUpdateStatus } from './autoUpdate';
 import * as fullLogRecorder from './fullLogRecorder';
 import * as transferJournal from './transferJournal';
 import {
@@ -762,6 +762,15 @@ const setupIpcHandlers = () => {
       return { success: true };
     } catch (error) {
       return toIpcErrorResponse(error, '检查更新失败');
+    }
+  });
+
+  // 渲染层挂载后拉取最近一次更新状态：补回启动自动检查时因 push 早于订阅而丢失的「有新版本」提示。
+  ipcMain.handle(IPC_CHANNELS.UPDATE_GET_STATUS, async () => {
+    try {
+      return { success: true, data: getLastUpdateStatus() };
+    } catch (error) {
+      return toIpcErrorResponse(error, '获取更新状态失败');
     }
   });
 
