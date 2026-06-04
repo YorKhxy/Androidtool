@@ -696,6 +696,65 @@ describe('project smoke checks', () => {
     expect(mediaSource).toContain('performance-recordings');
   });
 
+  test('capture session IPC contract and orchestration wired across main/preload/renderer', () => {
+    const controllerPath = path.join(root, 'src/main/performanceCaptureController.ts');
+    expect(fs.existsSync(controllerPath)).toBe(true);
+    const controllerSource = fs.readFileSync(controllerPath, 'utf-8');
+    const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+
+    // 通道常量
+    const channels = [
+      'START_CAPTURE_SESSION', 'STOP_CAPTURE_SESSION', 'LIST_CAPTURE_SESSIONS', 'LOAD_CAPTURE_SESSION',
+      'DELETE_CAPTURE_SESSION', 'RENAME_CAPTURE_SESSION', 'SAVE_CAPTURE_MARKERS', 'SAVE_CAPTURE_FRAME',
+      'CAPTURE_SAMPLE', 'CAPTURE_SIZE_LIMIT',
+    ];
+    channels.forEach((ch) => expect(channelSource).toContain(`${ch}:`));
+
+    // ADBManager 暴露采集录制方法
+    expect(managerSource).toContain('PerformanceCaptureRecorder');
+    expect(managerSource).toContain('startCaptureRecording');
+    expect(managerSource).toContain('stopCaptureRecording');
+    expect(managerSource).toContain('getCaptureProvider');
+    expect(managerSource).toContain('getDeviceSerial');
+
+    // 编排：采样循环 + 录制同启 + 软上限 30min/2GB
+    expect(controllerSource).toContain('class PerformanceCaptureController');
+    expect(controllerSource).toContain('SAMPLE_INTERVAL_MS = 1000');
+    expect(controllerSource).toContain('SOFT_LIMIT_DURATION_MS = 30 * 60 * 1000');
+    expect(controllerSource).toContain('SOFT_LIMIT_SIZE_BYTES = 2 * 1024 * 1024 * 1024');
+    expect(controllerSource).toContain('createSession');
+    expect(controllerSource).toContain('startCaptureRecording');
+    expect(controllerSource).toContain('appendSamples');
+    expect(controllerSource).toContain('CAPTURE_SAMPLE');
+    expect(controllerSource).toContain('CAPTURE_SIZE_LIMIT');
+    expect(controllerSource).toContain('finalizeSession');
+    expect(controllerSource).toContain('stopAll');
+
+    // 两入口都注册 handler + 实例化 + 退出清理
+    [indexSource, prodSource].forEach((src) => {
+      expect(src).toContain('new PerformanceCaptureController');
+      expect(src).toContain('captureController.start(deviceId)');
+      expect(src).toContain('captureController.stop(deviceId)');
+      expect(src).toContain('captureStore.listSessions()');
+      expect(src).toContain('captureStore.deleteSession(sessionId)');
+      expect(src).toContain('captureController.stopAll()');
+      expect(src).toContain('saveScreenshot');
+    });
+
+    // preload + electronApi 暴露
+    ['startCaptureSession', 'stopCaptureSession', 'listCaptureSessions', 'loadCaptureSession',
+      'deleteCaptureSession', 'renameCaptureSession', 'saveCaptureMarkers', 'saveCaptureFrame',
+      'onCaptureSample', 'onCaptureSizeLimit'].forEach((m) => {
+      expect(preloadSource).toContain(m);
+      expect(electronApiSource).toContain(m);
+    });
+  });
+
   test('network tab does not auto-trigger capture or show loading as an error toast', () => {
     const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
 

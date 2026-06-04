@@ -11,6 +11,8 @@ import { AdbCommandError, classifyAdbError } from './adbError';
 import { ResolvedAdbBinary, getBundledAdbCandidates, resolveBundledAdbBinaryPath } from './adbBinary';
 import { AdbRuntimeInspector } from './runtimeInspector';
 import { PerformanceRecordingManager } from './performanceRecording';
+import { PerformanceCaptureRecorder, type CaptureSegmentMeta } from './captureRecorder';
+import type { PerformanceCaptureProvider } from '../../shared/types';
 
 export interface PerformanceInfo {
   provider?: 'android' | 'pico';
@@ -62,6 +64,11 @@ export class ADBManager extends EventEmitter {
     (args, options) => this.execAdb(args, options),
     async () => (await this.resolveAdbBinary()).path,
     (deviceId) => this.getPerformanceMetrics(deviceId)
+  );
+  // Phase 14 持续分段录制引擎（采集会话用）。
+  private readonly captureRecorder = new PerformanceCaptureRecorder(
+    (args, options) => this.execAdb(args, options),
+    async () => (await this.resolveAdbBinary()).path
   );
   private adbBinary: ResolvedAdbBinary | null = null;
   private deviceInfoCache = new Map<string, DeviceInfo>();
@@ -1424,6 +1431,39 @@ export class ADBManager extends EventEmitter {
       options,
       isPico: this.isLikelyPicoDevice(deviceId),
     });
+  }
+
+  // —— Phase 14 采集会话：持续分段录制 —— //
+
+  isPicoDevice(deviceId: string): boolean {
+    return this.isLikelyPicoDevice(deviceId);
+  }
+
+  getDeviceSerial(deviceId: string): string {
+    return this.deviceInfoCache.get(deviceId)?.serialNo || deviceId;
+  }
+
+  getCaptureProvider(deviceId: string): PerformanceCaptureProvider {
+    return this.isLikelyPicoDevice(deviceId) ? 'pico-screenrecord' : 'android-screenrecord';
+  }
+
+  isCaptureRecording(deviceId: string): boolean {
+    return this.captureRecorder.isRecording(deviceId);
+  }
+
+  async startCaptureRecording(input: {
+    deviceId: string;
+    videoDir: string;
+    bitRateMbps?: number;
+    onSegment?: (meta: CaptureSegmentMeta) => void;
+    onSizeBytes?: (totalBytes: number) => void;
+    onError?: (error: Error) => void;
+  }): Promise<void> {
+    return this.captureRecorder.start(input);
+  }
+
+  async stopCaptureRecording(deviceId: string): Promise<void> {
+    return this.captureRecorder.stop(deviceId);
   }
 
   async getProcesses(deviceId: string): Promise<ProcessInfo[]> {

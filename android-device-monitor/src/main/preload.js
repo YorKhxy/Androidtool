@@ -10,6 +10,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopLogcat: (deviceId) => ipcRenderer.invoke('adb:stop-logcat', deviceId),
   getPerformance: (deviceId) => ipcRenderer.invoke('adb:get-performance', deviceId),
   startPerformanceRecording: (deviceId, options) => ipcRenderer.invoke('adb:start-performance-recording', deviceId, options),
+  startCaptureSession: (deviceId) => ipcRenderer.invoke('capture:start', deviceId),
+  stopCaptureSession: (deviceId) => ipcRenderer.invoke('capture:stop', deviceId),
+  listCaptureSessions: () => ipcRenderer.invoke('capture:list'),
+  loadCaptureSession: (sessionId) => ipcRenderer.invoke('capture:load', sessionId),
+  deleteCaptureSession: (sessionId) => ipcRenderer.invoke('capture:delete', sessionId),
+  renameCaptureSession: (sessionId, title) => ipcRenderer.invoke('capture:rename', sessionId, title),
+  saveCaptureMarkers: (sessionId, markers) => ipcRenderer.invoke('capture:save-markers', sessionId, markers),
+  saveCaptureFrame: (sessionId, dataUrl) => ipcRenderer.invoke('capture:save-frame', sessionId, dataUrl),
+  onCaptureSample: (callback) => {
+    const listener = (_, payload) => callback(payload);
+    ipcRenderer.on('capture:sample', listener);
+    return () => ipcRenderer.removeListener('capture:sample', listener);
+  },
+  onCaptureSizeLimit: (callback) => {
+    const listener = (_, payload) => callback(payload);
+    ipcRenderer.on('capture:size-limit', listener);
+    return () => ipcRenderer.removeListener('capture:size-limit', listener);
+  },
   getProcesses: (deviceId) => ipcRenderer.invoke('adb:get-processes', deviceId),
   getRunningPackages: (deviceId) => ipcRenderer.invoke('adb:get-running-packages', deviceId),
   connectUSB: () => ipcRenderer.invoke('adb:connect-usb'),

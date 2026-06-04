@@ -314,6 +314,24 @@ export interface PerformanceCaptureSessionDetail {
   markers: PerformanceCaptureMarker[];
 }
 
+/** 采集进行中实时推送给渲染层的单条样本（供实时曲线）。 */
+export interface CaptureSamplePayload {
+  deviceId: string;
+  sessionId: string;
+  sample: PerformanceSample;
+  /** 相对采集起点的毫秒数 */
+  elapsedMs: number;
+}
+
+/** 软上限提醒：录制时长或体积先到阈值时触发一次。 */
+export interface CaptureSizeLimitPayload {
+  deviceId: string;
+  sessionId: string;
+  reason: 'duration' | 'size';
+  durationMs: number;
+  sizeBytes: number;
+}
+
 export interface AdbStatus {
   available: boolean;
   version: string | null;

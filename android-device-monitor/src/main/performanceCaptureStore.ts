@@ -161,6 +161,15 @@ export class PerformanceCaptureStore {
     );
   }
 
+  /** 保存一帧快捷截图到会话 screenshots/，返回相对路径（供回看展示）。 */
+  async saveScreenshot(sessionId: string, pngBuffer: Buffer): Promise<string> {
+    const dir = this.getScreenshotDir(sessionId);
+    await fs.mkdir(dir, { recursive: true });
+    const fileName = `shot-${Date.now()}.png`;
+    await fs.writeFile(path.join(dir, fileName), pngBuffer);
+    return toPortablePath(path.join(CAPTURES_DIR, sessionId, 'screenshots', fileName));
+  }
+
   async deleteSession(sessionId: string): Promise<void> {
     // 二次确认在 UI 侧；这里直接递归删整个会话文件夹（video/data/screenshots 一并清除）。
     await fs.rm(this.sessionDir(sessionId), { recursive: true, force: true });

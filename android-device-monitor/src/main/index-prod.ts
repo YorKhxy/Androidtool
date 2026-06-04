@@ -9,6 +9,9 @@ import { AdbCommandError } from './adb/adbError';
 import { resolveRuntimeAppRoot } from './runtimeAppRoot';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
+import { PerformanceCaptureStore } from './performanceCaptureStore';
+import { PerformanceCaptureController } from './performanceCaptureController';
+import type { PerformanceCaptureMarker } from '../shared/types';
 import { initAutoUpdate, checkForUpdates, downloadUpdate, quitAndInstallUpdate, getLastUpdateStatus } from './autoUpdate';
 import * as fullLogRecorder from './fullLogRecorder';
 import * as transferJournal from './transferJournal';
@@ -22,6 +25,8 @@ import {
 
 let mainWindow: BrowserWindow | null = null;
 let adbManager: ADBManager;
+let captureStore: PerformanceCaptureStore;
+let captureController: PerformanceCaptureController;
 const scrcpyManager = new ScrcpyManager();
 let isCleanupComplete = false;
 let cleanupPromise: Promise<void> | null = null;
@@ -52,6 +57,9 @@ const cleanupBeforeQuit = async () => {
     clearLogQueue();
     fullLogRecorder.stopAll();
     scrcpyManager.stopAll();
+    if (captureController) {
+      await captureController.stopAll();
+    }
     if (adbManager) {
       // 先置位「退出中」：让被 SIGTERM 中断的传输保留为 transferring（可恢复），不被当成失败清出 journal。
       transferJournal.setQuitting(true);
@@ -256,6 +264,80 @@ const setupIpcHandlers = () => {
       return { success: true, data: recording };
     } catch (error) {
       return toIpcErrorResponse(error, '性能录制失败');
+    }
+  });
+
+  // —— Phase 14 采集会话 —— //
+  ipcMain.handle(IPC_CHANNELS.START_CAPTURE_SESSION, async (_event, deviceId: string) => {
+    try {
+      const session = await captureController.start(deviceId);
+      return { success: true, data: session };
+    } catch (error) {
+      return toIpcErrorResponse(error, '开始采集失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.STOP_CAPTURE_SESSION, async (_event, deviceId: string) => {
+    try {
+      const session = await captureController.stop(deviceId);
+      return { success: true, data: session };
+    } catch (error) {
+      return toIpcErrorResponse(error, '关闭采集失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LIST_CAPTURE_SESSIONS, async () => {
+    try {
+      const sessions = await captureStore.listSessions();
+      return { success: true, data: sessions };
+    } catch (error) {
+      return toIpcErrorResponse(error, '加载采集列表失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LOAD_CAPTURE_SESSION, async (_event, sessionId: string) => {
+    try {
+      const detail = await captureStore.loadSession(sessionId);
+      return { success: true, data: detail };
+    } catch (error) {
+      return toIpcErrorResponse(error, '加载采集记录失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.DELETE_CAPTURE_SESSION, async (_event, sessionId: string) => {
+    try {
+      await captureStore.deleteSession(sessionId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '删除采集记录失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RENAME_CAPTURE_SESSION, async (_event, sessionId: string, title: string) => {
+    try {
+      const session = await captureStore.renameSession(sessionId, title);
+      return { success: true, data: session };
+    } catch (error) {
+      return toIpcErrorResponse(error, '重命名采集记录失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SAVE_CAPTURE_MARKERS, async (_event, sessionId: string, markers: PerformanceCaptureMarker[]) => {
+    try {
+      await captureStore.saveMarkers(sessionId, markers);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '保存过滤标记失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SAVE_CAPTURE_FRAME, async (_event, sessionId: string, dataUrl: string) => {
+    try {
+      const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+      const relativePath = await captureStore.saveScreenshot(sessionId, Buffer.from(base64, 'base64'));
+      return { success: true, data: relativePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '保存截图失败');
     }
   });
 
@@ -780,6 +862,12 @@ const setupIpcHandlers = () => {
 
 app.whenReady().then(() => {
   adbManager = new ADBManager();
+  captureStore = new PerformanceCaptureStore(() => resolveRuntimeAppRoot(app));
+  captureController = new PerformanceCaptureController(
+    adbManager,
+    captureStore,
+    (channel, payload) => mainWindow?.webContents.send(channel, payload)
+  );
   registerPerformanceMediaProtocol(() => resolveRuntimeAppRoot(app));
   createWindow();
   setupIpcHandlers();
