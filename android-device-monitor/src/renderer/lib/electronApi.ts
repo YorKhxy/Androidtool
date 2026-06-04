@@ -11,7 +11,6 @@ import type {
   PerformanceRecording,
   PerformanceRecordingOptions,
   PerformanceSessionExportPayload,
-  PerformanceSnapshot,
   PairResult,
   DeviceFileList,
   PushProgress,
@@ -46,9 +45,7 @@ export interface ElectronAPI {
   ) => Promise<ElectronResult<undefined>>;
   stopLogcat: (deviceId: string) => Promise<ElectronResult<undefined>>;
   getPerformance: (deviceId: string) => Promise<ElectronResult<PerformanceMetrics>>;
-  capturePerformanceSnapshot: (deviceId: string, currentMetrics?: PerformanceMetrics) => Promise<ElectronResult<PerformanceSnapshot>>;
   startPerformanceRecording: (deviceId: string, options: PerformanceRecordingOptions) => Promise<ElectronResult<PerformanceRecording>>;
-  readSnapshotImage: (screenshotPath: string) => Promise<ElectronResult<string>>;
   getProcesses: (deviceId: string) => Promise<ElectronResult<ProcessInfo[]>>;
   getRunningPackages: (deviceId: string) => Promise<ElectronResult<string[]>>;
   connectUSB: () => Promise<ElectronResult<DeviceInfo[]>>;

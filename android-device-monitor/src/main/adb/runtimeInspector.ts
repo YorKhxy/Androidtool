@@ -2,10 +2,8 @@ import type { ExecFileOptions } from 'child_process';
 import type { ActivityStackEntry, PerformanceMetrics, ProcessInfo } from '../../shared/types';
 import { logger } from '../logger';
 import { PicoAppSupportResult, PicoMetricsReader } from './picoMetrics';
-import { AdbScreenshotCapture, CapturedScreenshot } from './screenshotCapture';
 
 type ExecAdbText = (args: string[], options?: ExecFileOptions) => Promise<{ stdout: string; stderr: string }>;
-type ExecAdbBuffer = (args: string[], options?: ExecFileOptions) => Promise<{ stdout: Buffer; stderr: Buffer }>;
 
 type ForegroundAppContext = {
   packageName?: string;
@@ -19,12 +17,6 @@ type DeviceFingerprint = {
   device?: string;
 };
 
-export type CapturedPerformanceSnapshot = {
-  capturedAt: Date;
-  metrics: PerformanceMetrics;
-  screenshot: CapturedScreenshot;
-};
-
 type PerformanceOptions = {
   preferPico?: boolean;
   currentMetrics?: PerformanceMetrics;
@@ -32,14 +24,9 @@ type PerformanceOptions = {
 
 export class AdbRuntimeInspector {
   private readonly picoMetricsReader: PicoMetricsReader;
-  private readonly screenshotCapture: AdbScreenshotCapture;
 
-  constructor(
-    private readonly execAdb: ExecAdbText,
-    private readonly execAdbBuffer: ExecAdbBuffer
-  ) {
+  constructor(private readonly execAdb: ExecAdbText) {
     this.picoMetricsReader = new PicoMetricsReader(this.execAdb);
-    this.screenshotCapture = new AdbScreenshotCapture(this.execAdbBuffer);
   }
 
   async getPerformanceMetrics(deviceId: string, options: PerformanceOptions = {}): Promise<PerformanceMetrics> {
@@ -209,22 +196,6 @@ export class AdbRuntimeInspector {
     if (unit.toUpperCase() === 'G') return parsed * 1024 * 1024;
     if (unit.toUpperCase() === 'M') return parsed * 1024;
     return parsed;
-  }
-
-  async capturePerformanceSnapshot(deviceId: string, options: PerformanceOptions = {}): Promise<CapturedPerformanceSnapshot> {
-    const screenState = await this.getScreenPowerState(deviceId);
-    if (!screenState.isOn) {
-      throw new Error('设备当前息屏，请先唤醒设备后再抓取性能快照。');
-    }
-
-    const metrics = options.currentMetrics || await this.getPerformanceMetrics(deviceId, options);
-    const screenshot = await this.screenshotCapture.capture(deviceId);
-
-    return {
-      capturedAt: new Date(),
-      metrics,
-      screenshot,
-    };
   }
 
   async getProcesses(deviceId: string): Promise<ProcessInfo[]> {

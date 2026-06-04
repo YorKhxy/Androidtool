@@ -211,18 +211,6 @@ export interface PerformanceMetrics {
   picoSupportMessage?: string;
 }
 
-export interface PerformanceSnapshot {
-  id: string;
-  deviceId: string;
-  capturedAt: Date;
-  metrics: PerformanceMetrics;
-  screenshotPath?: string;
-  packageName?: string;
-  activityName?: string;
-  trigger: 'manual' | 'fps_drop' | 'threshold';
-  note?: string;
-}
-
 export interface PerformanceSample {
   id: string;
   deviceId: string;
@@ -261,7 +249,6 @@ export interface PerformanceSessionExportPayload {
   startedAt: Date;
   endedAt?: Date;
   samples: PerformanceSample[];
-  snapshots: PerformanceSnapshot[];
 }
 
 export interface AdbStatus {

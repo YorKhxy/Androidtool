@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
@@ -199,7 +199,6 @@ function SimpleApp() {
   const [performanceSamplesByDeviceId, setPerformanceSamplesByDeviceId] = useState<Record<string, PerformanceSample[]>>({});
   const [performanceSessionStartedAtByDeviceId, setPerformanceSessionStartedAtByDeviceId] = useState<Record<string, Date>>({});
   const [performanceEnabledDeviceIds, setPerformanceEnabledDeviceIds] = useState<Set<string>>(() => new Set());
-  const [performanceSnapshots, setPerformanceSnapshots] = useState<PerformanceSnapshot[]>([]);
   const [performanceRecordings, setPerformanceRecordings] = useState<PerformanceRecording[]>([]);
   const [recordingDeviceIds, setRecordingDeviceIds] = useState<Set<string>>(() => new Set());
   const [installedPackages, setInstalledPackages] = useState<string[]>([]);
@@ -269,7 +268,6 @@ function SimpleApp() {
   const [batchUpdateSize, setBatchUpdateSize] = useState(BATCH_UPDATE_SIZE);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
-  const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
   const [apkInstallStates, setApkInstallStates] = useState<Record<string, DeviceApkInstallState>>({});
   const [pendingApks, setPendingApks] = useState<{ path: string; fileName: string }[]>([]);
   const [isApkDragOver, setIsApkDragOver] = useState(false); // 拖拽 APK 到待安装区时高亮
@@ -1205,40 +1203,6 @@ function SimpleApp() {
     });
   };
 
-  const capturePerformanceSnapshot = async () => {
-    if (!selectedDevice || !hasElectronAPI()) return;
-    const deviceId = selectedDevice.id;
-    const currentPerformance = performanceByDeviceId[deviceId];
-    if (!performanceEnabledDeviceIds.has(deviceId)) {
-      setPerformanceEnabledDeviceIds((previous) => new Set(previous).add(deviceId));
-      setPerformanceSamplesByDeviceId((previous) => ({ ...previous, [deviceId]: previous[deviceId] || [] }));
-      setPerformanceSessionStartedAtByDeviceId((previous) => ({ ...previous, [deviceId]: previous[deviceId] || new Date() }));
-    }
-
-    setIsCapturingSnapshot(true);
-    try {
-      const result = await window.electronAPI!.capturePerformanceSnapshot(deviceId, currentPerformance);
-      if (result.success && result.data) {
-        setPerformanceByDeviceId((previous) => ({ ...previous, [deviceId]: result.data!.metrics }));
-        setPerformanceSamplesByDeviceId((previous) => ({
-          ...previous,
-          [deviceId]: [
-            ...(previous[deviceId] || []),
-            { id: `${deviceId}-${new Date(result.data!.capturedAt).getTime()}-snapshot`, deviceId, capturedAt: result.data!.capturedAt, metrics: result.data!.metrics },
-          ].slice(-3600),
-        }));
-        setPerformanceSnapshots((previousSnapshots) => [result.data!, ...previousSnapshots].slice(0, 20));
-        setError('');
-      } else {
-        setError(result.error || '抓取性能快照失败');
-      }
-    } catch (err) {
-      setError('抓取性能快照失败：' + (err as Error).message);
-    } finally {
-      setIsCapturingSnapshot(false);
-    }
-  };
-
   const startPerformanceRecording = async (durationSeconds: 10 | 30 | 60) => {
     if (!selectedDevice || !hasElectronAPI()) return;
     const deviceId = selectedDevice.id;
@@ -1294,7 +1258,6 @@ function SimpleApp() {
       startedAt: performanceSessionStartedAtByDeviceId[selectedDevice.id] || samples[0].capturedAt,
       endedAt: new Date(),
       samples,
-      snapshots: visibleSessionSnapshots,
     });
 
     if (result.success) {
@@ -1894,20 +1857,10 @@ function SimpleApp() {
   const selectedPerformance = selectedDeviceId ? performanceByDeviceId[selectedDeviceId] || null : null;
   const selectedPerformanceSamples = selectedDeviceId ? performanceSamplesByDeviceId[selectedDeviceId] || [] : [];
   const isSelectedPerformanceEnabled = Boolean(selectedDeviceId && performanceEnabledDeviceIds.has(selectedDeviceId));
-  const visiblePerformanceSnapshots = useMemo(
-    () => performanceSnapshots.filter((snapshot) => snapshot.deviceId === selectedDeviceId),
-    [performanceSnapshots, selectedDeviceId]
-  );
   const visiblePerformanceRecordings = useMemo(
     () => performanceRecordings.filter((recording) => recording.deviceId === selectedDeviceId),
     [performanceRecordings, selectedDeviceId]
   );
-  const visibleSessionSnapshots = useMemo(() => {
-    const sessionStartedAt = selectedDeviceId ? performanceSessionStartedAtByDeviceId[selectedDeviceId] : undefined;
-    if (!sessionStartedAt) return [];
-    const sessionStartTime = new Date(sessionStartedAt).getTime();
-    return visiblePerformanceSnapshots.filter((snapshot) => new Date(snapshot.capturedAt).getTime() >= sessionStartTime);
-  }, [performanceSessionStartedAtByDeviceId, selectedDeviceId, visiblePerformanceSnapshots]);
   const getApkInstallStatusMeta = (status: ApkInstallStatus) => {
     switch (status) {
       case 'installing':
@@ -3114,14 +3067,10 @@ function SimpleApp() {
                     device={selectedDevice}
                     performance={selectedPerformance}
                     samples={selectedPerformanceSamples}
-                    snapshots={visiblePerformanceSnapshots}
-                    sessionSnapshots={visibleSessionSnapshots}
                     isMonitoringPerformance={isSelectedPerformanceEnabled}
-                    isCapturingSnapshot={isCapturingSnapshot}
                     isRecording={Boolean(selectedDeviceId && recordingDeviceIds.has(selectedDeviceId))}
                     recordings={visiblePerformanceRecordings}
                     onToggleMonitoring={togglePerformanceMonitoring}
-                    onCaptureSnapshot={capturePerformanceSnapshot}
                     onStartRecording={startPerformanceRecording}
                     onExportSession={exportPerformanceSession}
                   />

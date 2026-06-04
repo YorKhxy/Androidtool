@@ -1,84 +1,16 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import type { DeviceInfo, MetricReading, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, PicoMetricsState } from '../../shared/types';
+import type { DeviceInfo, MetricReading, PerformanceMetrics, PerformanceRecording, PerformanceSample, PicoMetricsState } from '../../shared/types';
 
 type PerformancePanelProps = {
   device: DeviceInfo | null;
   performance: PerformanceMetrics | null;
   samples: PerformanceSample[];
-  snapshots: PerformanceSnapshot[];
-  sessionSnapshots: PerformanceSnapshot[];
   isMonitoringPerformance: boolean;
-  isCapturingSnapshot: boolean;
   isRecording: boolean;
   recordings: PerformanceRecording[];
   onToggleMonitoring: () => void;
-  onCaptureSnapshot: () => void;
   onStartRecording: (durationSeconds: 10 | 30 | 60) => void;
   onExportSession: () => void;
-};
-
-const useSnapshotImageUrl = (screenshotPath?: string) => {
-  const [imageUrl, setImageUrl] = useState<string | undefined>();
-  const [loadFailed, setLoadFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setImageUrl(undefined);
-    setLoadFailed(false);
-
-    if (!screenshotPath) return;
-
-    const readSnapshotImage = window.electronAPI?.readSnapshotImage;
-    if (!readSnapshotImage) {
-      setLoadFailed(true);
-      return;
-    }
-
-    readSnapshotImage(screenshotPath).then((result) => {
-      if (cancelled) return;
-      if (result.success && result.data) {
-        setImageUrl(result.data);
-      } else {
-        setLoadFailed(true);
-      }
-    }).catch(() => {
-      if (!cancelled) {
-        setLoadFailed(true);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [screenshotPath]);
-
-  return { imageUrl, loadFailed };
-};
-
-const SnapshotImage = ({
-  screenshotPath,
-  alt,
-  style,
-}: {
-  screenshotPath?: string;
-  alt: string;
-  style: CSSProperties;
-}) => {
-  const { imageUrl, loadFailed } = useSnapshotImageUrl(screenshotPath);
-
-  if (!screenshotPath) {
-    return <div style={{ color: '#6b7280', fontSize: '12px' }}>截图不可用</div>;
-  }
-
-  if (loadFailed) {
-    return <div style={{ color: '#fca5a5', fontSize: '12px' }}>截图加载失败</div>;
-  }
-
-  if (!imageUrl) {
-    return <div style={{ color: '#6b7280', fontSize: '12px' }}>截图加载中...</div>;
-  }
-
-  return <img src={imageUrl} alt={alt} style={style} />;
 };
 
 const renderMetricCard = (
@@ -120,11 +52,6 @@ const formatMetricReading = (metric?: MetricReading, fallback = '--') => {
 };
 
 const formatMemoryMb = (memoryKb: number) => (memoryKb / 1024).toFixed(1);
-
-const renderSnapshotPath = (snapshot: PerformanceSnapshot) =>
-  snapshot.screenshotPath ? (
-    <div style={{ marginTop: '8px', color: '#6b7280', fontSize: '11px', wordBreak: 'break-all' }}>{snapshot.screenshotPath}</div>
-  ) : null;
 
 const renderAndroidMetrics = (performance: PerformanceMetrics | null) => (
   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
@@ -262,38 +189,10 @@ const renderPicoFallbackMetrics = (performance: PerformanceMetrics | null) => (
   </div>
 );
 
-const renderAndroidSnapshotSummary = (snapshot: PerformanceSnapshot) => (
-  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '6px', fontSize: '12px' }}>
-    <div style={{ color: '#93c5fd' }}>{`CPU ${snapshot.metrics.cpuUsage.toFixed(1)}%`}</div>
-    <div style={{ color: '#86efac' }}>{`MEM ${formatMemoryMb(snapshot.metrics.memoryUsage)}MB`}</div>
-    <div style={{ color: '#d8b4fe' }}>{`FPS ${snapshot.metrics.fps}`}</div>
-  </div>
-);
-
-const renderPicoSnapshotSummary = (snapshot: PerformanceSnapshot) => {
-  const pico = snapshot.metrics.picoMetrics;
-  if (snapshot.metrics.picoMetricsState && snapshot.metrics.picoMetricsState !== 'native') {
-    return renderAndroidSnapshotSummary(snapshot);
-  }
-
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px', fontSize: '12px' }}>
-      <div style={{ color: '#d8b4fe' }}>{`FPS ${formatMetricReading(pico?.fps)}`}</div>
-      <div style={{ color: '#93c5fd' }}>{`CPU ${snapshot.metrics.cpuUsage.toFixed(1)}%`}</div>
-      <div style={{ color: '#86efac' }}>{`MEM ${(snapshot.metrics.memoryUsage / 1024).toFixed(1)}MB`}</div>
-      <div style={{ color: '#93c5fd' }}>{`MTP ${formatMetricReading(pico?.mtp)}`}</div>
-      <div style={{ color: '#86efac' }}>{`FrmCpu ${formatMetricReading(pico?.frameCpu)}`}</div>
-      <div style={{ color: '#f97316' }}>{`FrmGpu ${formatMetricReading(pico?.frameGpu)}`}</div>
-      <div style={{ color: '#facc15' }}>{`ATWGPU ${formatMetricReading(pico?.atwGpu)}`}</div>
-      <div style={{ color: '#ec4899' }}>{`GPU ${formatMetricReading(pico?.gpuUtil)}`}</div>
-    </div>
-  );
-};
-
 const getPicoIntroText = (performance: PerformanceMetrics | null) => {
   return performance?.picoMetricsState === 'native'
-    ? 'Pico 性能指标会和当前设备画面一起保存到快照。'
-    : '当前显示 Pico 性能回退采样，可抓取快照记录现场。';
+    ? 'Pico 官方指标采集中，曲线会实时记录本次采集的指标时间线。'
+    : '当前显示 Pico 性能回退采样，曲线会实时记录本次采集的指标时间线。';
 };
 
 const isLikelyPicoDevice = (device: DeviceInfo | null) => {
@@ -487,23 +386,13 @@ const buildPoints = (
   }).join(' ');
 };
 
-const findNearestSample = (samples: PerformanceSample[], snapshot: PerformanceSnapshot) => {
-  const snapshotTime = new Date(snapshot.capturedAt).getTime();
-  return samples.reduce<{ sample: PerformanceSample; index: number; delta: number } | null>((nearest, sample, index) => {
-    const delta = Math.abs(new Date(sample.capturedAt).getTime() - snapshotTime);
-    return !nearest || delta < nearest.delta ? { sample, index, delta } : nearest;
-  }, null);
-};
-
-const renderSessionReport = (samples: PerformanceSample[], snapshots: PerformanceSnapshot[]) => {
-  const [hoveredSnapshotId, setHoveredSnapshotId] = useState<string | null>(null);
+const renderSessionReport = (samples: PerformanceSample[]) => {
   const [hoverPoint, setHoverPoint] = useState<HoverPoint | null>(null);
   // 选中的曲线 key 集合：空集 = 全显；非空 = 只显示集合内的。点图例：全显时首点=只看它，
   // 之后点别的=多选追加，点已选的=取消，删空回到全显。
   const [selectedSeriesKeys, setSelectedSeriesKeys] = useState<Set<string>>(new Set());
   const width = 720;
   const height = 220;
-  const hoveredSnapshot = snapshots.find((snapshot) => snapshot.id === hoveredSnapshotId);
   const memoryValues = samples.map((sample) => Number(formatMemoryMb(sample.metrics.memoryUsage))).filter(Number.isFinite);
   const memoryMax = Math.max(1, ...memoryValues);
   const memoryAxisMax = Math.ceil(memoryMax / 512) * 512;
@@ -523,12 +412,9 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
       return next; // 删到空集会自动回到全显
     });
   const visibleSeries = series.filter((s) => isSeriesVisible(s.key));
-  const snapshotMarkers = snapshots
-    .map((snapshot, index) => ({ snapshot, label: `S${index + 1}`, nearest: findNearestSample(samples, snapshot) }))
-    .filter((marker): marker is { snapshot: PerformanceSnapshot; label: string; nearest: { sample: PerformanceSample; index: number; delta: number } } => Boolean(marker.nearest));
 
   if (samples.length === 0) {
-    return <div style={{ color: '#6b7280', fontSize: '13px' }}>开启采集后，这里会显示本次采集曲线和快照标记。</div>;
+    return <div style={{ color: '#6b7280', fontSize: '13px' }}>开启采集后，这里会显示本次采集的指标曲线。</div>;
   }
 
   const plotWidth = width - chartPadding.left - chartPadding.right;
@@ -560,7 +446,6 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
         onMouseMove={(event) => updateHoverPoint(event.clientX, event.clientY, event.currentTarget)}
         onMouseLeave={() => {
           setHoverPoint(null);
-          setHoveredSnapshotId(null);
         }}
         style={{ width: '100%', height: '280px', background: '#0f172a', borderRadius: '10px' }}
       >
@@ -619,21 +504,6 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
             </g>,
           ];
         })}
-        {snapshotMarkers.map(({ snapshot, label, nearest }) => {
-          const x = chartPadding.left + (samples.length === 1 ? 0 : (nearest.index / (samples.length - 1)) * plotWidth);
-          const y = chartPadding.top + plotHeight - (Math.max(0, nearest.sample.metrics.fps) / leftAxisMax) * plotHeight;
-          return (
-            <g
-              key={snapshot.id}
-              onMouseEnter={() => setHoveredSnapshotId(snapshot.id)}
-              onMouseMove={(event) => updateHoverPoint(event.clientX, event.clientY, event.currentTarget.ownerSVGElement!)}
-              style={{ cursor: 'pointer' }}
-            >
-              <circle cx={x} cy={y} r="6" fill="#f59e0b" stroke="#fff" strokeWidth="2" />
-              <text x={x + 8} y={y - 8} fill="#fbbf24" fontSize="12">{label}</text>
-            </g>
-          );
-        })}
         <text x={chartPadding.left} y="16" fill="#94a3b8" fontSize="11">% / FPS</text>
         <text x={chartPadding.left + plotWidth - 32} y="16" fill="#86efac" fontSize="11">MEM MB</text>
         {series.map((item, index) => {
@@ -648,14 +518,7 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
           );
         })}
       </svg>
-      {hoveredSnapshot && (
-        <div style={{ position: 'absolute', left: `${hoverPoint?.x || 16}px`, top: `${hoverPoint?.y || 16}px`, width: '220px', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '8px', padding: '8px', boxShadow: '0 12px 30px rgba(0,0,0,0.35)', pointerEvents: 'none', zIndex: 2 }}>
-          <SnapshotImage screenshotPath={hoveredSnapshot.screenshotPath} alt={hoveredSnapshot.id} style={{ width: '100%', maxHeight: '120px', objectFit: 'cover', borderRadius: '6px' }} />
-          <div style={{ color: '#fff', fontSize: '12px', marginTop: '6px' }}>{new Date(hoveredSnapshot.capturedAt).toLocaleString('zh-CN', { hour12: false })}</div>
-          <div style={{ color: '#94a3b8', fontSize: '12px' }}>{`FPS ${hoveredSnapshot.metrics.fps} / CPU ${hoveredSnapshot.metrics.cpuUsage.toFixed(1)}% / MEM ${formatMemoryMb(hoveredSnapshot.metrics.memoryUsage)}MB`}</div>
-        </div>
-      )}
-      {hoverPoint && !hoveredSnapshot && (
+      {hoverPoint && (
         <div style={{ position: 'absolute', left: `${hoverPoint.x}px`, top: `${hoverPoint.y}px`, backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '8px', padding: '8px 10px', boxShadow: '0 12px 30px rgba(0,0,0,0.35)', pointerEvents: 'none', zIndex: 1 }}>
           <div style={{ color: '#fff', fontSize: '12px', marginBottom: '4px' }}>{new Date(hoverPoint.sample.capturedAt).toLocaleString('zh-CN', { hour12: false })}</div>
           {getSampleValues(hoverPoint.sample).map((line) => <div key={line} style={{ color: '#cbd5e1', fontSize: '12px' }}>{line}</div>)}
@@ -669,21 +532,16 @@ export function PerformancePanel({
   device,
   performance,
   samples,
-  snapshots,
-  sessionSnapshots,
   isMonitoringPerformance,
-  isCapturingSnapshot,
   isRecording,
   recordings,
   onToggleMonitoring,
-  onCaptureSnapshot,
   onStartRecording,
   onExportSession,
 }: PerformancePanelProps) {
   const isPicoView = performance?.provider === 'pico' || (!performance && isLikelyPicoDevice(device));
   const picoMetricsState: PicoMetricsState = performance?.picoMetricsState || 'native';
   const showPicoFallback = isPicoView && picoMetricsState !== 'native';
-  const [previewSnapshot, setPreviewSnapshot] = useState<PerformanceSnapshot | null>(null);
   const [previewRecording, setPreviewRecording] = useState<PerformanceRecording | null>(null);
   const [recordingPlaybackTime, setRecordingPlaybackTime] = useState(0);
   const [previewVideoSize, setPreviewVideoSize] = useState<{ width: number; height: number } | null>(null);
@@ -694,16 +552,15 @@ export function PerformancePanel({
   }, [previewRecording]);
 
   useEffect(() => {
-    if (!previewSnapshot && !previewRecording) return;
+    if (!previewRecording) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setPreviewSnapshot(null);
         setPreviewRecording(null);
       }
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [previewSnapshot, previewRecording]);
+  }, [previewRecording]);
 
   const previewRecordingMediaUrl = previewRecording ? buildRecordingMediaUrl(previewRecording) : undefined;
   const previewRecordingSample = previewRecording ? findRecordingSampleAt(previewRecording, recordingPlaybackTime) : null;
@@ -735,7 +592,7 @@ export function PerformancePanel({
             {isMonitoringPerformance
               ? isPicoView
                 ? getPicoIntroText(performance)
-                : '当前设备性能采集中，可以抓取快照或录制一段带指标时间线的视频。'
+                : '当前设备性能采集中，曲线会实时记录本次采集的指标时间线。'
               : '性能采集已关闭。点击开启后才会获取当前设备的性能参数。'}
           </div>
           <div style={{ color: '#64748b', fontSize: '12px' }}>
@@ -763,21 +620,6 @@ export function PerformancePanel({
             </button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))', gap: '8px' }}>
-            <button
-              onClick={onCaptureSnapshot}
-              disabled={isCapturingSnapshot}
-              style={{
-                padding: '9px 12px',
-                backgroundColor: isCapturingSnapshot ? '#4b5563' : '#4a90d9',
-                border: 'none',
-                borderRadius: '6px',
-                color: 'white',
-                cursor: isCapturingSnapshot ? 'not-allowed' : 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {isCapturingSnapshot ? '抓取中...' : '抓取快照'}
-            </button>
             <button
               onClick={onExportSession}
               disabled={samples.length === 0}
@@ -833,81 +675,9 @@ export function PerformancePanel({
       <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '14px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
           <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>本次采集报告</div>
-          <div style={{ fontSize: '12px', color: '#94a3b8' }}>{`采样 ${samples.length} 条 / 快照 ${sessionSnapshots.length} 张`}</div>
+          <div style={{ fontSize: '12px', color: '#94a3b8' }}>{`采样 ${samples.length} 条`}</div>
         </div>
-        {renderSessionReport(samples, sessionSnapshots)}
-      </div>
-
-      <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '14px' }}>
-        <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '12px' }}>性能快照</div>
-        {snapshots.length === 0 ? (
-          <div style={{ color: '#6b7280', fontSize: '13px' }}>还没有快照，先抓一张看看当时的页面和指标。</div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
-            {snapshots.map((snapshot) => {
-              const isPicoSnapshot = snapshot.metrics.provider === 'pico';
-              return (
-                <div
-                  key={snapshot.id}
-                  onClick={() => {
-                    if (snapshot.screenshotPath) {
-                      setPreviewSnapshot(snapshot);
-                    }
-                  }}
-                  style={{
-                    backgroundColor: '#202038',
-                    borderRadius: '8px',
-                    overflow: 'hidden',
-                    cursor: snapshot.screenshotPath ? 'zoom-in' : 'default',
-                  }}
-                  title={snapshot.screenshotPath ? '点击查看大图' : undefined}
-                >
-                  <div
-                    style={{
-                      height: '124px',
-                      backgroundColor: '#111827',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: isPicoSnapshot ? 'flex-start' : 'center',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {snapshot.screenshotPath ? (
-                      <SnapshotImage
-                        screenshotPath={snapshot.screenshotPath}
-                        alt={`snapshot-${snapshot.id}`}
-                        style={
-                          isPicoSnapshot
-                            ? {
-                                width: '200%',
-                                minWidth: '200%',
-                                height: '100%',
-                                objectFit: 'cover',
-                                objectPosition: 'left center',
-                                flexShrink: 0,
-                              }
-                            : { width: '100%', height: '100%', objectFit: 'cover' }
-                        }
-                      />
-                    ) : (
-                      <div style={{ color: '#6b7280', fontSize: '12px' }}>截图不可用</div>
-                    )}
-                  </div>
-                  <div style={{ padding: '12px' }}>
-                    <div style={{ color: '#fff', fontSize: '13px', marginBottom: '6px' }}>
-                      {new Date(snapshot.capturedAt).toLocaleString('zh-CN', { hour12: false })}
-                    </div>
-                    <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '8px' }}>
-                      {snapshot.trigger === 'manual' ? '手动快照' : snapshot.trigger}
-                    </div>
-                    {isPicoSnapshot ? renderPicoSnapshotSummary(snapshot) : renderAndroidSnapshotSummary(snapshot)}
-                    {renderSnapshotPath(snapshot)}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {renderSessionReport(samples)}
       </div>
 
       <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '14px' }}>
@@ -1008,87 +778,6 @@ export function PerformancePanel({
           </div>
         )}
       </div>
-      {previewSnapshot && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="性能快照大图预览"
-          onClick={() => setPreviewSnapshot(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1000,
-            backgroundColor: 'rgba(5, 8, 15, 0.88)',
-            display: 'flex',
-            flexDirection: 'column',
-            padding: '24px',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '16px',
-              color: '#e5e7eb',
-              marginBottom: '16px',
-            }}
-          >
-            <div>
-              <div style={{ fontSize: '15px', fontWeight: 600 }}>性能快照大图</div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
-                {new Date(previewSnapshot.capturedAt).toLocaleString('zh-CN', { hour12: false })}
-              </div>
-            </div>
-            <button
-              onClick={(event) => {
-                event.stopPropagation();
-                setPreviewSnapshot(null);
-              }}
-              style={{
-                width: '36px',
-                height: '36px',
-                border: '1px solid #475569',
-                borderRadius: '6px',
-                backgroundColor: '#111827',
-                color: '#e5e7eb',
-                cursor: 'pointer',
-                fontSize: '20px',
-                lineHeight: '20px',
-              }}
-              aria-label="关闭大图预览"
-            >
-              ×
-            </button>
-          </div>
-          <div
-            onClick={(event) => event.stopPropagation()}
-            style={{
-              flex: 1,
-              minHeight: 0,
-              backgroundColor: '#020617',
-              border: '1px solid #1f2937',
-              borderRadius: '8px',
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <SnapshotImage
-              screenshotPath={previewSnapshot.screenshotPath}
-              alt={`snapshot-preview-${previewSnapshot.id}`}
-              style={{
-                maxWidth: '100%',
-                maxHeight: '100%',
-                width: 'auto',
-                height: 'auto',
-                objectFit: 'contain',
-              }}
-            />
-          </div>
-        </div>
-      )}
       {previewRecording && previewRecordingMediaUrl && (
         <div
           role="dialog"

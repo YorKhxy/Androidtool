@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 import type { LogEntry } from '../shared/types';
 import { logger } from './logger';
-import { resolveRuntimeAppRoot } from './performanceSnapshots';
+import { resolveRuntimeAppRoot } from './runtimeAppRoot';
 
 // 完整日志落盘：把 logcat 抓到的每一条（全等级、从监控第一行起）实时写进会话文件。
 // 不受渲染层「每设备最多 2 万条」UI 上限影响，也先于主进程→渲染层的背压队列，因此能保证

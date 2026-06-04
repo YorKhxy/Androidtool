@@ -9,7 +9,7 @@ import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceI
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
 import { ResolvedAdbBinary, getBundledAdbCandidates, resolveBundledAdbBinaryPath } from './adbBinary';
-import { AdbRuntimeInspector, CapturedPerformanceSnapshot } from './runtimeInspector';
+import { AdbRuntimeInspector } from './runtimeInspector';
 import { PerformanceRecordingManager } from './performanceRecording';
 
 export interface PerformanceInfo {
@@ -56,8 +56,7 @@ const execFileAsync = promisify(execFile);
 
 export class ADBManager extends EventEmitter {
   private readonly runtimeInspector = new AdbRuntimeInspector(
-    (args, options) => this.execAdb(args, options),
-    (args, options) => this.execAdbBuffer(args, options)
+    (args, options) => this.execAdb(args, options)
   );
   private readonly performanceRecordingManager = new PerformanceRecordingManager(
     (args, options) => this.execAdb(args, options),
@@ -1414,13 +1413,6 @@ export class ADBManager extends EventEmitter {
     throw this.createRebootError(result);
   }
 
-  async capturePerformanceSnapshot(deviceId: string, currentMetrics?: PerformanceMetrics): Promise<CapturedPerformanceSnapshot> {
-    return this.runtimeInspector.capturePerformanceSnapshot(deviceId, {
-      preferPico: this.isLikelyPicoDevice(deviceId),
-      currentMetrics,
-    });
-  }
-
   async startPerformanceRecording(
     deviceId: string,
     baseDir: string,
@@ -1874,52 +1866,6 @@ export class ADBManager extends EventEmitter {
         stdout: result.stdout.toString(),
         stderr: result.stderr.toString(),
       };
-    } catch (error) {
-      const adbError = classifyAdbError(error, args);
-      if (adbError.code === 'ADB_NOT_FOUND') {
-        this.adbBinary = null;
-        this.updateAdbStatus({
-          available: false,
-          version: null,
-          path: null,
-          source: undefined,
-          message: adbError.message,
-          checkedAt: Date.now(),
-          code: adbError.code,
-          hint: adbError.hint,
-        });
-      }
-      throw adbError;
-    }
-  }
-
-  private async execAdbBuffer(args: string[], options?: ExecFileOptions): Promise<{ stdout: Buffer; stderr: Buffer }> {
-    const adbBinary = await this.resolveAdbBinary();
-    try {
-      const result = await new Promise<{ stdout: Buffer; stderr: Buffer }>((resolve, reject) => {
-        execFile(
-          adbBinary.path,
-          args,
-          { ...options, encoding: 'buffer' } as ExecFileOptions,
-          (error, stdout, stderr) => {
-            if (error) {
-              reject(error);
-              return;
-            }
-
-            resolve({
-              stdout: Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout as string),
-              stderr: Buffer.isBuffer(stderr) ? stderr : Buffer.from(stderr as string),
-            });
-          }
-        );
-      });
-
-      if (!this.adbStatus.available) {
-        void this.getAdbStatus(true);
-      }
-
-      return result;
     } catch (error) {
       const adbError = classifyAdbError(error, args);
       if (adbError.code === 'ADB_NOT_FOUND') {

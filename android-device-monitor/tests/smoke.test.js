@@ -507,148 +507,6 @@ describe('project smoke checks', () => {
     expect(managerSource).not.toContain('Network capture failed. tcpdump may be missing or require elevated device permissions');
   });
 
-  test('manual performance snapshots save screenshot artifacts and renderer surfaces snapshot history', () => {
-    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/runtimeInspector.ts'), 'utf-8');
-    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
-    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
-    const snapshotStoreSource = fs.readFileSync(path.join(root, 'src/main/performanceSnapshots.ts'), 'utf-8');
-    const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/components/PerformancePanel.tsx'), 'utf-8');
-    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
-    const exportSource = fs.readFileSync(path.join(root, 'src/main/performanceSessionExport.ts'), 'utf-8');
-    const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
-    const typeSource = fs.readFileSync(path.join(root, 'src/shared/types/index.ts'), 'utf-8');
-
-    expect(managerSource).toContain('AdbScreenshotCapture');
-    expect(managerSource).toContain('this.screenshotCapture.capture(deviceId)');
-    expect(managerSource).not.toContain("'exec-out', 'screencap', '-p'");
-    expect(fs.existsSync(path.join(root, 'src/main/adb/screenshotCapture.ts'))).toBe(true);
-    const screenshotSource = fs.readFileSync(path.join(root, 'src/main/adb/screenshotCapture.ts'), 'utf-8');
-    expect(screenshotSource).toContain("'adb-raw-framebuffer'");
-    expect(screenshotSource).toContain("'adb-png-screencap'");
-    expect(screenshotSource).toContain("['-s', deviceId, 'exec-out', 'screencap']");
-    expect(screenshotSource).toContain("['-s', deviceId, 'exec-out', 'screencap', '-p']");
-    expect(screenshotSource).toContain('decodeRawScreencap');
-    expect(screenshotSource).toContain('convertRawPixelsToElectronBitmap');
-    expect(managerSource).toContain('capturePerformanceSnapshot');
-    expect(managerSource).toContain('currentMetrics?: PerformanceMetrics');
-    expect(managerSource.indexOf('const screenState = await this.getScreenPowerState(deviceId)')).toBeLessThan(
-      managerSource.indexOf('options.currentMetrics || await this.getPerformanceMetrics')
-    );
-    expect(managerSource).toContain("'dumpsys', 'power'");
-    expect(managerSource).toContain('设备当前息屏，请先唤醒设备后再抓取性能快照。');
-    expect(managerSource).not.toContain('screenshotSkippedReason');
-    expect(managerSource).not.toContain('capturePicoSystemScreenshot');
-    expect(managerSource).not.toContain("'shell', 'input', 'keyevent', '120'");
-    expect(managerSource).not.toContain('listScreenshotCandidates');
-    expect(managerSource).toContain("return identity.includes('pico')");
-    expect(managerSource).toContain('parseCpuUsage');
-    expect(managerSource).toContain('parseMemoryUsage');
-    expect(managerSource).toContain('Used RAM');
-    expect(snapshotStoreSource).toContain('performance-snapshots');
-    expect(snapshotStoreSource).toContain('formatDateFolder');
-    expect(snapshotStoreSource).toContain('resolveRuntimeAppRoot');
-    expect(snapshotStoreSource).toContain('path.dirname(process.execPath)');
-    expect(snapshotStoreSource).toContain('buildAnnotatedSnapshotImage');
-    expect(snapshotStoreSource).toContain('nativeImage.createFromBitmap');
-    expect(snapshotStoreSource).toContain('nativeImage.createFromBuffer');
-    expect(snapshotStoreSource).not.toContain('SCREEN OFF - SCREENSHOT SKIPPED');
-    expect(snapshotStoreSource).not.toContain('NO WAKEUP CAPTURE');
-    expect(snapshotStoreSource).toContain('baseImage.crop');
-    expect(snapshotStoreSource).toContain('buildSnapshotMetricLines');
-    expect(snapshotStoreSource).toContain('CPU USAGE');
-    expect(snapshotStoreSource).toContain('formatMemoryMb');
-    expect(snapshotStoreSource).not.toContain("formatMetricValue(metrics.memoryUsage, 'KB')");
-    expect(snapshotStoreSource).not.toContain('metrics.networkSpeed');
-    expect(indexSource).toContain('CAPTURE_PERFORMANCE_SNAPSHOT');
-    expect(indexSource).toContain('resolveRuntimeAppRoot(app)');
-    expect(indexSource).not.toContain("app.getPath('userData')");
-    expect(preloadSource).toContain('capturePerformanceSnapshot');
-    expect(preloadSource).toContain('currentMetrics');
-    expect(typeSource).toContain("trigger: 'manual' | 'fps_drop' | 'threshold'");
-    expect(typeSource).toContain('screenshotPath?: string');
-    expect(typeSource).not.toContain('screenshotSkippedReason?: string');
-    expect(typeSource).not.toContain('networkSpeed: number');
-    expect(rendererSource).toContain('抓取快照');
-    expect(rendererSource).toContain('性能快照');
-    expect(simpleAppSource).toContain('const deviceId = selectedDevice.id');
-    expect(simpleAppSource).toContain('const currentPerformance = performanceByDeviceId[deviceId]');
-    expect(simpleAppSource).not.toContain('请先开启当前设备的性能采集，再抓取性能快照。');
-    expect(simpleAppSource).toContain('capturePerformanceSnapshot(deviceId, currentPerformance)');
-    expect(simpleAppSource).toContain("id: `${deviceId}-${new Date(result.data!.capturedAt).getTime()}-snapshot`");
-    expect(rendererSource).toContain('开启采集');
-    expect(rendererSource).toContain('关闭采集');
-    expect(rendererSource).toContain('本次采集报告');
-    // 曲线图：图例可点切换可见性（多选），可见曲线标峰谷
-    expect(rendererSource).toContain('selectedSeriesKeys');
-    expect(rendererSource).toContain('toggleSeries');
-    expect(rendererSource).toContain('visibleSeries');
-    expect(rendererSource).toContain('波峰');
-    expect(rendererSource).toContain('hoveredSnapshotId');
-    expect(rendererSource).toContain('hoverPoint');
-    expect(rendererSource).toContain('getSampleValues');
-    expect(rendererSource).toContain('updateHoverPoint');
-    expect(rendererSource).toContain('previewSnapshot');
-    expect(rendererSource).toContain('useEffect');
-    expect(rendererSource).toContain("window.addEventListener('keydown', closeOnEscape)");
-    expect(rendererSource).toContain('onClick');
-    expect(rendererSource).toContain('点击查看大图');
-    expect(rendererSource).toContain('性能快照大图预览');
-    expect(rendererSource).toContain('snapshot-preview-');
-    expect(rendererSource).toContain('关闭大图预览');
-    expect(rendererSource).toContain("event.key === 'Escape'");
-    expect(rendererSource).not.toContain('isPicoPreview');
-    expect(simpleAppSource).toContain('visibleSessionSnapshots');
-    expect(simpleAppSource).toContain('new Date(snapshot.capturedAt).getTime() >= sessionStartTime');
-    expect(rendererSource).toContain('MEM MB');
-    expect(rendererSource).toContain('GPU%');
-    expect(rendererSource).toContain('memoryAxisMax');
-    expect(rendererSource).not.toContain('networkSpeed');
-    expect(rendererSource).toContain('导出报告');
-    expect(simpleAppSource).toContain('performanceSamplesByDeviceId');
-    expect(simpleAppSource).toContain('exportPerformanceSession');
-    expect(exportSource).toContain('buildPerformanceSessionWorkbook');
-    expect(exportSource).toContain('<?mso-application progid="Excel.Sheet"?>');
-    expect(exportSource).toContain("worksheet('Summary'");
-    expect(exportSource).toContain('Raw Data');
-    expect(exportSource).toContain('GPU %');
-    expect(exportSource).toContain('Pico Raw Line');
-    expect(exportSource).toContain('Snapshots');
-    expect(exportSource).not.toContain("worksheet('Chart Data'");
-    expect(exportSource).not.toContain("worksheet('Pico Metrics'");
-    expect(exportSource).not.toContain('buildPicoRows');
-    expect(exportSource).not.toContain('NET KB/s');
-    expect(exportSource).not.toContain('networkSpeed');
-    expect(exportSource).toContain('snapshotMarkerForSample');
-    expect(exportSource).toContain("'Time', 'FPS', 'CPU %', 'MEM MB', 'GPU %', 'MTP', 'FrmCpu', 'FrmGpu', 'ATWGPU'");
-    expect(exportSource).toContain("'Provider', 'Package', 'Activity', 'Snapshot Marker', 'Pico Raw Line'");
-    expect(exportSource.indexOf("'MEM MB'")).toBeLessThan(exportSource.indexOf("'GPU %'"));
-    expect(channelSource).toContain('EXPORT_PERFORMANCE_SESSION');
-    expect(rendererSource).toContain('性能采集已关闭。点击开启后才会获取当前设备的性能参数。');
-    expect(rendererSource).not.toContain('screenshotSkippedReason');
-    expect(rendererSource).toContain('CPU 占用率');
-    expect(rendererSource).toContain('内存占用');
-    expect(rendererSource).not.toContain("'GPU',\n        'GPU 使用率'");
-    expect(rendererSource).toContain('formatMemoryMb');
-    expect(rendererSource).not.toContain("'KB'");
-    const picoMetricsSource = rendererSource.slice(
-      rendererSource.indexOf('const renderPicoMetrics'),
-      rendererSource.indexOf('const renderPicoFallbackMetrics')
-    );
-    expect(picoMetricsSource.indexOf('Pico 实时帧率')).toBeGreaterThanOrEqual(0);
-    expect(picoMetricsSource.indexOf('CPU 占用率')).toBeGreaterThanOrEqual(0);
-    expect(picoMetricsSource.indexOf('内存占用')).toBeGreaterThanOrEqual(0);
-    expect(picoMetricsSource.indexOf('GPU 利用率')).toBeGreaterThanOrEqual(0);
-    expect(picoMetricsSource.indexOf('Pico 实时帧率')).toBeLessThan(picoMetricsSource.indexOf('CPU 占用率'));
-    expect(picoMetricsSource.indexOf('CPU 占用率')).toBeLessThan(picoMetricsSource.indexOf('内存占用'));
-    expect(picoMetricsSource.indexOf('内存占用')).toBeLessThan(picoMetricsSource.indexOf('GPU 利用率'));
-    expect(rendererSource).toContain("width: '200%'");
-    expect(rendererSource).toContain("minWidth: '200%'");
-    expect(rendererSource).toContain("objectPosition: 'left center'");
-    expect(rendererSource).toContain("justifyContent: isPicoSnapshot ? 'flex-start' : 'center'");
-    expect(rendererSource).toContain("justifyContent: 'center'");
-    expect(simpleAppSource).toContain('setPerformanceSnapshots');
-  });
-
   test('performance recording uses provider-specific screenrecord flow and surfaces recordings in renderer', () => {
     const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
     const recordingSource = fs.readFileSync(path.join(root, 'src/main/adb/performanceRecording.ts'), 'utf-8');
@@ -719,9 +577,9 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('recordingDeviceIds');
     expect(simpleAppSource).toContain('startPerformanceRecording');
     expect(simpleAppSource).toContain('bitRateMbps: 8');
-    expect(simpleAppSource).not.toContain('请先开启当前设备的性能采集，再抓取性能快照。');
-    expect(simpleAppSource).toContain('capturePerformanceSnapshot(deviceId, currentPerformance)');
-    expect(simpleAppSource).toContain("id: `${deviceId}-${new Date(result.data!.capturedAt).getTime()}-snapshot`");
+    // 性能快照已在 Phase 14 移除：相关链路不应再出现
+    expect(simpleAppSource).not.toContain('capturePerformanceSnapshot');
+    expect(simpleAppSource).not.toContain('setPerformanceSnapshots');
     expect(rendererSource).toContain('onStartRecording');
     expect(rendererSource).toContain('recordings');
     expect(rendererSource).toContain('Pico SDK');
@@ -745,17 +603,15 @@ describe('project smoke checks', () => {
     expect(rendererSource).toContain("getRecordingVideoStyle(false, 'contain')");
     expect(rendererSource).toContain('{renderRecordingMetricOverlay(firstSample, true)}');
     expect(rendererSource).toContain('{renderRecordingMetricOverlay(previewRecordingSample)}');
-    expect(rendererSource).toContain('disabled={isCapturingSnapshot}');
-    expect(rendererSource).not.toContain('disabled={isCapturingSnapshot || !performance}');
     expect(rendererSource).toContain('性能录制播放预览');
     expect(rendererSource).toContain('关闭录制播放');
     expect(rendererSource).not.toContain('recording.videoPath &&');
     expect(rendererSource).not.toContain('recording.manifestPath &&');
-    const snapshotSectionIndex = rendererSource.indexOf('>性能快照</div>');
+    // 性能快照 UI 已在 Phase 14 移除
+    expect(rendererSource).not.toContain('>性能快照</div>');
+    expect(rendererSource).not.toContain('isCapturingSnapshot');
     const recordingSectionIndex = rendererSource.indexOf('>性能录制</div>');
-    expect(snapshotSectionIndex).toBeGreaterThanOrEqual(0);
     expect(recordingSectionIndex).toBeGreaterThanOrEqual(0);
-    expect(snapshotSectionIndex).toBeLessThan(recordingSectionIndex);
   });
 
   test('network tab does not auto-trigger capture or show loading as an error toast', () => {

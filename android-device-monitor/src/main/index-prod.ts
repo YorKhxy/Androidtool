@@ -4,9 +4,9 @@ import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
 import { ScrcpyManager } from './scrcpy/scrcpyManager';
-import { LogEntry, MirrorStartOptions, PerformanceMetrics, PerformanceRecordingOptions, PerformanceSessionExportPayload } from '../shared/types';
+import { LogEntry, MirrorStartOptions, PerformanceRecordingOptions, PerformanceSessionExportPayload } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
-import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
+import { resolveRuntimeAppRoot } from './runtimeAppRoot';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
 import { initAutoUpdate, checkForUpdates, downloadUpdate, quitAndInstallUpdate, getLastUpdateStatus } from './autoUpdate';
@@ -116,20 +116,6 @@ const toIpcErrorResponse = (error: unknown, fallbackMessage: string) => {
     success: false,
     error: error instanceof Error ? error.message : fallbackMessage,
   };
-};
-
-const readSnapshotImageAsDataUrl = async (screenshotPath: string) => {
-  const appRoot = resolveRuntimeAppRoot(app);
-  const snapshotRoot = path.resolve(appRoot, 'performance-snapshots');
-  const resolvedPath = path.resolve(screenshotPath);
-  const relativePath = path.relative(snapshotRoot, resolvedPath);
-
-  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-    throw new Error('快照图片路径不在允许目录内');
-  }
-
-  const image = await fs.readFile(resolvedPath);
-  return `data:image/png;base64,${image.toString('base64')}`;
 };
 
 const resolveRendererIndexPath = (): string => {
@@ -264,35 +250,12 @@ const setupIpcHandlers = () => {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.CAPTURE_PERFORMANCE_SNAPSHOT, async (_event, deviceId: string, currentMetrics?: PerformanceMetrics) => {
-    try {
-      const snapshotPayload = await adbManager.capturePerformanceSnapshot(deviceId, currentMetrics);
-      const snapshot = await persistPerformanceSnapshot(resolveRuntimeAppRoot(app), {
-        deviceId,
-        snapshot: snapshotPayload,
-        trigger: 'manual',
-      });
-      return { success: true, data: snapshot };
-    } catch (error) {
-      return toIpcErrorResponse(error, '抓取性能快照失败');
-    }
-  });
-
   ipcMain.handle(IPC_CHANNELS.START_PERFORMANCE_RECORDING, async (_event, deviceId: string, options: PerformanceRecordingOptions) => {
     try {
       const recording = await adbManager.startPerformanceRecording(deviceId, resolveRuntimeAppRoot(app), options);
       return { success: true, data: recording };
     } catch (error) {
       return toIpcErrorResponse(error, '性能录制失败');
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.READ_SNAPSHOT_IMAGE, async (_event, screenshotPath: string) => {
-    try {
-      const dataUrl = await readSnapshotImageAsDataUrl(screenshotPath);
-      return { success: true, data: dataUrl };
-    } catch (error) {
-      return toIpcErrorResponse(error, '读取快照图片失败');
     }
   });
 
