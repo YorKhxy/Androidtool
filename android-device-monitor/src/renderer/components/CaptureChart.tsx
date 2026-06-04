@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { PerformanceCaptureSession, PerformanceSample } from '../../shared/types';
-import { formatMemoryMb, getGpuValue, sampleElapsedMs } from './perfFormat';
+import { formatMemoryMb, getGpuValue, METRIC_COLORS, sampleElapsedMs, type CaptureMetricKey } from './perfFormat';
 
 const chartPadding = { left: 54, right: 76, top: 24, bottom: 38 };
 
@@ -23,16 +23,16 @@ type CaptureChartProps = {
   playheadMs: number;
   showPlayhead: boolean;
   onSeekToMs?: (ms: number) => void;
-  /** 参数过滤命中的相对时间点（AND 结果），在曲线上打独立标记。 */
-  markerHits?: number[];
+  /** 参数过滤标记：每个条件各自在「自己指标的曲线」上打点，按指标区分颜色，跟随该曲线显隐。 */
+  markers?: Array<{ metricKey: CaptureMetricKey; atMs: number[] }>;
   onMarkerClick?: (ms: number) => void;
 };
 
 const SERIES: ChartSeries[] = [
-  { key: 'fps', label: 'FPS', color: '#a855f7', axis: 'percent', getValue: (s) => s.metrics.fps },
-  { key: 'cpu', label: 'CPU%', color: '#3b82f6', axis: 'percent', getValue: (s) => s.metrics.cpuUsage },
-  { key: 'gpu', label: 'GPU%', color: '#ec4899', axis: 'percent', getValue: getGpuValue },
-  { key: 'mem', label: 'MEM MB', color: '#22c55e', axis: 'memory', getValue: (s) => Number(formatMemoryMb(s.metrics.memoryUsage)) },
+  { key: 'fps', label: 'FPS', color: METRIC_COLORS.fps, axis: 'percent', getValue: (s) => s.metrics.fps },
+  { key: 'cpu', label: 'CPU%', color: METRIC_COLORS.cpu, axis: 'percent', getValue: (s) => s.metrics.cpuUsage },
+  { key: 'gpu', label: 'GPU%', color: METRIC_COLORS.gpu, axis: 'percent', getValue: getGpuValue },
+  { key: 'mem', label: 'MEM MB', color: METRIC_COLORS.mem, axis: 'memory', getValue: (s) => Number(formatMemoryMb(s.metrics.memoryUsage)) },
 ];
 
 export function CaptureChart({
@@ -44,7 +44,7 @@ export function CaptureChart({
   playheadMs,
   showPlayhead,
   onSeekToMs,
-  markerHits,
+  markers,
   onMarkerClick,
 }: CaptureChartProps) {
   const [hoverPoint, setHoverPoint] = useState<HoverPoint | null>(null);
@@ -104,6 +104,8 @@ export function CaptureChart({
   }
 
   const playheadX = xForMs(playheadMs);
+  // 命中时间点 → 样本，用于把过滤标记打在对应指标曲线的实际数值位置上。
+  const elapsedToSample = new Map(samples.map((sample) => [sampleElapsedMs(sample, session.startedAt), sample]));
 
   return (
     <div style={{ position: 'relative' }}>
@@ -180,25 +182,32 @@ export function CaptureChart({
             </g>,
           ];
         })}
-        {/* 参数过滤命中标记：琥珀色竖带 + 底部可点菱形，区别于曲线上的波峰波谷三角。 */}
-        {(markerHits ?? []).map((ms, i) => {
-          const mx = xForMs(ms);
-          const baseY = chartPadding.top + plotHeight;
-          return (
-            <g
-              key={`hit-${ms}-${i}`}
-              onPointerDown={(e) => {
-                if (!onMarkerClick) return;
-                e.stopPropagation();
-                onMarkerClick(ms);
-              }}
-              style={{ cursor: onMarkerClick ? 'pointer' : 'default' }}
-            >
-              <line x1={mx} y1={chartPadding.top} x2={mx} y2={baseY} stroke="#fbbf24" strokeWidth="1" opacity={0.5} />
-              <rect x={mx - 6} y={baseY - 2} width="12" height="12" fill="transparent" />
-              <polygon points={`${mx},${baseY + 1} ${mx - 4},${baseY + 6} ${mx},${baseY + 11} ${mx + 4},${baseY + 6}`} fill="#fbbf24" />
-            </g>
-          );
+        {/* 参数过滤标记：每个条件各自在「自己指标的曲线」上打空心圆点，颜色取该指标曲线色，
+            隐藏该曲线时其标记一并隐藏（不与波峰波谷三角混淆）。 */}
+        {(markers ?? []).flatMap((marker) => {
+          const series = SERIES.find((s) => s.key === marker.metricKey);
+          if (!series || !isSeriesVisible(series.key)) return [];
+          const axisMax = series.axis === 'memory' ? memoryAxisMax : leftAxisMax;
+          return marker.atMs.flatMap((ms, i) => {
+            const sample = elapsedToSample.get(ms);
+            if (!sample) return [];
+            const cx = xForMs(ms);
+            const cy = yForValue(series.getValue(sample) || 0, axisMax);
+            return [
+              <g
+                key={`${marker.metricKey}-${ms}-${i}`}
+                onPointerDown={(e) => {
+                  if (!onMarkerClick) return;
+                  e.stopPropagation();
+                  onMarkerClick(ms);
+                }}
+                style={{ cursor: onMarkerClick ? 'pointer' : 'default' }}
+              >
+                <circle cx={cx} cy={cy} r="9" fill="transparent" />
+                <circle cx={cx} cy={cy} r="4.5" fill="#0f172a" stroke={series.color} strokeWidth="2.5" />
+              </g>,
+            ];
+          });
         })}
         {showPlayhead && (
           <g>

@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import {
+  METRIC_COLORS,
   METRIC_LABELS,
   type CaptureFilterOp,
   type CaptureMetricKey,
@@ -51,7 +52,7 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
     <div style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
         <div style={{ color: '#fff', fontSize: '13px', fontWeight: 600 }}>参数过滤</div>
-        <div style={{ color: '#94a3b8', fontSize: '12px' }}>多条件按 AND 组合（全部满足才命中）</div>
+        <div style={{ color: '#94a3b8', fontSize: '12px' }}>每条独立标在对应指标曲线上（按颜色区分，跟随曲线显隐）</div>
       </div>
 
       {conditions.length === 0 ? (
@@ -62,6 +63,8 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
             const thresholdEmpty = !Number.isFinite(condition.threshold);
             return (
             <div key={condition.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* 色块：与该指标曲线及其命中标记同色，标识「这条过滤标在哪条曲线上」。 */}
+              <span style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: METRIC_COLORS[condition.metricKey], flexShrink: 0 }} title="该参数曲线颜色" />
               <select
                 value={condition.metricKey}
                 onChange={(e) => updateCondition(condition.id, { metricKey: e.target.value as CaptureMetricKey })}

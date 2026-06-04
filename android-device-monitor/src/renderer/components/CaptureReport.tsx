@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceSample } from '../../shared/types';
 import { CaptureChart } from './CaptureChart';
 import { CaptureFilterPanel } from './CaptureFilterPanel';
 import { captureSegmentFrame, findNearestSample, getSingleEyeWrapperStyle, renderMetricOverlay, renderRecordingPlaceholder } from './captureReportHelpers';
 import {
-  andHitTimes,
   buildSegmentMediaUrl,
   captureTotalMs,
   computeMarkers,
@@ -56,16 +55,14 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
     setAppliedMarkers(markersPropRef.current ?? []);
   }, [sessionId, live]);
 
-  // AND 命中时间点。必须在任何 early return 之前调用，保证每次渲染的 hook 数量一致
-  // （否则 session 由 null↔非 null 切换时 React 报「Rendered more hooks than previous」）。
-  const hitTimes = useMemo(() => andHitTimes(appliedMarkers), [appliedMarkers]);
-
   if (!session) {
     return <div style={{ color: '#6b7280', fontSize: '13px' }}>开启采集后，这里会显示本次采集的指标曲线与录屏。</div>;
   }
 
   const segments = session.videoSegments;
   const totalMs = captureTotalMs(session, samples);
+  // 各条件独立标记，总命中点数（用于过滤面板提示与播放头显隐）。
+  const markCount = appliedMarkers.reduce((sum, marker) => sum + marker.atMs.length, 0);
   const toggleSeries = (key: string) =>
     setSelectedSeriesKeys((prev) => {
       if (prev.size === 0) return new Set([key]); // 全显状态首点 → 只看这一条
@@ -275,9 +272,9 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
           selectedSeriesKeys={selectedSeriesKeys}
           onToggleSeries={toggleSeries}
           playheadMs={playheadMs}
-          showPlayhead={!live && (segments.length > 0 || hitTimes.length > 0)}
+          showPlayhead={!live && (segments.length > 0 || markCount > 0)}
           onSeekToMs={!live && segments.length > 0 ? seekTo : undefined}
-          markerHits={hitTimes}
+          markers={appliedMarkers}
           onMarkerClick={!live ? seekAndPause : undefined}
         />
         {renderVideoArea()}
@@ -289,7 +286,7 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
           onApply={applyFilter}
           onClear={clearFilter}
           isPico={session.provider.startsWith('pico')}
-          hitCount={hitTimes.length}
+          hitCount={markCount}
           applied={appliedMarkers.length > 0}
         />
       )}

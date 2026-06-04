@@ -18,6 +18,14 @@ export const METRIC_LABELS: Record<CaptureMetricKey, string> = {
   gpu: 'GPU %',
 };
 
+// 每个指标的曲线颜色：曲线、过滤标记、过滤面板色块共用一处，保证「同一参数同一颜色」。
+export const METRIC_COLORS: Record<CaptureMetricKey, string> = {
+  fps: '#a855f7',
+  cpu: '#3b82f6',
+  mem: '#22c55e',
+  gpu: '#ec4899',
+};
+
 // 性能采集报告与指标卡共用的格式化 / 取值小工具。集中放一处，避免 PerformancePanel
 // 与 CaptureReport 各写一份导致口径漂移。
 
@@ -113,18 +121,6 @@ export const computeMarkers = (
       .filter((sample) => evalCondition(metricValueOf(sample, condition.metricKey), condition.op, condition.threshold))
       .map((sample) => sampleElapsedMs(sample, sessionStartedAt)),
   }));
-
-/** 多标记按 AND 组合：取各标记 atMs 的交集（所有条件同时命中的时间点），升序去重。 */
-export const andHitTimes = (markers: PerformanceCaptureMarker[]): number[] => {
-  if (markers.length === 0) return [];
-  const [first, ...rest] = markers;
-  let hits = new Set(first.atMs);
-  for (const marker of rest) {
-    const next = new Set(marker.atMs);
-    hits = new Set([...hits].filter((ms) => next.has(ms)));
-  }
-  return [...hits].sort((a, b) => a - b);
-};
 
 export const formatClock = (ms: number) => {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));

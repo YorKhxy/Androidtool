@@ -615,7 +615,7 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('确定关闭采集吗');
   });
 
-  test('capture filter marks AND-combined hits, persists markers, and jumps+pauses on marker click', () => {
+  test('capture filter marks each condition on its own metric curve (per-metric color, follows series visibility), persists markers, jumps+pauses on click', () => {
     const formatSource = fs.readFileSync(path.join(root, 'src/renderer/components/perfFormat.ts'), 'utf-8');
     const filterSource = fs.readFileSync(path.join(root, 'src/renderer/components/CaptureFilterPanel.tsx'), 'utf-8');
     const chartSource = fs.readFileSync(path.join(root, 'src/renderer/components/CaptureChart.tsx'), 'utf-8');
@@ -625,20 +625,21 @@ describe('project smoke checks', () => {
 
     expect(fs.existsSync(path.join(root, 'src/renderer/components/CaptureFilterPanel.tsx'))).toBe(true);
 
-    // 求值与标记计算：指标取值 + 运算符 + 逐点求值 + AND 交集
+    // 求值与标记计算：指标取值 + 运算符 + 逐点求值 + 每指标颜色（不再做 AND 交集）
     expect(formatSource).toContain('metricValueOf');
     expect(formatSource).toContain('evalCondition');
     expect(formatSource).toContain('computeMarkers');
-    expect(formatSource).toContain('andHitTimes'); // AND 组合 = 各条件命中点交集
+    expect(formatSource).toContain('METRIC_COLORS'); // 每参数一色，曲线/标记/面板色块共用
+    expect(formatSource).not.toContain('andHitTimes'); // 已弃用 AND 交集语义
     expect(formatSource).toContain("case '>'");
     expect(formatSource).toContain("case '<'");
     expect(formatSource).toContain("case '='");
 
-    // 过滤面板：指标/运算符/阈值 + 多条件 + GPU 仅 Pico + AND 说明
+    // 过滤面板：指标/运算符/阈值 + 多条件 + GPU 仅 Pico + 每参数色块
     expect(filterSource).toContain('添加条件');
     expect(filterSource).toContain('过滤');
     expect(filterSource).toContain('清除');
-    expect(filterSource).toContain('AND');
+    expect(filterSource).toContain('METRIC_COLORS[condition.metricKey]'); // 行内色块与曲线同色
     expect(filterSource).toContain("['fps', 'cpu', 'mem', 'gpu']"); // Pico
     expect(filterSource).toContain("['fps', 'cpu', 'mem']"); // 非 Pico 无 GPU
     // 阈值输入可留空/删空（默认 NaN 而非删不掉的 0），求值时跳过未填阈值的条件
@@ -647,24 +648,25 @@ describe('project smoke checks', () => {
     expect(filterSource).toContain('阈值不能为空'); // 留空给明确提示（红框+红字）
     expect(formatSource).toContain('conditions.filter((condition) => Number.isFinite(condition.threshold))');
 
-    // 曲线命中标记（独立样式）+ 点击回调
-    expect(chartSource).toContain('markerHits');
-    expect(chartSource).toContain('onMarkerClick');
-    expect(chartSource).toContain('#fbbf24'); // 琥珀色，区别波峰波谷
+    // 曲线标记：每条件标在自己指标曲线上、按指标颜色、跟随该曲线显隐
+    expect(chartSource).toContain('markers'); // 接收 markers（每条件 atMs）而非扁平 hits
+    expect(chartSource).not.toContain('markerHits'); // 旧的 AND 扁平命中已移除
+    expect(chartSource).toContain('isSeriesVisible(series.key)'); // 曲线隐藏则其标记隐藏
+    expect(chartSource).toContain('elapsedToSample'); // 标记打在曲线对应数值位置
+    expect(chartSource).toContain('stroke={series.color}'); // 标记取该曲线颜色
 
-    // 报告：应用过滤→持久化、清除、命中点击 seek+暂停
+    // 报告：应用过滤→持久化、清除、命中点击 seek+暂停，传 appliedMarkers 给图
     expect(reportSource).toContain('computeMarkers');
     expect(reportSource).toContain('onSaveMarkers');
     expect(reportSource).toContain('seekAndPause');
     expect(reportSource).toContain('<CaptureFilterPanel');
     expect(reportSource).toContain('.pause()'); // 命中跳转时暂停视频
-    // 防回归：hitTimes 的 useMemo 必须在 `if (!session)` early return 之前，
+    expect(reportSource).toContain('markers={appliedMarkers}');
+    expect(reportSource).not.toContain('andHitTimes');
+    // 防回归（hooks 顺序）：early return 之后不得再有任何 hook 调用，
     // 否则 session 由 null↔非 null 切换时 hook 数量变化 → "Rendered more hooks than previous"。
-    const memoIdx = reportSource.indexOf('useMemo(() => andHitTimes');
-    const earlyReturnIdx = reportSource.indexOf('if (!session)');
-    expect(memoIdx).toBeGreaterThan(-1);
-    expect(earlyReturnIdx).toBeGreaterThan(-1);
-    expect(memoIdx).toBeLessThan(earlyReturnIdx);
+    const afterEarlyReturn = reportSource.slice(reportSource.indexOf('if (!session)'));
+    expect(afterEarlyReturn).not.toMatch(/use(State|Effect|Memo|Ref|Callback)\(/);
 
     // 接线：面板透传 + SimpleApp 持久化
     expect(panelSource).toContain('onSaveCaptureMarkers');
