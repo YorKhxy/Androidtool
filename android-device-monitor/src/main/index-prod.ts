@@ -10,8 +10,9 @@ import { resolveRuntimeAppRoot } from './runtimeAppRoot';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
 import { PerformanceCaptureStore } from './performanceCaptureStore';
+import { zipSessionDir, extractZipToSessionDir } from './performanceCaptureTransfer';
 import { PerformanceCaptureController } from './performanceCaptureController';
-import type { PerformanceCaptureMarker } from '../shared/types';
+import type { PerformanceCaptureMarker, PerformanceCaptureSession } from '../shared/types';
 import { initAutoUpdate, checkForUpdates, downloadUpdate, quitAndInstallUpdate, getLastUpdateStatus } from './autoUpdate';
 import * as fullLogRecorder from './fullLogRecorder';
 import * as transferJournal from './transferJournal';
@@ -330,6 +331,63 @@ const setupIpcHandlers = () => {
     } catch (error) {
       return toIpcErrorResponse(error, '保存截图失败');
     }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EXPORT_CAPTURE_SESSION, async (_event, sessionId: string) => {
+    try {
+      const sessionDir = captureStore.getSessionDir(sessionId);
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: '导出采集会话',
+        defaultPath: `${sessionId}.zip`,
+        filters: [{ name: '采集会话压缩包', extensions: ['zip'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: true, data: undefined };
+      }
+      zipSessionDir(sessionDir, result.filePath);
+      return { success: true, data: result.filePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '导出采集会话失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SELECT_IMPORT_FILES, async () => {
+    try {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: '导入采集会话',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: '采集会话压缩包', extensions: ['zip'] }],
+      });
+      return { success: true, data: result.canceled ? [] : result.filePaths };
+    } catch (error) {
+      return toIpcErrorResponse(error, '选择导入文件失败');
+    }
+  });
+
+  // 导入：逐个处理 zip / 会话文件夹，单个失败不影响其余，收集结果与错误一并返回。
+  ipcMain.handle(IPC_CHANNELS.IMPORT_CAPTURE_SESSIONS, async (_event, paths: string[]) => {
+    const imported: PerformanceCaptureSession[] = [];
+    const errors: string[] = [];
+    for (const sourcePath of paths || []) {
+      try {
+        const stat = await fs.stat(sourcePath);
+        if (stat.isDirectory()) {
+          imported.push(await captureStore.importFromDirectory(sourcePath));
+        } else if (sourcePath.toLowerCase().endsWith('.zip')) {
+          const { sessionDir, cleanup } = await extractZipToSessionDir(sourcePath);
+          try {
+            imported.push(await captureStore.importFromDirectory(sessionDir));
+          } finally {
+            await cleanup();
+          }
+        } else {
+          errors.push(`${path.basename(sourcePath)}：仅支持 .zip 或采集会话文件夹`);
+        }
+      } catch (error) {
+        errors.push(`${path.basename(sourcePath)}：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return { success: true, data: { imported, errors } };
   });
 
   ipcMain.handle(IPC_CHANNELS.GET_PROCESSES, async (_event, deviceId: string) => {

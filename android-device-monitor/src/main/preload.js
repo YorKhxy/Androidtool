@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   renameCaptureSession: (sessionId, title) => ipcRenderer.invoke('capture:rename', sessionId, title),
   saveCaptureMarkers: (sessionId, markers) => ipcRenderer.invoke('capture:save-markers', sessionId, markers),
   saveCaptureFrame: (sessionId, dataUrl) => ipcRenderer.invoke('capture:save-frame', sessionId, dataUrl),
+  exportCaptureSession: (sessionId) => ipcRenderer.invoke('capture:export', sessionId),
+  selectImportFiles: () => ipcRenderer.invoke('capture:select-import'),
+  importCaptureSessions: (paths) => ipcRenderer.invoke('capture:import', paths),
   onCaptureSample: (callback) => {
     const listener = (_, payload) => callback(payload);
     ipcRenderer.on('capture:sample', listener);

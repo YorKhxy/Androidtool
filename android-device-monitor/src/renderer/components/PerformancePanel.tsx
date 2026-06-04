@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { DeviceInfo, PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceMetrics, PerformanceSample, PicoMetricsState } from '../../shared/types';
 import { CaptureReport } from './CaptureReport';
 import { CaptureHistoryList } from './CaptureHistoryList';
@@ -28,6 +29,11 @@ type PerformancePanelProps = {
   onSelectCaptureSession: (sessionId: string) => void;
   onRenameCaptureSession: (sessionId: string, title: string) => void;
   onDeleteCaptureSession: (sessionId: string) => void;
+  onExportCaptureSession: (sessionId: string) => void;
+  /** 选 zip 文件导入。 */
+  onImportCaptureSessions: () => void;
+  /** 拖拽导入（.zip 或会话文件夹路径）。 */
+  onImportCapturePaths: (paths: string[]) => void;
   onExportSession: () => void;
 };
 
@@ -123,8 +129,22 @@ export function PerformancePanel({
   onSelectCaptureSession,
   onRenameCaptureSession,
   onDeleteCaptureSession,
+  onExportCaptureSession,
+  onImportCaptureSessions,
+  onImportCapturePaths,
   onExportSession,
 }: PerformancePanelProps) {
+  const [importDragOver, setImportDragOver] = useState(false);
+
+  const handleImportDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setImportDragOver(false);
+    const paths = Array.from(e.dataTransfer.files || [])
+      .map((f) => (f as File & { path?: string }).path || '')
+      .filter(Boolean);
+    if (paths.length) onImportCapturePaths(paths);
+  };
   const isPicoView = performance?.provider === 'pico' || (!performance && isLikelyPicoDevice(device));
   const picoMetricsState: PicoMetricsState = performance?.picoMetricsState || 'native';
   const showPicoFallback = isPicoView && picoMetricsState !== 'native';
@@ -224,17 +244,33 @@ export function PerformancePanel({
         />
       </div>
 
-      <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '14px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', alignItems: 'center' }}>
+      <div
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setImportDragOver(true); }}
+        onDragLeave={(e) => { e.preventDefault(); setImportDragOver(false); }}
+        onDrop={handleImportDrop}
+        style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '14px', border: `1.5px dashed ${importDragOver ? '#6d28d9' : 'transparent'}` }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', alignItems: 'center', gap: '10px' }}>
           <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>采集回看</div>
-          <div style={{ fontSize: '12px', color: '#94a3b8' }}>{`共 ${captureSessions.length} 次`}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              onClick={onImportCaptureSessions}
+              title="导入采集会话（.zip）；也可把 zip 或会话文件夹拖到此区域"
+              style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#cbd5e1', cursor: 'pointer', padding: '5px 12px', fontSize: '12px' }}
+            >导入</button>
+            <div style={{ fontSize: '12px', color: '#94a3b8' }}>{`共 ${captureSessions.length} 次`}</div>
+          </div>
         </div>
+        {importDragOver && (
+          <div style={{ color: '#c4b5fd', fontSize: '12px', marginBottom: '10px' }}>松开以导入采集会话（.zip 或会话文件夹）</div>
+        )}
         <CaptureHistoryList
           sessions={captureSessions}
           selectedSessionId={loadedSessionId}
           onSelect={onSelectCaptureSession}
           onRename={onRenameCaptureSession}
           onDelete={onDeleteCaptureSession}
+          onExport={onExportCaptureSession}
         />
       </div>
     </div>

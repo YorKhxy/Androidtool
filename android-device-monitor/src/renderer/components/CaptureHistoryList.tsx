@@ -8,12 +8,13 @@ type CaptureHistoryListProps = {
   onSelect: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  onExport: (id: string) => void;
 };
 
 const defaultTitle = (session: PerformanceCaptureSession) =>
   `${session.deviceSn} · ${formatLocalDateTime(session.startedAt)}`;
 
-export function CaptureHistoryList({ sessions, selectedSessionId, onSelect, onRename, onDelete }: CaptureHistoryListProps) {
+export function CaptureHistoryList({ sessions, selectedSessionId, onSelect, onRename, onDelete, onExport }: CaptureHistoryListProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
@@ -99,11 +100,18 @@ export function CaptureHistoryList({ sessions, selectedSessionId, onSelect, onRe
                 >取消</button>
               </div>
             ) : (
-              <button
-                onClick={(e) => { e.stopPropagation(); setConfirmingDeleteId(session.id); }}
-                title="删除该采集记录"
-                style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer', padding: '5px 10px', fontSize: '12px', flexShrink: 0 }}
-              >删除</button>
+              <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                <button
+                  onClick={() => onExport(session.id)}
+                  title="导出为 zip（可拷到另一台 PC 导入查看）"
+                  style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer', padding: '5px 10px', fontSize: '12px' }}
+                >导出</button>
+                <button
+                  onClick={() => setConfirmingDeleteId(session.id)}
+                  title="删除该采集记录"
+                  style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer', padding: '5px 10px', fontSize: '12px' }}
+                >删除</button>
+              </div>
             )}
           </div>
         );

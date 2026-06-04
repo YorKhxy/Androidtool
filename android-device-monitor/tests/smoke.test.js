@@ -717,6 +717,64 @@ describe('project smoke checks', () => {
     expect(panelSource).toContain('onSelectCaptureSession');
   });
 
+  test('capture sessions can be exported to zip and imported (file picker + drag-drop) across machines', () => {
+    const transferPath = path.join(root, 'src/main/performanceCaptureTransfer.ts');
+    expect(fs.existsSync(transferPath)).toBe(true);
+    const transferSource = fs.readFileSync(transferPath, 'utf-8');
+    const storeSource = fs.readFileSync(path.join(root, 'src/main/performanceCaptureStore.ts'), 'utf-8');
+    const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const historySource = fs.readFileSync(path.join(root, 'src/renderer/components/CaptureHistoryList.tsx'), 'utf-8');
+    const panelSource = fs.readFileSync(path.join(root, 'src/renderer/components/PerformancePanel.tsx'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
+
+    // 依赖 + 打包工具：zip 用纯 JS 的 adm-zip（随 dependencies 打包）
+    expect(pkg.dependencies['adm-zip']).toBeTruthy();
+    expect(transferSource).toContain("from 'adm-zip'");
+    expect(transferSource).toContain('zipSessionDir');
+    expect(transferSource).toContain('extractZipToSessionDir');
+    expect(transferSource).toContain('manifest.json'); // 解压后定位会话目录
+
+    // store：导出取目录 + 导入（id 冲突生成新 id、改写 manifest）
+    expect(storeSource).toContain('getSessionDir');
+    expect(storeSource).toContain('importFromDirectory');
+    expect(storeSource).toContain('-imp'); // id 冲突后缀
+    expect(storeSource).toContain('fs.cp'); // 递归拷入
+
+    // 通道 + 两入口 handler
+    ['EXPORT_CAPTURE_SESSION', 'SELECT_IMPORT_FILES', 'IMPORT_CAPTURE_SESSIONS'].forEach((ch) => {
+      expect(channelSource).toContain(`${ch}:`);
+    });
+    [indexSource, prodSource].forEach((src) => {
+      expect(src).toContain('zipSessionDir');
+      expect(src).toContain('extractZipToSessionDir');
+      expect(src).toContain('captureStore.importFromDirectory');
+      expect(src).toContain('showSaveDialog');
+    });
+
+    // preload + electronApi
+    ['exportCaptureSession', 'selectImportFiles', 'importCaptureSessions'].forEach((m) => {
+      expect(preloadSource).toContain(m);
+      expect(electronApiSource).toContain(m);
+    });
+
+    // UI：列表每行导出 + 面板导入按钮 + 拖拽导入（zip/文件夹路径）
+    expect(historySource).toContain('onExport');
+    expect(historySource).toContain('导出');
+    expect(panelSource).toContain('onImportCaptureSessions');
+    expect(panelSource).toContain('onImportCapturePaths');
+    expect(panelSource).toContain('handleImportDrop');
+    expect(panelSource).toContain('onDrop=');
+    expect(panelSource).toContain('dataTransfer.files'); // 拖拽取路径
+    expect(panelSource).toContain('导入');
+    expect(simpleAppSource).toContain('importCapturePaths');
+    expect(simpleAppSource).toContain('exportCaptureSession');
+  });
+
   test('continuous capture recorder segments at 180s, finalizes via SIGINT and pulls each segment', () => {
     const recorderPath = path.join(root, 'src/main/adb/captureRecorder.ts');
     expect(fs.existsSync(recorderPath)).toBe(true);

@@ -1327,6 +1327,49 @@ function SimpleApp() {
     return result.data;
   };
 
+  // 导出会话为 zip（弹系统保存框；取消则 data 为空，不提示）。
+  const exportCaptureSession = async (sessionId: string) => {
+    if (!hasElectronAPI()) return;
+    try {
+      const result = await window.electronAPI!.exportCaptureSession(sessionId);
+      if (!result.success) setError(result.error || '导出采集会话失败');
+      else if (result.data) setSuccess(`已导出：${result.data}`);
+    } catch (err) {
+      setError('导出采集会话失败：' + (err as Error).message);
+    }
+  };
+
+  // 导入会话（zip / 会话文件夹路径，来自选择对话框或拖拽），完成后刷新列表。
+  const importCapturePaths = async (paths: string[]) => {
+    if (!hasElectronAPI() || paths.length === 0) return;
+    try {
+      const result = await window.electronAPI!.importCaptureSessions(paths);
+      if (result.success && result.data) {
+        void refreshCaptureSessions();
+        const { imported, errors } = result.data;
+        if (errors.length > 0) {
+          setError(`导入完成 ${imported.length} 个，${errors.length} 个失败：${errors.join('；')}`);
+        } else {
+          setSuccess(`已导入 ${imported.length} 个采集会话`);
+        }
+      } else if (!result.success) {
+        setError(result.error || '导入采集会话失败');
+      }
+    } catch (err) {
+      setError('导入采集会话失败：' + (err as Error).message);
+    }
+  };
+
+  const importCaptureViaDialog = async () => {
+    if (!hasElectronAPI()) return;
+    const result = await window.electronAPI!.selectImportFiles();
+    if (result.success && result.data && result.data.length > 0) {
+      await importCapturePaths(result.data);
+    } else if (!result.success) {
+      setError(result.error || '选择导入文件失败');
+    }
+  };
+
   const exportPerformanceSession = async () => {
     if (!selectedDevice || !hasElectronAPI()) return;
     const capturing = Boolean(activeCaptureByDeviceId[selectedDevice.id]);
@@ -3173,6 +3216,9 @@ function SimpleApp() {
                     onSelectCaptureSession={selectCaptureSession}
                     onRenameCaptureSession={renameCaptureSession}
                     onDeleteCaptureSession={deleteCaptureSession}
+                    onExportCaptureSession={exportCaptureSession}
+                    onImportCaptureSessions={importCaptureViaDialog}
+                    onImportCapturePaths={importCapturePaths}
                     onExportSession={exportPerformanceSession}
                   />
                 )}

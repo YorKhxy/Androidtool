@@ -281,6 +281,12 @@ export interface PerformanceCaptureSession {
   error?: string;
 }
 
+/** 导入会话结果：成功导入的会话 + 每个失败来源的错误说明。 */
+export interface CaptureImportResult {
+  imported: PerformanceCaptureSession[];
+  errors: string[];
+}
+
 /** loadSession 返回：会话元数据 + 完整样本序列 + 已存过滤标记。 */
 export interface PerformanceCaptureSessionDetail {
   session: PerformanceCaptureSession;

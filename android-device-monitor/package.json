@@ -30,6 +30,7 @@
   "author": "Developer",
   "license": "MIT",
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^20.0.0",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
@@ -49,6 +50,7 @@
   },
   "dependencies": {
     "adbkit": "^2.11.1",
+    "adm-zip": "^0.5.17",
     "electron-updater": "^6.8.3",
     "lucide-react": "^0.290.0",
     "react": "^18.0.0",

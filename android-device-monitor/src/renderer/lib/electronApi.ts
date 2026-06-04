@@ -12,6 +12,7 @@ import type {
   PerformanceCaptureSession,
   PerformanceCaptureSessionDetail,
   PerformanceCaptureMarker,
+  CaptureImportResult,
   CaptureSamplePayload,
   CaptureSizeLimitPayload,
   PairResult,
@@ -56,6 +57,9 @@ export interface ElectronAPI {
   renameCaptureSession: (sessionId: string, title: string) => Promise<ElectronResult<PerformanceCaptureSession>>;
   saveCaptureMarkers: (sessionId: string, markers: PerformanceCaptureMarker[]) => Promise<ElectronResult<undefined>>;
   saveCaptureFrame: (sessionId: string, dataUrl: string) => Promise<ElectronResult<string>>;
+  exportCaptureSession: (sessionId: string) => Promise<ElectronResult<string | undefined>>;
+  selectImportFiles: () => Promise<ElectronResult<string[]>>;
+  importCaptureSessions: (paths: string[]) => Promise<ElectronResult<CaptureImportResult>>;
   onCaptureSample: (callback: (payload: CaptureSamplePayload) => void) => () => void;
   onCaptureSizeLimit: (callback: (payload: CaptureSizeLimitPayload) => void) => () => void;
   getProcesses: (deviceId: string) => Promise<ElectronResult<ProcessInfo[]>>;

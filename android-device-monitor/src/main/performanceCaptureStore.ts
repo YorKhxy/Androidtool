@@ -25,6 +25,7 @@ const MANIFEST_FILE = 'manifest.json';
 
 const toPortablePath = (value: string) => value.split(path.sep).join('/');
 const sanitizeSegment = (value: string) => value.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'device';
+const pathExists = (target: string): Promise<boolean> => fs.access(target).then(() => true, () => false);
 
 export type CreateCaptureSessionInput = {
   deviceId: string;
@@ -77,6 +78,10 @@ export class PerformanceCaptureStore {
       throw new Error(`非法的采集会话 ID：${sessionId}`);
     }
     return resolved;
+  }
+
+  getSessionDir(sessionId: string): string {
+    return this.sessionDir(sessionId);
   }
 
   getVideoDir(sessionId: string): string {
@@ -168,6 +173,43 @@ export class PerformanceCaptureStore {
     const fileName = `shot-${Date.now()}.png`;
     await fs.writeFile(path.join(dir, fileName), pngBuffer);
     return toPortablePath(path.join(CAPTURES_DIR, sessionId, 'screenshots', fileName));
+  }
+
+  /** 从一个外部会话目录（含 manifest.json）导入：id 冲突则生成新 id，递归拷入并改写 manifest。 */
+  async importFromDirectory(srcDir: string): Promise<PerformanceCaptureSession> {
+    let raw: string;
+    try {
+      raw = await fs.readFile(path.join(srcDir, MANIFEST_FILE), 'utf8');
+    } catch {
+      throw new Error('所选内容不是有效的采集会话（缺少 manifest.json）');
+    }
+    let parsed: PerformanceCaptureSession;
+    try {
+      parsed = JSON.parse(raw) as PerformanceCaptureSession;
+    } catch {
+      throw new Error('采集会话 manifest.json 解析失败');
+    }
+
+    // id 冲突（同名会话已存在）→ 追加 -impN，避免覆盖现有数据。
+    const baseId = sanitizeSegment(parsed.id || 'imported');
+    let finalId = baseId;
+    let n = 1;
+    while (await pathExists(this.sessionDir(finalId))) {
+      finalId = `${baseId}-imp${++n}`;
+    }
+
+    const destDir = this.sessionDir(finalId);
+    await fs.mkdir(this.capturesRoot(), { recursive: true });
+    await fs.cp(srcDir, destDir, { recursive: true });
+
+    const updated: PerformanceCaptureSession = {
+      ...reviveSession(parsed),
+      id: finalId,
+      dataRelativePath: toPortablePath(path.join(CAPTURES_DIR, finalId, 'data', SAMPLES_FILE)),
+      screenshotDir: toPortablePath(path.join(CAPTURES_DIR, finalId, 'screenshots')),
+    };
+    await this.writeManifest(destDir, updated);
+    return updated;
   }
 
   async deleteSession(sessionId: string): Promise<void> {
