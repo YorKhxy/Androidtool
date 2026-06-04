@@ -103,6 +103,42 @@ try {
         Move-Item $f.FullName -Destination $archiveDir -Force  # 从 dist 收纳进存档，保持 dist 干净
     }
 
+    # 发版锚点：提交版本号变更并打 git tag v<版本>，作为下次「更新说明」的可靠起点（取代易丢的文件标记）。
+    # 只 add package.json / package-lock.json，绝不 -a，避免扫入你其它未提交的改动。
+    # 整段 try 包裹：打包已成功，打 tag 出任何岔子都不该让发版失败，提示一下即可。
+    if (-not $NoVersionBump) {
+        try {
+            $inRepo = $false
+            git -C $ProjectRoot rev-parse --is-inside-work-tree | Out-Null
+            if ($LASTEXITCODE -eq 0) { $inRepo = $true }
+
+            if (-not $inRepo) {
+                Write-Host "Tagging skipped: not a git repo / git unavailable." -ForegroundColor DarkYellow
+            }
+            else {
+                Write-Host "Tagging release v$version (anchor for next release notes)..." -ForegroundColor Yellow
+                # 只暂存版本号文件并在确有变更时提交（重复打包同版本时可能无变更）。
+                git -C $ProjectRoot add package.json package-lock.json | Out-Null
+                git -C $ProjectRoot diff --cached --quiet
+                if ($LASTEXITCODE -ne 0) {
+                    git -C $ProjectRoot commit -m "chore: 发布 v$version" | Out-Null
+                }
+                # 打 tag（已存在则跳过，避免覆盖历史发版点）。
+                $existingTag = git -C $ProjectRoot tag --list "v$version"
+                if ([string]::IsNullOrWhiteSpace($existingTag)) {
+                    git -C $ProjectRoot tag -a "v$version" -m "release v$version" | Out-Null
+                    Write-Host "  Tagged v$version  (push it to share: git push origin v$version)" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "  Tag v$version already exists, skipped." -ForegroundColor DarkYellow
+                }
+            }
+        }
+        catch {
+            Write-Host "  Tagging skipped (non-fatal): $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
+    }
+
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "  Update package ready" -ForegroundColor Green

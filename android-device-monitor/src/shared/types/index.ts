@@ -11,6 +11,8 @@ export interface DeviceInfo {
   latencyMs?: number;
   latencyStatus?: 'ok' | 'timeout' | 'unknown';
   batteryLevel?: number;
+  // 屏幕电源状态：on=唤醒亮屏，off=息屏，unknown=识别不出/查询失败（不臆测）。
+  screenState?: 'on' | 'off' | 'unknown';
 }
 
 // 仅保存通过 WiFi 成功连过的设备，用于「快速重连」历史卡片。

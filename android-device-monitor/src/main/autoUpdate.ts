@@ -20,6 +20,9 @@ import type { UpdateStatus } from '../shared/types';
 // 推荐做法：用一个「稳定地址」当默认（局域网固定 IP，或带固定域名的内网穿透），这样最省事。
 
 let configured = false;
+// 缓存最近一次更新状态：启动时主进程那次自动检查的结果（如 available）可能早于渲染层订阅而 push 丢失，
+// 渲染层挂载后用 getLastUpdateStatus 主动拉一次即可补回，避免「非得手动点检查更新才提示」。
+let lastUpdateStatus: UpdateStatus | null = null;
 
 const resolveFeedUrl = (): string | null => {
   if (process.env.UPDATE_FEED_URL) {
@@ -39,8 +42,12 @@ const resolveFeedUrl = (): string | null => {
 };
 
 const send = (getWindow: () => BrowserWindow | null, status: UpdateStatus): void => {
+  lastUpdateStatus = status; // 同步缓存，供渲染层挂载后拉取（补回启动期 push 竞态丢失的状态）
   getWindow()?.webContents.send(IPC_CHANNELS.UPDATE_STATUS, status);
 };
+
+// 渲染层挂载完成后调用：返回主进程已知的最近一次更新状态（可能为启动自动检查的结果）。
+export const getLastUpdateStatus = (): UpdateStatus | null => lastUpdateStatus;
 
 // 解析「更新服务器」基地址：先用覆盖地址（环境变量/userData 配置），否则读打包资源里的
 // app-update.yml（build.publish 写入的默认地址）。用于把更新状态上报回服务器。

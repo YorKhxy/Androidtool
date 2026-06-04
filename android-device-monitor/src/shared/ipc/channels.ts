@@ -21,6 +21,7 @@ export const IPC_CHANNELS = {
   MIRROR_SET_AUDIO: 'mirror:set-audio',
   UPDATE_STATUS: 'update:status',
   UPDATE_CHECK: 'update:check',
+  UPDATE_GET_STATUS: 'update:get-status',
   UPDATE_DOWNLOAD: 'update:download',
   UPDATE_QUIT_AND_INSTALL: 'update:quit-and-install',
   SELECT_APK_FILES: 'adb:select-apk-files',

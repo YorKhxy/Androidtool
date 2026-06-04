@@ -57,6 +57,7 @@ export interface ElectronAPI {
   stopMirror: (deviceId: string) => Promise<ElectronResult<undefined>>;
   setMirrorAudio: (deviceId: string, forward: boolean) => Promise<ElectronResult<MirrorSession>>;
   checkForUpdate: () => Promise<ElectronResult<undefined>>;
+  getUpdateStatus: () => Promise<ElectronResult<UpdateStatus | null>>;
   downloadUpdate: () => Promise<ElectronResult<undefined>>;
   quitAndInstallUpdate: () => Promise<ElectronResult<undefined>>;
   onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
