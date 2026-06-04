@@ -49,6 +49,7 @@ Phase 1 基础框架
     -> Phase 10 批量安装
     -> Phase 11 设备文件管理
     -> Phase 12 历史设备保存与快速重连
+    -> Phase 13 Pico 弱网控制桌面集成
 ```
 
 依赖关系说明：
@@ -57,6 +58,7 @@ Phase 1 基础框架
 - Phase 6 不是完全独立的新模块，而是对前面各 Phase 的质量补齐和可发布化收尾。
 - Phase 7/8 是新增的「投屏镜像与设备操控」模块（Product-Spec 2.5）。只依赖 Phase 2 的设备连接与内置 ADB 分发能力，与 Phase 4 的 Pico 检测能力复用同一套判定，不依赖 Phase 5/6。Phase 7 先打通普通 Android 的一键投屏与操控；Phase 8 在其上补参数配置、Pico 单眼裁切与快捷键速查。
 - Phase 9（卸载）、Phase 10（批量安装）、Phase 11（设备文件管理）都是设备运维类功能，只依赖 Phase 2 的设备连接与内置 ADB，彼此独立，复用同一套主界面页签和 IPC 通道模式，不依赖 Phase 4/5/6/7/8。
+- Phase 13（Pico 弱网控制桌面集成）是把桌面工具接成 `pico-network-helper` 助手 APK 的控制台（Product-Spec 2.6）。只依赖 Phase 2 的设备连接与内置 ADB、以及已落地的应用安装（`INSTALL_APK`）与已安装列表（`LIST_INSTALLED_PACKAGES`）能力，复用 platform-tools/scrcpy 的随包分发模式，与 Phase 4/5/6/7/8/9/10/11/12 互不依赖。助手端 APK 代码已完成，本 Phase 仅覆盖桌面端。
 - Phase 12（历史设备保存与快速重连）是对 Phase 2 设备连接体验的增量增强，只依赖 Phase 2 已有的 WiFi 连接（`CONNECT_WIFI`）能力与 `DeviceInfo.serialNo` 字段，不引入新的主进程 ADB 命令，几乎是纯渲染层 + 本地持久化，与 Phase 4/5/6/7/8/9/10/11 互不依赖。Phase 2 已标记完成不再改动，本能力以独立 Phase 落地。
 
 ---
@@ -594,6 +596,65 @@ Phase 1 基础框架
 
 ---
 
+### Phase 13: Pico 弱网控制桌面集成
+
+**状态**：待开发
+
+**目标**：把桌面工具做成 Pico 弱网助手（`pico-network-helper` APK）的控制台：一键安装助手、选目标应用包名、设置弱网参数（延迟/抖动/丢包/上行/下行限速）、启动/停止弱网、展示助手运行状态。对齐 Product-Spec 功能需求 2.6、用户流程 4.5、数据模型 5.8。助手端 APK 代码已完成，本 Phase 只做桌面端集成。架构见 `docs/adr/0002`，tun2socks 内核见 `docs/adr/0003`。
+
+**设计约束（复用现有实现，不另造轮子）**
+- 助手 APK 随包分发沿用 `platform-tools` / `scrcpy` 的「`vendor/` 暂存 + `extraResources` 拷贝 + `prepare` 脚本」模式；运行时定位沿用 `src/main/scrcpy/scrcpyBinary.ts` 的 `process.resourcesPath`（生产）+ `path.resolve(__dirname, ...)`（开发）双路径回退，**禁止硬编码绝对路径**（CLAUDE.md 路径规范）。
+- 安装助手复用现有 `INSTALL_APK`（`adb:install-apk`）链路，不新增安装命令；目标包名选择复用现有 `LIST_INSTALLED_PACKAGES`（`adb:list-installed-packages`）。
+- 弱网控制为新增 IPC，必须**三处同步**：`src/shared/ipc/channels.ts` 定义通道 → `src/main/preload.js` 暴露 → `src/renderer/lib/electronApi.ts` 包装；主进程 handler 必须在 `src/main/index.ts` 与 `src/main/index-prod.ts` **两处同步注册**，业务逻辑落在 `ADBManager`。
+- 起停通过 `adb shell am start-foreground-service` 下发到助手 exported 的 `WeakNetworkControlService`（action `com.androidtool.piconetworkhelper.START/STOP`，extras：`packageName/latencyMs/jitterMs/packetLossPercent/uploadKbps/downloadKbps`，其中 `packetLossPercent` 用 `--ef` 浮点、其余 `--ei` 整数、包名用 `--es`）。
+- 状态查询用 `adb shell dumpsys`（查助手 `WeakNetworkVpnService` 是否在运行 / VPN 是否建立）推断，**不改动助手 APK**。
+- VPN 授权引导：检测到「待授权/未就绪」时，用 `am start -n com.androidtool.piconetworkhelper/.MainActivity` 拉起助手触发系统 VPN 授权弹窗（在头显内确认）。
+
+**交付清单**
+- [ ] 助手 APK 暂存脚本：新增 `android-device-monitor/scripts/prepare-helper-apk.js`，把 `pico-network-helper` 的构建产物（`app/build/outputs/apk/debug/app-debug.apk`，路径用 `path.resolve(__dirname, ...)` 从脚本锚点推导到仓库根）复制到 `android-device-monitor/vendor/pico-helper/pico-network-helper.apk`；源 APK 不存在时打印明确指引（先在 `pico-network-helper/` 执行 `gradlew assembleDebug`）并以非零码退出，参照 `scripts/prepare-scrcpy.js` 的结构与日志风格
+- [ ] 打包配置：`android-device-monitor/package.json` 的 `build.extraResources` 增加 `{ from: 'vendor/pico-helper', to: 'pico-helper', filter: ['**/*'] }`；新增脚本 `helper:prepare = node ./scripts/prepare-helper-apk.js`；并把 `helper:prepare` 串进 `pack` 与 `dist`（即 `npm run adb:prepare && npm run scrcpy:prepare && npm run helper:prepare && electron-builder ...`）
+- [ ] 助手 APK 运行时定位：新增 `android-device-monitor/src/main/adb/helperApkBinary.ts`，导出 `resolveHelperApkPath(): string`，按 `process.resourcesPath` 下 `pico-helper/pico-network-helper.apk`（生产）与 `path.resolve(__dirname, '../../../../vendor/pico-helper/pico-network-helper.apk')`（开发）双候选回退，返回首个存在者，全部缺失时抛出带两条候选路径的错误，完全照搬 `scrcpyBinary.ts` 的写法
+- [ ] IPC 通道定义：`src/shared/ipc/channels.ts` 的 `IPC_CHANNELS` 新增 `INSTALL_WEAKNET_HELPER: 'weaknet:install-helper'`、`START_WEAKNET: 'weaknet:start'`、`STOP_WEAKNET: 'weaknet:stop'`、`QUERY_WEAKNET_STATUS: 'weaknet:status'`
+- [ ] 共享类型：`src/shared/types/index.ts` 新增 `WeakNetworkProfile`（`packageName/latencyMs/jitterMs/packetLossPercent/uploadKbps/downloadKbps`）、`WeakNetworkPreset`（`id/label/values`）、`WeakNetworkHelperStatus`（`'not-installed'|'idle'|'need-vpn-permission'|'running'|'stopped'|'error'`），与 Product-Spec 5.8 对齐；并导出内置预设常量 `WEAK_NETWORK_PRESETS`（弱 WiFi / 3G / 高丢包 / 高延迟四档具体数值）
+- [ ] ADBManager 能力：`src/main/adb/ADBManager.ts` 新增 ① `installWeakNetworkHelper(deviceId)` —— 用 `resolveHelperApkPath()` 复用现有安装实现（`-r` 重装覆盖）；② `startWeakNetwork(deviceId, profile)` —— 拼装并执行 `am start-foreground-service` START（`--es packageName` + `--ei`/`--ef` 各参数），下发前对参数做范围裁剪（与助手端 `WeakNetworkConfig` 一致：latency/jitter 0–60000、loss 0–100、kbps≥0）；③ `stopWeakNetwork(deviceId)` —— 下发 STOP；④ `queryWeakNetworkStatus(deviceId): Promise<WeakNetworkHelperStatus>` —— 先用现有 `LIST_INSTALLED_PACKAGES` 逻辑判断助手是否安装（未装→`not-installed`），再 `dumpsys activity services com.androidtool.piconetworkhelper` / `dumpsys` 查 `WeakNetworkVpnService` 是否在跑（在跑→`running`，否则→`idle`），命令异常→`error`；⑤ `prepareWeakNetworkVpnPermission(deviceId)` —— `am start` 拉起助手 `MainActivity` 触发授权弹窗
+- [ ] 主进程 handler（两处同步）：`src/main/index.ts` 与 `src/main/index-prod.ts` 各新增 `ipcMain.handle` 注册 `INSTALL_WEAKNET_HELPER`/`START_WEAKNET`/`STOP_WEAKNET`/`QUERY_WEAKNET_STATUS`，分别委托到上述 `ADBManager` 方法，并用现有 `AdbCommandError`/`classifyAdbError` 模式把错误转成结构化 IPC 响应（参照现有 install/uninstall handler 的写法）
+- [ ] preload 暴露：`src/main/preload.js` 在 `window.electronAPI` 上新增 `installWeakNetHelper(deviceId)`、`startWeakNet(deviceId, profile)`、`stopWeakNet(deviceId)`、`queryWeakNetStatus(deviceId)` 的 invoke 包装
+- [ ] 渲染层 API：`src/renderer/lib/electronApi.ts` 增加对应的 typed 包装方法，入参/出参用上面的共享类型
+- [ ] 弱网面板组件：新增 `src/renderer/components/WeakNetPanel.tsx`，包含：目标应用选择（下拉，数据来自已安装应用列表）、预设档位按钮组（点击填入参数）、5 个参数的手动输入/滑块（受控，超范围即时校正）、「安装助手」按钮（助手未安装时高亮）、「启动弱网 / 停止弱网」主按钮（按状态切换）、状态徽标（未安装/已就绪/待授权/运行中/已停止/异常）、待授权时的「在设备上授权」引导按钮；props 经 `SimpleApp` 注入回调与状态
+- [ ] 标签页接入：`src/renderer/SimpleApp.tsx` 的 `TabType` 增加 `'weaknet'`，标签栏（现 `devices/logs/performance/network/mirror` 数组）新增 `{ key: 'weaknet', label: '弱网' }`，并在面板区 `activeTab === 'weaknet'` 时挂载 `WeakNetPanel`；进入该标签或切换设备时调用 `queryWeakNetStatus` 拉取状态，起停/安装后刷新状态
+- [ ] 测试断言同步：`tests/smoke.test.js` 增加结构断言——4 个新 IPC 通道在 `channels.ts`、`preload.js`、`electronApi.ts` 三处均存在；`package.json` 的 `pack`/`dist` 含 `helper:prepare`；`extraResources` 含 `pico-helper` 条目；`WeakNetPanel.tsx`/`helperApkBinary.ts`/`prepare-helper-apk.js` 文件存在
+
+**关键文件**
+| 文件路径 | 说明 |
+|----------|------|
+| `android-device-monitor/scripts/prepare-helper-apk.js` | 新增：把 pico-network-helper 构建产物暂存到 `vendor/pico-helper/`（路径从 `__dirname` 推导，缺产物时报错指引） |
+| `android-device-monitor/package.json` | 修改：`extraResources` 增 `pico-helper`；新增 `helper:prepare` 脚本并串入 `pack`/`dist` |
+| `android-device-monitor/src/main/adb/helperApkBinary.ts` | 新增：助手 APK 运行时定位（resourcesPath + __dirname 双回退） |
+| `android-device-monitor/src/shared/ipc/channels.ts` | 修改：新增 4 个弱网 IPC 通道 |
+| `android-device-monitor/src/shared/types/index.ts` | 修改：`WeakNetworkProfile`/`WeakNetworkPreset`/`WeakNetworkHelperStatus` + `WEAK_NETWORK_PRESETS` |
+| `android-device-monitor/src/main/adb/ADBManager.ts` | 修改：安装助手、START/STOP 下发、dumpsys 状态查询、VPN 授权拉起 |
+| `android-device-monitor/src/main/index.ts` | 修改：注册 4 个弱网 IPC handler |
+| `android-device-monitor/src/main/index-prod.ts` | 修改：与 index.ts 同步注册 4 个弱网 IPC handler |
+| `android-device-monitor/src/main/preload.js` | 修改：暴露 4 个弱网 invoke 包装 |
+| `android-device-monitor/src/renderer/lib/electronApi.ts` | 修改：4 个 typed 渲染层 API |
+| `android-device-monitor/src/renderer/components/WeakNetPanel.tsx` | 新增：弱网控制面板（选包名/预设档位/手动参数/安装/起停/状态/授权引导） |
+| `android-device-monitor/src/renderer/SimpleApp.tsx` | 修改：`TabType` 加 `weaknet`、标签栏加「弱网」、挂载面板、状态拉取与刷新 |
+| `android-device-monitor/tests/smoke.test.js` | 修改：IPC 三处同步、打包脚本/资源、组件与脚本文件存在性断言 |
+
+**验收标准**
+- `npm run build` 通过；`npm test` 通过（含新增结构断言）
+- 4 个弱网 IPC 通道在 `channels.ts` / `preload.js` / `electronApi.ts` 三处一致存在；`index.ts` 与 `index-prod.ts` 的 handler 注册一致
+- 「弱网」标签页可见并可切换；进入时按当前设备拉取并展示助手状态
+- 助手未安装时，点「安装助手」用内置 APK 成功 `adb install`，状态刷新为「已就绪」
+- 目标应用下拉来自真实已安装列表；选预设档位即时填入 5 个参数，手动改参数超范围被裁剪
+- 点「启动弱网」下发 START 后状态变「运行中」；点「停止」下发 STOP 后状态变「已停止」
+- 首次启动且未授权 VPN 时，状态显示「待授权」并提供「在设备上授权」按钮，点击可在头显拉起授权弹窗
+- 打包（`npm run dist`）时 `helper:prepare` 把助手 APK 纳入 `extraResources`，安装包内含 `pico-helper/pico-network-helper.apk`
+- 全程无硬编码绝对路径；真机（Pico）端到端验证目标 App 弱网生效列为本 Phase 的真机验收项
+- 已知降级项（待真机细化）：助手状态查询仅可靠产出「未安装/已就绪/运行中/异常」四态；`need-vpn-permission`（待授权）与 `stopped` 无法仅凭 adb/dumpsys 稳定推断，首次授权改由 UI 的「在设备上授权 VPN」按钮手动触发。VPN 授权态的自动探测留待真机验证后再评估实现
+
+---
+
 ## 4. 当前真实目录结构
 
 ```text
@@ -762,6 +823,7 @@ android-device-monitor/
 | Phase 10: 批量安装 | 已落地 | 单 APK 多设备并发安装、并发限流、逐台状态与重试已落地（已整合进设备页安装面板） |
 | Phase 11: 设备文件管理 | 已落地待真机回归 | 设备文件浏览/上传/下载/多选批量下载/删除/打开所在文件夹/快捷入口容错已落地 |
 | Phase 12: 历史设备保存与快速重连 | 待开发 | WiFi 历史设备卡片、一键快速重连、IP 变更就地输入重连、移除二次确认；复用现有 `CONNECT_WIFI` 与 localStorage 持久化，无新增 IPC |
+| Phase 13: Pico 弱网控制桌面集成 | 待开发 | 「弱网」标签页、内置助手 APK 一键安装、目标包名选择、预设档位+手动参数、START/STOP 下发、dumpsys 状态查询、VPN 授权引导；新增 4 个弱网 IPC（三处同步 + 双 entry 注册），助手端 APK 已完成 |
 
 **当前阶段判断**
 - 项目已经越过“脚手架阶段”

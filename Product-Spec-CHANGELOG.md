@@ -1,5 +1,19 @@
 # Product Spec Changelog
 
+## 2026-06-02
+
+### 新增
+- 新增「弱网控制」模块（功能需求 2.6）：桌面工具作为 Pico 弱网助手（pico-network-helper APK）的控制台，对目标 App 单独施加丢包/延迟/抖动/上下行限速，用于验证弱网下表现。助手端架构见 ADR 0002，TUN 传输由 native tun2socks 内核（hev-socks5-tunnel，预编译 .so）承载，见 ADR 0003。
+- 桌面端职责：① 内置预编译助手 APK（extraResources）+ 复用现有应用安装能力一键安装；② 复用已安装应用列表选目标包名；③ 预设档位（弱 WiFi / 3G / 高丢包 / 高延迟）+ 手动微调 5 个参数；④ 下发 START/STOP 到助手 `WeakNetworkControlService`；⑤ VPN 授权引导；⑥ 通过 `dumpsys` 实查助手运行状态。
+- 新增独立「弱网」标签页（与现有「网络」HTTP 抓包页签分离，职责清晰）。
+- 新增用户流程 4.5 弱网控制流程；新增数据模型 5.8（`WeakNetworkProfile` / `WeakNetworkPreset` / `WeakNetworkHelperStatus`）。
+- 新增开发计划 Phase「Pico 弱网控制桌面集成」，细化交由 DEV-PLAN.md。
+
+### 能力边界说明
+- 本模块不引入 AI（用户确认采用「预设档位 + 手动微调」，符合简单优先原则）。
+- 助手状态为单向 `am` 指令下发，桌面端通过 `dumpsys` 实查推断状态，不要求改动助手 APK。
+- 目标 ABI 仅 arm64-v8a（Pico = 高通 XR2）。
+
 ## 2026-05-28
 
 - 性能快照：截图采集拆为 provider 链路，优先使用 raw framebuffer 快路径，失败时自动回退 PNG screencap，为后续实时流 / SDK 截图通道保留接入点。

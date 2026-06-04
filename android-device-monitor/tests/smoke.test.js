@@ -783,4 +783,63 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain("const [installTargets, setInstallTargets] = useState<Set<string>>(new Set())");
     expect(simpleAppSource).not.toContain('prev.size === 0 ? new Set([selectedDevice.id]) : prev');
   });
+
+  test('weak-network desktop integration is wired end to end', () => {
+    // 新增文件存在
+    expect(fs.existsSync(path.join(root, 'src/renderer/components/WeakNetPanel.tsx'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'src/main/adb/helperApkBinary.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'scripts/prepare-helper-apk.js'))).toBe(true);
+
+    // 4 个弱网 IPC 通道在 channels / preload / electronApi 三处同步
+    const channelsSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const weaknetChannels = ['weaknet:install-helper', 'weaknet:start', 'weaknet:stop', 'weaknet:status'];
+    for (const channel of weaknetChannels) {
+      expect(channelsSource).toContain(channel);
+      expect(preloadSource).toContain(channel);
+    }
+    for (const method of ['installWeakNetHelper', 'startWeakNet', 'stopWeakNet', 'queryWeakNetStatus']) {
+      expect(preloadSource).toContain(method);
+      expect(electronApiSource).toContain(method);
+    }
+
+    // 主进程 handler 在 index.ts 与 index-prod.ts 双处注册
+    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const indexProdSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+    for (const source of [indexSource, indexProdSource]) {
+      expect(source).toContain('IPC_CHANNELS.INSTALL_WEAKNET_HELPER');
+      expect(source).toContain('IPC_CHANNELS.START_WEAKNET');
+      expect(source).toContain('IPC_CHANNELS.STOP_WEAKNET');
+      expect(source).toContain('IPC_CHANNELS.QUERY_WEAKNET_STATUS');
+    }
+
+    // ADBManager 提供弱网能力
+    const adbManagerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    expect(adbManagerSource).toContain('async installWeakNetworkHelper');
+    expect(adbManagerSource).toContain('async startWeakNetwork');
+    expect(adbManagerSource).toContain('async stopWeakNetwork');
+    expect(adbManagerSource).toContain('async queryWeakNetworkStatus');
+
+    // SimpleApp 接入弱网标签页
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+    expect(simpleAppSource).toContain('WeakNetPanel');
+    expect(simpleAppSource).toContain("'weaknet'");
+
+    // 打包：helper:prepare 串入 pack/dist，extraResources 含 pico-helper
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
+    expect(pkg.scripts['helper:prepare']).toContain('prepare-helper-apk.js');
+    expect(pkg.scripts.pack).toContain('helper:prepare');
+    expect(pkg.scripts.dist).toContain('helper:prepare');
+    expect(pkg.build.extraResources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ from: 'vendor/pico-helper', to: 'pico-helper' }),
+      ])
+    );
+
+    // 发布脚本准备并拷贝助手 APK
+    const ps1Source = fs.readFileSync(path.join(root, 'scripts/build-and-package.ps1'), 'utf-8');
+    expect(ps1Source).toContain('npm run helper:prepare');
+    expect(ps1Source).toContain('vendor\\pico-helper');
+  });
 });

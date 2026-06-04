@@ -4,7 +4,7 @@ import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
 import { ScrcpyManager } from './scrcpy/scrcpyManager';
-import { LogEntry, MirrorStartOptions, PerformanceMetrics, PerformanceRecordingOptions, PerformanceSessionExportPayload } from '../shared/types';
+import { LogEntry, MirrorStartOptions, PerformanceMetrics, PerformanceRecordingOptions, PerformanceSessionExportPayload, WeakNetworkProfile } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
@@ -343,6 +343,42 @@ const setupIpcHandlers = () => {
       return { success: true, data: packages };
     } catch (error) {
       return toIpcErrorResponse(error, '获取已安装应用失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.INSTALL_WEAKNET_HELPER, async (_event, deviceId: string) => {
+    try {
+      const output = await adbManager.installWeakNetworkHelper(deviceId);
+      return { success: true, data: { output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '安装弱网助手失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.START_WEAKNET, async (_event, deviceId: string, profile: WeakNetworkProfile) => {
+    try {
+      const output = await adbManager.startWeakNetwork(deviceId, profile);
+      return { success: true, data: { output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '启动弱网失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.STOP_WEAKNET, async (_event, deviceId: string) => {
+    try {
+      const output = await adbManager.stopWeakNetwork(deviceId);
+      return { success: true, data: { output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '停止弱网失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.QUERY_WEAKNET_STATUS, async (_event, deviceId: string) => {
+    try {
+      const status = await adbManager.queryWeakNetworkStatus(deviceId);
+      return { success: true, data: status };
+    } catch (error) {
+      return toIpcErrorResponse(error, '查询弱网状态失败');
     }
   });
 

@@ -22,6 +22,8 @@ android-device-monitor/vendor/platform-tools/**
 !android-device-monitor/vendor/platform-tools/README.md
 android-device-monitor/vendor/scrcpy/**
 !android-device-monitor/vendor/scrcpy/
+android-device-monitor/vendor/pico-helper/**
+!android-device-monitor/vendor/pico-helper/
 
 # Local tool/workflow state
 .claude/

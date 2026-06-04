@@ -317,3 +317,39 @@ export interface IpcResponse<T = unknown> {
   hint?: string;
   details?: string;
 }
+
+// ===== Pico 弱网控制（pico-network-helper 助手 APK 的桌面控制台）=====
+
+// 弱网参数，与助手 WeakNetworkControlService 的 extras 一一对应。
+export interface WeakNetworkProfile {
+  packageName: string;        // 目标应用包名
+  latencyMs: number;          // 附加延迟（毫秒，0-60000）
+  jitterMs: number;           // 抖动（毫秒，0-60000）
+  packetLossPercent: number;  // 丢包率（0-100）
+  uploadKbps: number;         // 上行限速（kbps，0=不限）
+  downloadKbps: number;       // 下行限速（kbps，0=不限）
+}
+
+// 预设档位：一键填入参数，可再手动微调。
+export interface WeakNetworkPreset {
+  id: string;
+  label: string;
+  values: Omit<WeakNetworkProfile, 'packageName'>;
+}
+
+// 助手在目标设备上的状态（桌面端通过 dumpsys 实查推断）。
+export type WeakNetworkHelperStatus =
+  | 'not-installed'        // 设备未安装助手 APK
+  | 'idle'                 // 已安装、未运行
+  | 'need-vpn-permission'  // 已安装但未授予 VPN 权限
+  | 'running'              // 弱网生效中
+  | 'stopped'              // 已停止
+  | 'error';               // 异常（命令失败等）
+
+// 内置预设档位（参考值，最终以实测为准）。
+export const WEAK_NETWORK_PRESETS: WeakNetworkPreset[] = [
+  { id: 'weak-wifi', label: '弱 WiFi', values: { latencyMs: 150, jitterMs: 40, packetLossPercent: 2, uploadKbps: 2048, downloadKbps: 4096 } },
+  { id: '3g', label: '3G', values: { latencyMs: 300, jitterMs: 80, packetLossPercent: 1, uploadKbps: 384, downloadKbps: 1024 } },
+  { id: 'high-loss', label: '高丢包', values: { latencyMs: 100, jitterMs: 30, packetLossPercent: 15, uploadKbps: 0, downloadKbps: 0 } },
+  { id: 'high-latency', label: '高延迟', values: { latencyMs: 800, jitterMs: 150, packetLossPercent: 0, uploadKbps: 0, downloadKbps: 0 } },
+];

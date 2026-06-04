@@ -1,9 +1,10 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest, WeakNetworkHelperStatus, WeakNetworkProfile } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
 import { FilesPanel } from './components/FilesPanel';
+import { WeakNetPanel } from './components/WeakNetPanel';
 import { ElectronResult, hasElectronAPI } from './lib/electronApi';
 import {
   buildHistoryEntryFromDevice,
@@ -33,7 +34,7 @@ const isLikelyPicoDevice = (device: DeviceInfo | null): boolean => {
   return identity.includes('pico') || identity.includes('a9210') || identity.includes('sparrow');
 };
 
-type TabType = 'devices' | 'logs' | 'performance' | 'network' | 'mirror';
+type TabType = 'devices' | 'logs' | 'performance' | 'network' | 'mirror' | 'weaknet';
 type LogLevelFilter = LogEntry['level'] | 'all';
 type ApkInstallStatus = 'queued' | 'installing' | 'success' | 'failed';
 
@@ -131,6 +132,11 @@ function SimpleApp() {
   const [activeTab, setActiveTab] = useState<TabType>('devices');
   const [mirrorSessionsByDeviceId, setMirrorSessionsByDeviceId] = useState<Record<string, MirrorSession>>({});
   const [mirrorStartingDeviceIds, setMirrorStartingDeviceIds] = useState<Set<string>>(new Set());
+  const [weakNetStatus, setWeakNetStatus] = useState<WeakNetworkHelperStatus>('not-installed');
+  const [weakNetPackages, setWeakNetPackages] = useState<string[]>([]);
+  const [weakNetLoadingPackages, setWeakNetLoadingPackages] = useState(false);
+  const [weakNetBusy, setWeakNetBusy] = useState(false);
+  const [weakNetError, setWeakNetError] = useState<string | null>(null);
   const [logVersion, setLogVersion] = useState(0);
   const [logViewport, setLogViewport] = useState({ scrollTop: 0, height: 320 });
   const [performanceByDeviceId, setPerformanceByDeviceId] = useState<Record<string, PerformanceMetrics>>({});
@@ -519,6 +525,16 @@ function SimpleApp() {
       return () => clearInterval(interval);
     }
   }, [selectedDevice, activeTab, performanceEnabledDeviceIds]);
+
+  // 进入「弱网」标签或切换设备时，拉取助手状态与已安装应用列表。
+  useEffect(() => {
+    if (selectedDevice && activeTab === 'weaknet') {
+      setWeakNetError(null);
+      void loadWeakNetStatus();
+      void loadWeakNetPackages();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDevice, activeTab]);
 
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
@@ -1296,6 +1312,63 @@ function SimpleApp() {
       setError('\u7f51\u7edc\u6293\u53d6\u5931\u8d25\uff1a' + (err as Error).message);
     }
   };
+
+  const loadWeakNetStatus = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    try {
+      const result = await window.electronAPI!.queryWeakNetStatus(selectedDevice.id);
+      if (result.success && result.data) {
+        setWeakNetStatus(result.data);
+      } else {
+        setWeakNetStatus('error');
+      }
+    } catch {
+      setWeakNetStatus('error');
+    }
+  };
+
+  const loadWeakNetPackages = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    setWeakNetLoadingPackages(true);
+    try {
+      const result = await window.electronAPI!.listInstalledPackages(selectedDevice.id);
+      setWeakNetPackages(result.success && result.data ? result.data : []);
+    } catch {
+      setWeakNetPackages([]);
+    } finally {
+      setWeakNetLoadingPackages(false);
+    }
+  };
+
+  const runWeakNetAction = async (action: () => Promise<ElectronResult<unknown>>, failureMessage: string) => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    setWeakNetBusy(true);
+    setWeakNetError(null);
+    try {
+      const result = await action();
+      if (!result.success) {
+        setWeakNetError(result.error || failureMessage);
+      }
+    } catch (err) {
+      setWeakNetError(`${failureMessage}：${(err as Error).message}`);
+    } finally {
+      setWeakNetBusy(false);
+      await loadWeakNetStatus();
+    }
+  };
+
+  const handleInstallWeakNetHelper = () =>
+    runWeakNetAction(() => window.electronAPI!.installWeakNetHelper(selectedDevice!.id), '安装弱网助手失败')
+      .then(() => loadWeakNetPackages());
+
+  const handleStartWeakNet = (profile: WeakNetworkProfile) =>
+    runWeakNetAction(() => window.electronAPI!.startWeakNet(selectedDevice!.id, profile), '启动弱网失败');
+
+  const handleStopWeakNet = () =>
+    runWeakNetAction(() => window.electronAPI!.stopWeakNet(selectedDevice!.id), '停止弱网失败');
+
+  const handleAuthorizeWeakNet = () =>
+    runWeakNetAction(() => window.electronAPI!.launchApp(selectedDevice!.id, 'com.androidtool.piconetworkhelper'), '拉起助手授权页失败');
 
   const handleStartMirror = async (params: { maxSize?: number; bitRate?: string }) => {
     if (!selectedDevice || !hasElectronAPI()) return;
@@ -2253,6 +2326,7 @@ function SimpleApp() {
                   { key: 'performance' as TabType, label: '\u6027\u80fd' },
                   { key: 'network' as TabType, label: '\u7f51\u7edc' },
                   { key: 'mirror' as TabType, label: '\u6295\u5c4f' },
+                  { key: 'weaknet' as TabType, label: '\u5f31\u7f51' },
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -2403,6 +2477,23 @@ function SimpleApp() {
                     starting={mirrorStartingDeviceIds.has(selectedDevice.id)}
                     onStart={handleStartMirror}
                     onStop={handleStopMirror}
+                  />
+                )}
+
+                {activeTab === 'weaknet' && (
+                  <WeakNetPanel
+                    deviceConnected={Boolean(selectedDevice)}
+                    status={weakNetStatus}
+                    installedPackages={weakNetPackages}
+                    loadingPackages={weakNetLoadingPackages}
+                    busy={weakNetBusy}
+                    errorMessage={weakNetError}
+                    onRefreshPackages={loadWeakNetPackages}
+                    onRefreshStatus={loadWeakNetStatus}
+                    onInstallHelper={handleInstallWeakNetHelper}
+                    onStart={handleStartWeakNet}
+                    onStop={handleStopWeakNet}
+                    onAuthorize={handleAuthorizeWeakNet}
                   />
                 )}
               </div>

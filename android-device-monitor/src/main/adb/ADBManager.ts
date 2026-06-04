@@ -5,12 +5,25 @@ import * as path from 'path';
 import { statSync as nodeFsStatSync, mkdtempSync as nodeFsMkdtempSync, renameSync as nodeFsRenameSync, copyFileSync as nodeFsCopyFileSync, rmSync as nodeFsRmSync } from 'fs';
 import { tmpdir as nodeOsTmpdir } from 'os';
 import type { ExecFileOptions } from 'child_process';
-import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo } from '../../shared/types';
+import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo, WeakNetworkHelperStatus, WeakNetworkProfile } from '../../shared/types';
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
 import { ResolvedAdbBinary, getBundledAdbCandidates, resolveBundledAdbBinaryPath } from './adbBinary';
+import { resolveHelperApkPath } from './helperApkBinary';
 import { AdbRuntimeInspector, CapturedPerformanceSnapshot } from './runtimeInspector';
 import { PerformanceRecordingManager } from './performanceRecording';
+
+// Pico 弱网助手（pico-network-helper）的包名与控制入口，与助手 AndroidManifest / 控制服务一致。
+const WEAKNET_HELPER_PACKAGE = 'com.androidtool.piconetworkhelper';
+const WEAKNET_CONTROL_COMPONENT = `${WEAKNET_HELPER_PACKAGE}/.control.WeakNetworkControlService`;
+const WEAKNET_ACTION_START = `${WEAKNET_HELPER_PACKAGE}.START`;
+const WEAKNET_ACTION_STOP = `${WEAKNET_HELPER_PACKAGE}.STOP`;
+// 助手 VPN 隧道的专属地址（WeakNetworkVpnService.addAddress("10.88.0.2", 32)），
+// 仅在弱网生效期间存在，停止时随 tun fd 关闭立即消失——比 dumpsys 服务记录更可靠。
+const WEAKNET_TUN_ADDRESS = '10.88.0.2';
+
+const clampInt = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, Math.round(Number.isFinite(value) ? value : 0)));
 
 export interface PerformanceInfo {
   provider?: 'android' | 'pico';
@@ -1133,6 +1146,104 @@ export class ADBManager extends EventEmitter {
     await this.execAdb(['-s', deviceId, 'shell', 'am', 'force-stop', cleanedPackage], {
       timeout: 10 * 1000,
     });
+  }
+
+  // ===== Pico 弱网控制 =====
+
+  // 安装内置弱网助手 APK（复用现有安装链路，-r -d 允许重装/降级覆盖）。
+  async installWeakNetworkHelper(deviceId: string): Promise<string> {
+    const apkPath = resolveHelperApkPath();
+    return this.installApk(deviceId, apkPath, { allowDowngrade: true });
+  }
+
+  // 下发 START：对目标应用施加弱网。参数范围与助手端 WeakNetworkConfig 的裁剪保持一致。
+  async startWeakNetwork(deviceId: string, profile: WeakNetworkProfile): Promise<string> {
+    const cleanedPackage = this.assertValidPackageName(profile.packageName);
+    const latencyMs = clampInt(profile.latencyMs, 0, 60000);
+    const jitterMs = clampInt(profile.jitterMs, 0, 60000);
+    const packetLossPercent = Math.max(0, Math.min(100, Number.isFinite(profile.packetLossPercent) ? profile.packetLossPercent : 0));
+    const uploadKbps = clampInt(profile.uploadKbps, 0, Number.MAX_SAFE_INTEGER);
+    const downloadKbps = clampInt(profile.downloadKbps, 0, Number.MAX_SAFE_INTEGER);
+
+    // 用 execFile（非 shell）按独立 argv 传参，extras 无需手动转义，避免注入。
+    const result = await this.execAdbWithExitCode(
+      [
+        '-s', deviceId, 'shell', 'am', 'start-foreground-service',
+        '-n', WEAKNET_CONTROL_COMPONENT,
+        '-a', WEAKNET_ACTION_START,
+        '--es', 'packageName', cleanedPackage,
+        '--ei', 'latencyMs', String(latencyMs),
+        '--ei', 'jitterMs', String(jitterMs),
+        '--ef', 'packetLossPercent', String(packetLossPercent),
+        '--ei', 'uploadKbps', String(uploadKbps),
+        '--ei', 'downloadKbps', String(downloadKbps),
+      ],
+      { timeout: 15 * 1000 }
+    );
+    const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+    if (result.exitCode !== 0 || /error|exception/i.test(output)) {
+      throw new AdbCommandError({
+        code: 'ADB_COMMAND_FAILED',
+        message: '启动弱网失败',
+        hint: '请确认已安装弱网助手、已在设备上授予 VPN 权限，且目标应用包名存在。',
+        details: output || 'am start-foreground-service did not succeed.',
+      });
+    }
+    return output;
+  }
+
+  // 下发 STOP：解除弱网，目标应用网络恢复。
+  async stopWeakNetwork(deviceId: string): Promise<string> {
+    const result = await this.execAdbWithExitCode(
+      [
+        '-s', deviceId, 'shell', 'am', 'start-foreground-service',
+        '-n', WEAKNET_CONTROL_COMPONENT,
+        '-a', WEAKNET_ACTION_STOP,
+      ],
+      { timeout: 15 * 1000 }
+    );
+    const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+    if (result.exitCode !== 0 || /error|exception/i.test(output)) {
+      throw new AdbCommandError({
+        code: 'ADB_COMMAND_FAILED',
+        message: '停止弱网失败',
+        hint: '请确认弱网助手仍在设备上运行。',
+        details: output || 'am start-foreground-service (STOP) did not succeed.',
+      });
+    }
+    return output;
+  }
+
+  // 通过 dumpsys 实查助手状态：未安装 / 运行中 / 已就绪空闲 / 异常。
+  // 说明：VPN 授权态（need-vpn-permission）与 stopped 无法仅凭 adb 可靠区分——
+  // VpnService 的用户授权记录在系统侧，没有稳定的 dumpsys 查询口径。因此这里只产出
+  // 可靠的四态；首次授权通过 UI 的「在设备上授权 VPN」按钮手动触发（拉起助手 MainActivity）。
+  // 自动「待授权」探测留待 Pico 真机验证阶段再细化（见 DEV-PLAN Phase 13）。
+  async queryWeakNetworkStatus(deviceId: string): Promise<WeakNetworkHelperStatus> {
+    try {
+      const installed = await this.execAdbWithExitCode(
+        ['-s', deviceId, 'shell', 'pm', 'list', 'packages', WEAKNET_HELPER_PACKAGE],
+        { timeout: 15 * 1000 }
+      );
+      const installedOutput = `${installed.stdout}\n${installed.stderr}`;
+      if (!installedOutput.includes(`package:${WEAKNET_HELPER_PACKAGE}`)) {
+        return 'not-installed';
+      }
+
+      // 以 VPN 隧道接口的专属地址判断是否生效：tun 接口只在弱网运行期间存在，
+      // 停止时引擎关闭 tun fd 后立即消失。不用 dumpsys 服务记录——停止后记录会短暂残留导致误报。
+      const addr = await this.execAdbWithExitCode(['-s', deviceId, 'shell', 'ip', 'addr'], {
+        timeout: 15 * 1000,
+      });
+      const addrOutput = `${addr.stdout}\n${addr.stderr}`;
+      if (addrOutput.includes(WEAKNET_TUN_ADDRESS)) {
+        return 'running';
+      }
+      return 'idle';
+    } catch (error) {
+      logger.warn('查询弱网助手状态失败', error);
+      return 'error';
+    }
   }
 
   private assertValidPackageName(packageName: string): string {
