@@ -1643,6 +1643,23 @@ function SimpleApp() {
     }
   };
 
+  // \u6309\u5f53\u524d\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7\uff1a\u4e0d\u91cd\u65b0\u91c7\u96c6\uff0c\u76f4\u63a5\u7528\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u7684\u8bcd\u5173\u8054\u8fc7\u6ee4\u6574\u4efd\u843d\u76d8\u6587\u4ef6\uff0c\u5207\u51fa\u4e00\u4efd\u5b8c\u6574\u5b50\u96c6\u3002
+  const exportFullLogsByPackage = async () => {
+    if (!hasElectronAPI() || !selectedDevice) return;
+    const pkg = logPackageFilter.trim() || packageFilter.trim();
+    if (!pkg) {
+      setError('\u8bf7\u5148\u5728\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u5199\u8981\u5bfc\u51fa\u7684\u5305\u540d');
+      return;
+    }
+    const result = await window.electronAPI!.exportFullLogsByPackage(selectedDevice.id, pkg);
+    if (result.success) {
+      setError('');
+      setLastExportedLogPath(result.data || null);
+    } else if (result.error !== '\u53d6\u6d88\u5bfc\u51fa') {
+      setError(result.error || '\u6309\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7\u5931\u8d25');
+    }
+  };
+
   const showCrashAndAnrLogs = () => {
     setFilterLevel('E');
     setUseRegexSearch(false);
@@ -2001,6 +2018,7 @@ function SimpleApp() {
         >{'\u6e05\u7a7a'}</button>
         <button onClick={exportVisibleLogs} title={'导出当前可见 / 筛选后的日志（受等级、搜索与显示上限影响）'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa'}</button>
         <button onClick={exportFullLogs} title={'从监控第一行到当前的完整原始日志（全等级，不受 2 万条上限与筛选影响）'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
+        <button onClick={exportFullLogsByPackage} title={'\u5728\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\u4e0a\uff0c\u7528\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u7684\u5305\u540d\u5173\u8054\u8fc7\u6ee4\uff0c\u5207\u51fa\u4e00\u4efd\u5b8c\u6574\u5b50\u96c6\uff08\u591a\u884c\u5806\u6808\u6574\u6761\u4fdd\u7559\uff0c\u4e0d\u91cd\u65b0\u91c7\u96c6\uff09'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u6309\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
         {lastExportedLogPath && (
           <button
             onClick={async () => {

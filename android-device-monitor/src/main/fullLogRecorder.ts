@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
 import type { LogEntry } from '../shared/types';
 import { logger } from './logger';
 import { resolveRuntimeAppRoot } from './performanceSnapshots';
@@ -39,13 +40,20 @@ const getDir = (): string => {
 // deviceId 可能含 ':' '/' 等不能做文件名的字符（如 wifi 的 ip:port），统一替换。
 const sanitize = (deviceId: string): string => deviceId.replace(/[^a-zA-Z0-9._-]/g, '_');
 
-// 与「导出当前可见日志」一致的行格式，便于两种导出对照阅读（本地时间）。
+// 落盘行格式（本地时间）。在「导出当前可见日志」的基础上多存一列「进程归属包名」，
+// 这样事后「按包名导出完整日志」才能复刻实时采集的关联匹配口径——应用自己打的日志正文里
+// 往往不含包名，得靠 PID 反查出的归属包名才判得出归属。无归属时用 '-' 占位。
 const formatLine = (log: LogEntry): string => {
   const d = new Date(log.timestamp);
   const pad = (n: number, len = 2) => String(n).padStart(len, '0');
   const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
-  return `${ts} ${log.deviceId} ${log.processId}/${log.threadId} ${log.level}/${log.tag}: ${log.message}`;
+  const pkg = log.packageName?.trim() || '-';
+  return `${ts} ${log.deviceId} ${pkg} ${log.processId}/${log.threadId} ${log.level}/${log.tag}: ${log.message}`;
 };
+
+// 条目头行的时间戳前缀（formatLine 写出的格式）。用于把多行堆栈续行归并到同一条记录，
+// 避免按包名切分时把堆栈续行当成独立行漏掉。
+const ENTRY_HEAD_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} /;
 
 // 开始记录某设备的完整日志：开新文件（覆盖旧的），返回文件路径。
 export const start = (deviceId: string): string => {
@@ -85,6 +93,63 @@ export const stop = (deviceId: string): void => {
 
 // 当前设备完整日志文件路径（无则 null）。
 export const getPath = (deviceId: string): string | null => filePaths.get(deviceId) ?? null;
+
+// 按包名从该设备的完整落盘日志切出一份完整子集，写到 destPath，返回命中的记录条数。
+// 不重新采集：直接在「全量落盘文件」上做关联过滤。口径与实时采集一致——记录里任意位置
+//（进程归属包名 / TAG / 消息体 / PID）出现该词即整条保留，多行堆栈整条不拆。
+// 流式读写，避免长会话的大文件一次性读进内存。
+export const exportByPackage = async (
+  deviceId: string,
+  packageName: string,
+  destPath: string
+): Promise<number> => {
+  const src = filePaths.get(deviceId);
+  if (!src || !fs.existsSync(src)) {
+    throw new Error('没有可导出的完整日志，请先开始日志采集');
+  }
+  const needle = packageName.trim().toLowerCase();
+  if (!needle) {
+    throw new Error('请先在「应用/包名」里填写要导出的包名');
+  }
+
+  const out = fs.createWriteStream(destPath, { flags: 'w', encoding: 'utf-8' });
+  const rl = readline.createInterface({
+    input: fs.createReadStream(src, { encoding: 'utf-8' }),
+    crlfDelay: Infinity,
+  });
+
+  let record: string[] = [];
+  let keep = false;
+  let matched = 0;
+
+  const flush = () => {
+    if (record.length && keep) {
+      out.write(record.join('\n') + '\n');
+      matched++;
+    }
+    record = [];
+    keep = false;
+  };
+
+  for await (const line of rl) {
+    if (ENTRY_HEAD_RE.test(line)) {
+      flush(); // 新记录开始，先结算上一条
+      record.push(line);
+      keep = line.toLowerCase().includes(needle);
+    } else {
+      // 续行（多行堆栈等）：归并到当前记录，命中也算整条命中
+      record.push(line);
+      if (!keep && line.toLowerCase().includes(needle)) keep = true;
+    }
+  }
+  flush();
+
+  await new Promise<void>((resolve, reject) => {
+    out.on('error', reject);
+    out.end(() => resolve());
+  });
+  return matched;
+};
 
 // 退出时关闭所有流。
 export const stopAll = (): void => {

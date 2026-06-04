@@ -667,6 +667,38 @@ const setupIpcHandlers = () => {
     }
   });
 
+  // 按当前包名导出完整日志：在「全量落盘文件」基础上用用户填的包名做关联过滤，切出一份完整子集
+  //（多行堆栈整条保留），不需要重新采集。0 命中时删掉空文件并提示。
+  ipcMain.handle(IPC_CHANNELS.EXPORT_FULL_LOGS_BY_PACKAGE, async (_event, deviceId: string, packageName: string) => {
+    try {
+      const src = fullLogRecorder.getPath(deviceId);
+      if (!src || !nodeFs.existsSync(src)) {
+        return { success: false, error: '没有可导出的完整日志，请先开始日志采集' };
+      }
+      const pkg = (packageName || '').trim();
+      if (!pkg) {
+        return { success: false, error: '请先在「应用/包名」里填写要导出的包名' };
+      }
+      const safePkg = pkg.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: '按包名导出完整日志',
+        defaultPath: `android-full-logs-${safePkg}-${Date.now()}.log`,
+        filters: [{ name: '日志文件', extensions: ['log', 'txt'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: '取消导出' };
+      }
+      const matched = await fullLogRecorder.exportByPackage(deviceId, pkg, result.filePath);
+      if (matched === 0) {
+        try { await fs.unlink(result.filePath); } catch { /* noop */ }
+        return { success: false, error: `「${pkg}」没有匹配到任何完整日志` };
+      }
+      return { success: true, data: result.filePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '按包名导出完整日志失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.EXPORT_PERFORMANCE_SESSION, async (_event, payload: PerformanceSessionExportPayload) => {
     try {
       const result = await dialog.showSaveDialog(mainWindow!, {

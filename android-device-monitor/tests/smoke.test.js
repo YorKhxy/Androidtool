@@ -86,6 +86,10 @@ describe('project smoke checks', () => {
     // IPC 契约：导出完整日志通道齐全
     expect(channels).toContain("EXPORT_FULL_LOGS: 'log:export-full'");
     expect(preload).toContain('exportFullLogs');
+    // 按包名导出完整日志：事后在落盘文件上切一份，通道与落盘的切分函数齐全
+    expect(channels).toContain("EXPORT_FULL_LOGS_BY_PACKAGE: 'log:export-full-by-package'");
+    expect(preload).toContain('exportFullLogsByPackage');
+    expect(recorder).toContain('export const exportByPackage');
   });
 
   test('logcat cleanup has bounded buffers and kills process trees on Windows', () => {
