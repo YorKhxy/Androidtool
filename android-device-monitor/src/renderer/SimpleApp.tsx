@@ -202,6 +202,8 @@ function SimpleApp() {
   const [installedPackages, setInstalledPackages] = useState<string[]>([]);
   const [installedPackagesLoading, setInstalledPackagesLoading] = useState(false);
   const [appFilter, setAppFilter] = useState('');
+  // 当前设备上在运行的应用包名集合：用于已安装列表标「运行中」并禁止重复启动。轮询刷新，反映真实状态。
+  const [runningPackages, setRunningPackages] = useState<Set<string>>(new Set());
   const [busyPackage, setBusyPackage] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<'launch' | 'stop' | 'uninstall' | null>(null);
   // 应用内确认弹窗：取代原生 window.confirm —— 后者在 Electron 渲染层关闭后会让网页文档丢键盘焦点，
@@ -264,6 +266,7 @@ function SimpleApp() {
   const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
   const [apkInstallStates, setApkInstallStates] = useState<Record<string, DeviceApkInstallState>>({});
   const [pendingApks, setPendingApks] = useState<{ path: string; fileName: string }[]>([]);
+  const [isApkDragOver, setIsApkDragOver] = useState(false); // 拖拽 APK 到待安装区时高亮
   const [installTargets, setInstallTargets] = useState<Set<string>>(new Set());
   const [installConcurrency, setInstallConcurrency] = useState(4);
   const [installAllowDowngrade, setInstallAllowDowngrade] = useState(false);
@@ -636,6 +639,18 @@ function SimpleApp() {
     });
   }, []);
 
+  // 全局拖拽守卫：拦掉窗口默认的「拖入文件即导航到 file://」行为——否则把 APK 拖偏到拖放区之外，
+  // 整个界面会被替换成该文件，体验崩坏。真正的接收逻辑在待安装拖放区里单独处理。
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', prevent);
+    window.addEventListener('drop', prevent);
+    return () => {
+      window.removeEventListener('dragover', prevent);
+      window.removeEventListener('drop', prevent);
+    };
+  }, []);
+
   // 安全兜底：万一初始化某步卡住，最多 15 秒后也撤掉「启动中」遮罩，避免永久锁死。
   useEffect(() => {
     const timer = window.setTimeout(() => setAppReady(true), 15000);
@@ -694,6 +709,20 @@ function SimpleApp() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDevice?.id]);
+
+  // 轮询当前设备「运行中」应用：仅设备页 + 设备已连接时，每 4s 刷新，让运行标识反映真实状态
+  //（不管谁启动的）。离开设备页 / 切设备 / 断开即清空，避免显示过期运行态。
+  useEffect(() => {
+    const deviceId = selectedDevice?.id;
+    if (!deviceId || selectedDevice?.status !== 'connected' || activeTab !== 'devices') {
+      setRunningPackages(new Set());
+      return;
+    }
+    void loadRunningPackages();
+    const timer = window.setInterval(() => { void loadRunningPackages(); }, 4000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDevice?.id, selectedDevice?.status, activeTab]);
 
   useEffect(() => {
     setSelectedNetworkRequestId(null);
@@ -1246,6 +1275,17 @@ function SimpleApp() {
     }
   };
 
+  // 把一批宿主路径加入待安装列表：仅留 .apk、按路径去重。供「选择 APK」与拖拽共用。
+  const addApkFilesByPath = (paths: string[]) => {
+    setPendingApks((prev) => {
+      const existing = new Set(prev.map((a) => a.path));
+      const added = paths
+        .filter((p) => p.toLowerCase().endsWith('.apk') && !existing.has(p))
+        .map((p) => ({ path: p, fileName: p.split(/[\\/]/).pop() || p }));
+      return [...prev, ...added];
+    });
+  };
+
   const selectApkFiles = async () => {
     if (!hasElectronAPI()) {
       setError('Electron 接口不可用');
@@ -1258,17 +1298,29 @@ function SimpleApp() {
         return;
       }
       if (result.data.length === 0) return;
-      setPendingApks((prev) => {
-        const existing = new Set(prev.map((a) => a.path));
-        const added = result.data!
-          .filter((p) => p.toLowerCase().endsWith('.apk') && !existing.has(p))
-          .map((p) => ({ path: p, fileName: p.split(/[\\/]/).pop() || p }));
-        return [...prev, ...added];
-      });
+      addApkFilesByPath(result.data);
       setError('');
     } catch (err) {
       setError('选择安装包失败：' + (err as Error).message);
     }
+  };
+
+  // 拖拽 APK 到待安装区：Electron 28 的 drop File 仍带 .path（宿主绝对路径），直接取用。
+  const handleApkDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsApkDragOver(false);
+    if (isUnifiedInstalling) return;
+    const files = Array.from(e.dataTransfer.files || []);
+    const paths = files
+      .map((f) => (f as File & { path?: string }).path || '')
+      .filter(Boolean);
+    const apks = paths.filter((p) => p.toLowerCase().endsWith('.apk'));
+    if (apks.length === 0) {
+      if (files.length > 0) setError('只能拖入 .apk 安装包');
+      return;
+    }
+    addApkFilesByPath(apks);
+    setError('');
   };
 
   const removePendingApk = (path: string) => {
@@ -1608,8 +1660,24 @@ function SimpleApp() {
     }
   };
 
+  // 拉取当前设备在运行的应用包名集合（带设备切换防过期）。失败静默，不打扰用户。
+  const loadRunningPackages = async () => {
+    if (!selectedDevice || !hasElectronAPI() || !window.electronAPI?.getRunningPackages) return;
+    const targetDeviceId = selectedDevice.id;
+    try {
+      const result = await window.electronAPI.getRunningPackages(targetDeviceId);
+      if (selectedDeviceRef.current?.id !== targetDeviceId) return; // 设备已切换，丢弃过期结果
+      if (result.success && result.data) {
+        setRunningPackages(new Set(result.data));
+      }
+    } catch {
+      /* 运行态查询失败不影响主流程，忽略 */
+    }
+  };
+
   const handleLaunchApp = async (packageName: string) => {
     if (!selectedDevice || !hasElectronAPI() || busyPackage) return;
+    if (runningPackages.has(packageName)) return; // 已在运行，禁止重复启动
     setBusyPackage(packageName);
     setBusyAction('launch');
     try {
@@ -1623,6 +1691,8 @@ function SimpleApp() {
     } finally {
       setBusyPackage(null);
       setBusyAction(null);
+      // 进程要一会儿才起来，稍后刷新运行态让「运行中」标识跟上
+      window.setTimeout(() => { void loadRunningPackages(); }, 1200);
     }
   };
 
@@ -1641,6 +1711,7 @@ function SimpleApp() {
     } finally {
       setBusyPackage(null);
       setBusyAction(null);
+      window.setTimeout(() => { void loadRunningPackages(); }, 600); // 关闭后进程很快消失，稍后刷新运行态
     }
   };
 
@@ -1768,33 +1839,67 @@ function SimpleApp() {
     const activeDeviceIds = devices.map((d) => d.id).filter((id) => (apkInstallStates[id]?.queue.length || 0) > 0);
 
     return (
-      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{'应用安装'}</h2>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <button onClick={selectApkFiles} disabled={isUnifiedInstalling} style={{ padding: '8px 14px', backgroundColor: isUnifiedInstalling ? '#4b5563' : '#4a90d9', border: 'none', borderRadius: '6px', color: '#fff', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600 }}>选择 APK</button>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#cbd5e1' }}>并发数
-            <select value={installConcurrency} disabled={isUnifiedInstalling} onChange={(e) => setInstallConcurrency(Number(e.target.value))} style={{ padding: '6px 10px', fontSize: '13px', color: '#e5e7eb', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
-              <option value={2}>2</option><option value={4}>4</option><option value={8}>8</option><option value={0}>不限</option>
-            </select>
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#cbd5e1' }}>
-            <input type="checkbox" checked={installAllowDowngrade} disabled={isUnifiedInstalling} onChange={(e) => setInstallAllowDowngrade(e.target.checked)} />允许降级覆盖
-          </label>
+      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        {/* 标题行：标题在左，并发数/降级收到右侧，省掉单独一行配置 */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{'应用安装'}</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#9ca3af' }}>并发数
+              <select value={installConcurrency} disabled={isUnifiedInstalling} onChange={(e) => setInstallConcurrency(Number(e.target.value))} style={{ padding: '5px 8px', fontSize: '13px', color: '#e5e7eb', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
+                <option value={2}>2</option><option value={4}>4</option><option value={8}>8</option><option value={0}>不限</option>
+              </select>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
+              <input type="checkbox" checked={installAllowDowngrade} disabled={isUnifiedInstalling} onChange={(e) => setInstallAllowDowngrade(e.target.checked)} />允许降级覆盖
+            </label>
+          </div>
         </div>
 
-        {pendingApks.length > 0 ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            {pendingApks.map((a) => (
-              <span key={a.path} title={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '999px', fontSize: '12px', color: '#e5e7eb' }}>
-                {a.fileName}
-                <button onClick={() => removePendingApk(a.path)} disabled={isUnifiedInstalling} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', padding: 0, fontSize: '13px' }}>✕</button>
+        {/* 拖放区：无文件时收成细单行（图标+文字一行），有文件时展开放 chip */}
+        <div
+          onClick={() => { if (!isUnifiedInstalling) selectApkFiles(); }}
+          onDragOver={(e) => { e.preventDefault(); if (!isUnifiedInstalling) setIsApkDragOver(true); }}
+          onDragEnter={(e) => { e.preventDefault(); if (!isUnifiedInstalling) setIsApkDragOver(true); }}
+          onDragLeave={(e) => { e.preventDefault(); setIsApkDragOver(false); }}
+          onDrop={handleApkDrop}
+          style={{
+            flex: 1,
+            minHeight: '180px',
+            display: 'flex',
+            flexDirection: 'column',
+            border: `1.5px dashed ${isApkDragOver ? '#4a90d9' : '#3a3a55'}`,
+            backgroundColor: isApkDragOver ? '#2a3550' : '#1f1f3320',
+            borderRadius: '10px',
+            padding: pendingApks.length > 0 ? '12px 14px' : '16px',
+            cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer',
+            transition: 'background-color 120ms ease, border-color 120ms ease',
+          }}
+        >
+          {pendingApks.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 0, overflowY: 'auto' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{`已选 ${pendingApks.length} 个安装包`}</span>
+                <span style={{ fontSize: '12px', color: '#60a5fa' }}>{'＋ 点击或拖拽继续添加'}</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {pendingApks.map((a) => (
+                  <span key={a.path} title={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '999px', fontSize: '12px', color: '#e5e7eb' }}>
+                    {a.fileName}
+                    <button onClick={(e) => { e.stopPropagation(); removePendingApk(a.path); }} disabled={isUnifiedInstalling} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', padding: 0, fontSize: '13px' }}>✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: isApkDragOver ? '#93c5fd' : '#9ca3af', pointerEvents: 'none' }}>
+              <span style={{ fontSize: '36px', lineHeight: 1, opacity: 0.85 }}>{'📦'}</span>
+              <span style={{ fontSize: '14px', fontWeight: 500 }}>
+                {isApkDragOver ? '松开以添加 APK' : '把 .apk 拖到这里，或点击选择'}
               </span>
-            ))}
-          </div>
-        ) : (
-          <div style={{ fontSize: '13px', color: '#6b7280' }}>还没有待安装文件，点「选择 APK」添加（可多选）</div>
-        )}
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>{'支持多选'}</span>
+            </div>
+          )}
+        </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -2237,6 +2342,15 @@ function SimpleApp() {
       color: 'white',
       overflow: 'hidden'
     }}>
+      {/* 全局深色滚动条：index.css 未被入口引入，这里就地注入，和工具深色主题统一。
+          仅用 webkit 规则——Electron 是 Chromium 内核，加 scrollbar-width 反而会接管并禁用自定义样式。 */}
+      <style>{`
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3a3a55; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+        ::-webkit-scrollbar-thumb:hover { background: #50506e; background-clip: content-box; }
+        ::-webkit-scrollbar-corner { background: transparent; }
+      `}</style>
       {!appReady && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 3000, backgroundColor: '#1a1a2e', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: '320px', textAlign: 'center' }}>
@@ -2766,11 +2880,15 @@ function SimpleApp() {
 
               <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
                 {activeTab === 'devices' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    {renderUnifiedInstallPanel()}
+                  <div style={{ display: 'flex', flexDirection: 'row', gap: '16px', height: '100%', alignItems: 'stretch' }}>
+                    {/* 左栏：应用安装（封顶宽度；卡片撑满左栏高度，让拖放区有空间放大） */}
+                    <div style={{ flex: '1 1 0', minWidth: 0, maxWidth: '460px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                      {renderUnifiedInstallPanel()}
+                    </div>
 
-                  <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '12px' }}>
+                  {/* 右栏：已安装应用（撑满剩余宽高，列表内部滚动） */}
+                  <div style={{ flex: '1.7 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#252540', borderRadius: '8px', padding: '16px', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '12px', flexShrink: 0 }}>
                       <h2 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
                         {'已安装应用'}
                         <span style={{ fontSize: '13px', color: '#888', marginLeft: '8px', fontWeight: 400 }}>
@@ -2806,15 +2924,23 @@ function SimpleApp() {
                         return <div style={{ padding: '24px', textAlign: 'center', color: '#666', fontSize: '13px' }}>{'没有匹配的应用'}</div>;
                       }
                       return (
-                        <div style={{ maxHeight: '420px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                           {filtered.map(pkg => (
                             <div
                               key={pkg}
                               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', gap: '12px' }}
                             >
-                              <span style={{ fontSize: '13px', color: '#e5e7eb', fontFamily: 'monospace', wordBreak: 'break-all' }}>{pkg}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                                <span style={{ fontSize: '13px', color: '#e5e7eb', fontFamily: 'monospace', wordBreak: 'break-all' }}>{pkg}</span>
+                                {runningPackages.has(pkg) && (
+                                  <span title={'应用正在运行'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 600, color: '#86efac', backgroundColor: '#22c55e1f', border: '1px solid #22c55e55', borderRadius: '999px' }}>
+                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#22c55e', boxShadow: '0 0 4px #22c55e' }} />{'运行中'}
+                                  </span>
+                                )}
+                              </div>
                               {(() => {
                                 const isBusy = busyPackage === pkg;
+                                const isRunning = runningPackages.has(pkg);
                                 const busyStyle = (base: React.CSSProperties): React.CSSProperties => ({
                                   ...base,
                                   cursor: isBusy ? 'not-allowed' : 'pointer',
@@ -2824,8 +2950,9 @@ function SimpleApp() {
                                   <div style={{ flexShrink: 0, display: 'flex', gap: '6px' }}>
                                     <button
                                       onClick={() => handleLaunchApp(pkg)}
-                                      disabled={isBusy}
-                                      style={busyStyle({ padding: '5px 12px', fontSize: '12px', color: '#86efac', backgroundColor: '#22c55e22', border: '1px solid #22c55e55', borderRadius: '6px' })}
+                                      disabled={isBusy || isRunning}
+                                      title={isRunning ? '应用已在运行，无需重复启动' : undefined}
+                                      style={{ padding: '5px 12px', fontSize: '12px', color: '#86efac', backgroundColor: '#22c55e22', border: '1px solid #22c55e55', borderRadius: '6px', cursor: (isBusy || isRunning) ? 'not-allowed' : 'pointer', opacity: (isBusy || isRunning) ? 0.4 : 1 }}
                                     >
                                       {isBusy && busyAction === 'launch' ? '启动中…' : '启动'}
                                     </button>

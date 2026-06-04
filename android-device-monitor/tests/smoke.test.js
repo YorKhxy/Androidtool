@@ -907,6 +907,7 @@ describe('project smoke checks', () => {
     const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
     const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
     const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+    const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
 
     // 安装模式（-r / -r -d）
     expect(managerSource).toContain("options?.allowDowngrade ? ['-r', '-d'] : ['-r']");
@@ -921,6 +922,18 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('const limit = installConcurrency > 0 ? installConcurrency : targetIds.length');
     expect(simpleAppSource).toContain('installApk(deviceId, item.path, { allowDowngrade: installAllowDowngrade })');
     expect(simpleAppSource).toContain('pendingApks');
+    // 运行中应用：主进程按 ps -A 出运行包集合，渲染层轮询、标「运行中」、运行中禁止再次启动
+    expect(channelSource).toContain("GET_RUNNING_PACKAGES: 'adb:get-running-packages'");
+    expect(managerSource).toContain('async getRunningPackages(deviceId: string)');
+    expect(preloadSource).toContain('getRunningPackages');
+    expect(simpleAppSource).toContain('runningPackages');
+    expect(simpleAppSource).toContain('loadRunningPackages');
+    expect(simpleAppSource).toContain('disabled={isBusy || isRunning}');
+    expect(simpleAppSource).toContain('已在运行，禁止重复启动');
+    // 待安装支持拖拽 APK：共用 addApkFilesByPath、drop 取 File.path，并有全局守卫防拖偏导航
+    expect(simpleAppSource).toContain('addApkFilesByPath');
+    expect(simpleAppSource).toContain('handleApkDrop');
+    expect(simpleAppSource).toContain("window.addEventListener('drop', prevent)");
     expect(simpleAppSource).toContain('installTargets');
     expect(simpleAppSource).toContain('retryDeviceInstall');
     expect(simpleAppSource).toContain('应用安装');

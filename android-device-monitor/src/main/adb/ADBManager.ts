@@ -1358,6 +1358,25 @@ export class ADBManager extends EventEmitter {
     return this.runtimeInspector.getProcesses(deviceId);
   }
 
+  // 当前在运行的应用包名集合：用 ps -A 全量进程，按进程名归一出包名（取 ':' 前并校验格式）。
+  // 供已安装列表标「运行中」、禁止重复启动用。无论工具启动还是设备本机启动都能反映真实状态。
+  async getRunningPackages(deviceId: string): Promise<string[]> {
+    try {
+      const stdout = await this.getProcessListOutput(deviceId);
+      const running = new Set<string>();
+      for (const line of stdout.split('\n')) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 2) continue;
+        const pkg = this.normalizeAndroidPackageName(parts[parts.length - 1]);
+        if (pkg) running.add(pkg);
+      }
+      return Array.from(running);
+    } catch (error) {
+      logger.warn('ADBManager: getRunningPackages failed:', error);
+      return [];
+    }
+  }
+
   async getActivityStack(deviceId: string, packageName?: string): Promise<ActivityStackEntry[]> {
     try {
       return await this.runtimeInspector.getActivityStack(deviceId, packageName);

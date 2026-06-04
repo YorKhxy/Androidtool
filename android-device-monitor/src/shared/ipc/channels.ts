@@ -13,6 +13,7 @@ export const IPC_CHANNELS = {
   READ_SNAPSHOT_IMAGE: 'performance:read-snapshot-image',
   EXPORT_PERFORMANCE_SESSION: 'performance:export-session',
   GET_PROCESSES: 'adb:get-processes',
+  GET_RUNNING_PACKAGES: 'adb:get-running-packages',
   GET_ACTIVITY_STACK: 'adb:get-activity-stack',
   GET_NETWORK_REQUESTS: 'adb:get-network-requests',
   MIRROR_START: 'mirror:start',

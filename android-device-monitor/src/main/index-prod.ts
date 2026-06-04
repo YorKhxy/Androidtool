@@ -305,6 +305,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.GET_RUNNING_PACKAGES, async (_event, deviceId: string) => {
+    try {
+      const data = await adbManager.getRunningPackages(deviceId);
+      return { success: true, data };
+    } catch (error) {
+      return toIpcErrorResponse(error, '获取运行中应用失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.GET_ACTIVITY_STACK, async (_event, deviceId: string, packageName?: string) => {
     try {
       const activities = await adbManager.getActivityStack(deviceId, packageName);
