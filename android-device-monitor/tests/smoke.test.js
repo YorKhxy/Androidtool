@@ -609,7 +609,7 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('onCaptureSample');
     expect(simpleAppSource).toContain('onCaptureSizeLimit');
     expect(simpleAppSource).toContain('activeCaptureByDeviceId');
-    expect(simpleAppSource).toContain('reportSessionByDeviceId');
+    expect(simpleAppSource).toContain('loadedReport'); // 停止后/回看加载的报告会话（14.7 统一取代 per-device 报告态）
   });
 
   test('capture filter marks AND-combined hits, persists markers, and jumps+pauses on marker click', () => {
@@ -654,6 +654,50 @@ describe('project smoke checks', () => {
     // 接线：面板透传 + SimpleApp 持久化
     expect(panelSource).toContain('onSaveCaptureMarkers');
     expect(simpleAppSource).toContain('saveCaptureMarkers');
+  });
+
+  test('capture history list loads/renames/deletes sessions and report supports quick screenshot archiving', () => {
+    const historySource = fs.readFileSync(path.join(root, 'src/renderer/components/CaptureHistoryList.tsx'), 'utf-8');
+    const reportSource = fs.readFileSync(path.join(root, 'src/renderer/components/CaptureReport.tsx'), 'utf-8');
+    const helperSource = fs.readFileSync(path.join(root, 'src/renderer/components/captureReportHelpers.tsx'), 'utf-8');
+    const panelSource = fs.readFileSync(path.join(root, 'src/renderer/components/PerformancePanel.tsx'), 'utf-8');
+    const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+    const mediaSource = fs.readFileSync(path.join(root, 'src/main/performanceMedia.ts'), 'utf-8');
+
+    expect(fs.existsSync(path.join(root, 'src/renderer/components/CaptureHistoryList.tsx'))).toBe(true);
+
+    // 回看列表：SN+本地时间+时长、双击改名、删除行内二次确认、空状态
+    expect(historySource).toContain('formatLocalDateTime');
+    expect(historySource).toContain('formatDuration');
+    expect(historySource).toContain('onDoubleClick');
+    expect(historySource).toContain('confirmingDeleteId');
+    expect(historySource).toContain('确认删除');
+    expect(historySource).toContain('还没有采集记录'); // 空状态
+
+    // SimpleApp 接线：列表/加载/改名/删除/截图 + 进性能页刷新
+    expect(simpleAppSource).toContain('listCaptureSessions');
+    expect(simpleAppSource).toContain('loadCaptureSession');
+    expect(simpleAppSource).toContain('renameCaptureSession');
+    expect(simpleAppSource).toContain('deleteCaptureSession');
+    expect(simpleAppSource).toContain('saveCaptureFrame');
+    expect(simpleAppSource).toContain('refreshCaptureSessions');
+    expect(simpleAppSource).toContain('loadedReport');
+    // 旧的 per-device 报告态已被统一的 loadedReport 取代
+    expect(simpleAppSource).not.toContain('reportSessionByDeviceId');
+
+    // 视频快捷截图：离屏 crossOrigin video 抓帧 + canvas toDataURL + 不弹系统保存框
+    expect(helperSource).toContain('captureSegmentFrame');
+    expect(helperSource).toContain("crossOrigin = 'anonymous'");
+    expect(helperSource).toContain('toDataURL');
+    expect(reportSource).toContain('handleCaptureFrame');
+    expect(reportSource).toContain('onSaveFrame');
+    expect(panelSource).toContain('onSaveCaptureFrame');
+    // 媒体协议开 CORS，保证离屏抓帧 canvas 不被污染
+    expect(mediaSource).toContain('corsEnabled: true');
+
+    // 面板挂载回看列表
+    expect(panelSource).toContain('<CaptureHistoryList');
+    expect(panelSource).toContain('onSelectCaptureSession');
   });
 
   test('continuous capture recorder segments at 180s, finalizes via SIGINT and pulls each segment', () => {

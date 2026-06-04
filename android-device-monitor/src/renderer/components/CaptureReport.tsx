@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceSample } from '../../shared/types';
 import { CaptureChart } from './CaptureChart';
 import { CaptureFilterPanel } from './CaptureFilterPanel';
-import { findNearestSample, getSingleEyeWrapperStyle, renderMetricOverlay } from './captureReportHelpers';
+import { captureSegmentFrame, findNearestSample, getSingleEyeWrapperStyle, renderMetricOverlay, renderRecordingPlaceholder } from './captureReportHelpers';
 import {
   andHitTimes,
   buildSegmentMediaUrl,
@@ -24,9 +24,11 @@ type CaptureReportProps = {
   markers?: PerformanceCaptureMarker[];
   /** 过滤后持久化标记到会话（SimpleApp 走 saveCaptureMarkers）。 */
   onSaveMarkers?: (sessionId: string, markers: PerformanceCaptureMarker[]) => void;
+  /** 视频快捷截图：把当前帧 PNG dataUrl 归档到会话 screenshots/（SimpleApp 走 saveCaptureFrame），成功返回相对路径。 */
+  onSaveFrame?: (sessionId: string, dataUrl: string) => Promise<string | undefined>;
 };
 
-export function CaptureReport({ session, samples, live, elapsedMs, markers, onSaveMarkers }: CaptureReportProps) {
+export function CaptureReport({ session, samples, live, elapsedMs, markers, onSaveMarkers, onSaveFrame }: CaptureReportProps) {
   const [selectedSeriesKeys, setSelectedSeriesKeys] = useState<Set<string>>(new Set());
   const [playheadMs, setPlayheadMs] = useState(0);
   const [activeSegmentIndex, setActiveSegmentIndex] = useState(0);
@@ -34,6 +36,8 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
   const [videoSize, setVideoSize] = useState<{ width: number; height: number } | null>(null);
   const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([]);
   const [appliedMarkers, setAppliedMarkers] = useState<PerformanceCaptureMarker[]>([]);
+  const [frameNote, setFrameNote] = useState<string | null>(null);
+  const [capturingFrame, setCapturingFrame] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pendingSeekOffsetRef = useRef<number | null>(null);
   // markers prop 可能每次渲染换新引用；只在切会话时播种，故经 ref 读取避免反复复位过滤态。
@@ -158,15 +162,27 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
   const hasVideoSize = Boolean(videoSize && videoSize.width > 0 && videoSize.height > 0);
   const currentSample = findNearestSample(samples, session.startedAt, playheadMs);
 
+  // 截当前帧自动归档：用离屏 crossOrigin video 抓 activeSegment 在播放头处的帧，不弹系统保存框。
+  const handleCaptureFrame = async () => {
+    if (!activeSegment || !segmentUrl || !onSaveFrame || capturingFrame) return;
+    setCapturingFrame(true);
+    setFrameNote(null);
+    try {
+      const offsetSec = Math.max(0, (playheadMs - activeSegment.startMs) / 1000);
+      const dataUrl = await captureSegmentFrame(segmentUrl, offsetSec, shouldCrop);
+      await onSaveFrame(session.id, dataUrl);
+      setFrameNote('截图已保存');
+    } catch (error) {
+      setFrameNote(`截图失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setCapturingFrame(false);
+      window.setTimeout(() => setFrameNote(null), 3000);
+    }
+  };
+
   const renderVideoArea = () => {
     if (live) {
-      return (
-        <div style={{ height: '260px', borderRadius: '10px', backgroundColor: '#020617', border: '1px solid #1f2937', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: '#94a3b8' }}>
-          <span style={{ width: '12px', height: '12px', borderRadius: '999px', backgroundColor: '#ef4444', boxShadow: '0 0 0 6px rgba(239,68,68,0.18)' }} />
-          <div style={{ fontSize: '14px', color: '#e5e7eb' }}>录制中</div>
-          <div style={{ fontSize: '12px' }}>已录制 {formatClock(elapsedMs ?? 0)}（采集中不在工具内回传画面）</div>
-        </div>
-      );
+      return renderRecordingPlaceholder(elapsedMs ?? 0);
     }
     if (segments.length === 0 || !segmentUrl) {
       return (
@@ -228,7 +244,19 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
           <div style={{ color: '#cbd5e1', fontSize: '12px', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
             {formatClock(playheadMs)} / {formatClock(totalMs)}
           </div>
+          {onSaveFrame && (
+            <button
+              type="button"
+              onClick={handleCaptureFrame}
+              disabled={capturingFrame}
+              title="把当前画面存为截图（自动归档到会话）"
+              style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: '#1e293b', color: '#fff', cursor: capturingFrame ? 'not-allowed' : 'pointer', padding: '7px 12px', fontSize: '12px', flexShrink: 0, whiteSpace: 'nowrap' }}
+            >{capturingFrame ? '截图中…' : '截图'}</button>
+          )}
         </div>
+        {frameNote && (
+          <div style={{ color: frameNote.startsWith('截图失败') ? '#fca5a5' : '#86efac', fontSize: '12px', marginTop: '6px' }}>{frameNote}</div>
+        )}
       </div>
     );
   };

@@ -12,6 +12,8 @@ export function registerPerformanceMediaScheme(): void {
         secure: true,
         supportFetchAPI: true,
         stream: true,
+        // 开 CORS：让带 crossOrigin 的离屏 <video> 抓帧绘到 canvas 不被跨域污染（视频快捷截图）。
+        corsEnabled: true,
       },
     },
   ]);

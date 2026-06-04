@@ -131,3 +131,18 @@ export const formatClock = (ms: number) => {
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 };
+
+/** 本地时间展示，与项目其它处一致用 zh-CN 24 小时制。 */
+export const formatLocalDateTime = (date: Date | string) =>
+  new Date(date).toLocaleString('zh-CN', { hour12: false });
+
+/** 时长（毫秒）→「x时x分x秒」，省略为 0 的高位。 */
+export const formatDuration = (ms: number) => {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}时${minutes}分${seconds}秒`;
+  if (minutes > 0) return `${minutes}分${seconds}秒`;
+  return `${seconds}秒`;
+};

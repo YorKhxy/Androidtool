@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceCaptureSession, PerformanceCaptureMarker, PerformanceSample, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceCaptureSession, PerformanceCaptureSessionDetail, PerformanceCaptureMarker, PerformanceSample, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
@@ -199,12 +199,14 @@ function SimpleApp() {
   const [performanceSamplesByDeviceId, setPerformanceSamplesByDeviceId] = useState<Record<string, PerformanceSample[]>>({});
   const [performanceSessionStartedAtByDeviceId, setPerformanceSessionStartedAtByDeviceId] = useState<Record<string, Date>>({});
   // —— Phase 14 采集会话状态（按设备）——
-  // 进行中的采集会话（点开始采集时设入，关闭后移除）；停止后 finalize 的报告会话；start/stop 异步进行中集合。
+  // 进行中的采集会话（点开始采集时设入，关闭后移除）；start/stop 异步进行中集合。
   const [activeCaptureByDeviceId, setActiveCaptureByDeviceId] = useState<Record<string, PerformanceCaptureSession>>({});
-  const [reportSessionByDeviceId, setReportSessionByDeviceId] = useState<Record<string, PerformanceCaptureSession>>({});
   const [captureBusyDeviceIds, setCaptureBusyDeviceIds] = useState<Set<string>>(() => new Set());
   const [captureElapsedByDeviceId, setCaptureElapsedByDeviceId] = useState<Record<string, number>>({});
   const [softLimitNoticeByDeviceId, setSoftLimitNoticeByDeviceId] = useState<Record<string, string>>({});
+  // 采集回看：归档会话列表（倒序）+ 当前在报告区展示的会话明细（停止采集后或点列表加载）。
+  const [captureSessions, setCaptureSessions] = useState<PerformanceCaptureSession[]>([]);
+  const [loadedReport, setLoadedReport] = useState<PerformanceCaptureSessionDetail | null>(null);
   const [installedPackages, setInstalledPackages] = useState<string[]>([]);
   const [installedPackagesLoading, setInstalledPackagesLoading] = useState(false);
   const [appFilter, setAppFilter] = useState('');
@@ -739,6 +741,17 @@ function SimpleApp() {
   // 采集中的指标采样由主进程编排（PerformanceCaptureController 每秒一次），经 onCaptureSample
   // 实时推送到渲染层，渲染层不再自行轮询 getPerformance。
 
+  // 采集回看列表加载（进性能页时 + 停止/删除/改名后各自刷新）。
+  const refreshCaptureSessions = useCallback(async () => {
+    if (!hasElectronAPI()) return;
+    const result = await window.electronAPI!.listCaptureSessions();
+    if (result.success && result.data) setCaptureSessions(result.data);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'performance') void refreshCaptureSessions();
+  }, [activeTab, refreshCaptureSessions]);
+
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
   useEffect(() => {
@@ -1195,7 +1208,9 @@ function SimpleApp() {
             delete next[deviceId];
             return next;
           });
-          setReportSessionByDeviceId((prev) => ({ ...prev, [deviceId]: finalized }));
+          // 用内存里刚累积的样本直接生成报告（无需再从磁盘加载），并刷新回看列表（新会话已归档）。
+          setLoadedReport({ session: finalized, samples: performanceSamplesByDeviceId[deviceId] || [], markers: [] });
+          void refreshCaptureSessions();
           setError('');
         } else {
           setError(result.error || '关闭采集失败');
@@ -1203,11 +1218,7 @@ function SimpleApp() {
       } else {
         // 开始前清空上次缓冲、报告与提醒，避免新旧会话数据串味。
         setPerformanceSamplesByDeviceId((prev) => ({ ...prev, [deviceId]: [] }));
-        setReportSessionByDeviceId((prev) => {
-          const next = { ...prev };
-          delete next[deviceId];
-          return next;
-        });
+        setLoadedReport(null);
         setCaptureElapsedByDeviceId((prev) => ({ ...prev, [deviceId]: 0 }));
         setSoftLimitNoticeByDeviceId((prev) => {
           const next = { ...prev };
@@ -1245,6 +1256,8 @@ function SimpleApp() {
   // 过滤标记持久化到会话（写 data/markers.json），失败给错误提示，不阻塞 UI。
   const saveCaptureMarkers = async (sessionId: string, markers: PerformanceCaptureMarker[]) => {
     if (!hasElectronAPI()) return;
+    // 同步到当前展示的报告，回看时再加载即一致。
+    setLoadedReport((prev) => (prev && prev.session.id === sessionId ? { ...prev, markers } : prev));
     try {
       const result = await window.electronAPI!.saveCaptureMarkers(sessionId, markers);
       if (!result.success) setError(result.error || '保存过滤标记失败');
@@ -1253,17 +1266,66 @@ function SimpleApp() {
     }
   };
 
+  // —— Phase 14 采集回看：加载 / 改名 / 删除 / 截图归档 —— //（refreshCaptureSessions 在上方定义）
+  const selectCaptureSession = async (sessionId: string) => {
+    if (!hasElectronAPI()) return;
+    const result = await window.electronAPI!.loadCaptureSession(sessionId);
+    if (result.success && result.data) {
+      setLoadedReport(result.data);
+      setError('');
+    } else {
+      setError(result.error || '加载采集会话失败');
+    }
+  };
+
+  const renameCaptureSession = async (sessionId: string, title: string) => {
+    if (!hasElectronAPI()) return;
+    const result = await window.electronAPI!.renameCaptureSession(sessionId, title);
+    if (result.success) {
+      void refreshCaptureSessions();
+      const trimmed = title.trim();
+      setLoadedReport((prev) =>
+        prev && prev.session.id === sessionId ? { ...prev, session: { ...prev.session, title: trimmed || undefined } } : prev
+      );
+    } else {
+      setError(result.error || '重命名采集会话失败');
+    }
+  };
+
+  const deleteCaptureSession = async (sessionId: string) => {
+    if (!hasElectronAPI()) return;
+    const result = await window.electronAPI!.deleteCaptureSession(sessionId);
+    if (result.success) {
+      void refreshCaptureSessions();
+      setLoadedReport((prev) => (prev && prev.session.id === sessionId ? null : prev));
+    } else {
+      setError(result.error || '删除采集会话失败');
+    }
+  };
+
+  // 截图归档：成功返回相对路径；失败抛错，由 CaptureReport 就地提示（不双重弹错误条）。
+  const saveCaptureFrame = async (sessionId: string, dataUrl: string): Promise<string | undefined> => {
+    if (!hasElectronAPI()) throw new Error('Electron 接口不可用');
+    const result = await window.electronAPI!.saveCaptureFrame(sessionId, dataUrl);
+    if (!result.success) throw new Error(result.error || '保存截图失败');
+    return result.data;
+  };
+
   const exportPerformanceSession = async () => {
     if (!selectedDevice || !hasElectronAPI()) return;
-    const samples = performanceSamplesByDeviceId[selectedDevice.id] || [];
+    const capturing = Boolean(activeCaptureByDeviceId[selectedDevice.id]);
+    // 采集中导出实时缓冲；否则导出报告区当前展示的会话（含加载的历史会话）。
+    const samples = capturing
+      ? performanceSamplesByDeviceId[selectedDevice.id] || []
+      : loadedReport?.samples ?? performanceSamplesByDeviceId[selectedDevice.id] ?? [];
     if (samples.length === 0) {
-      setError('当前设备还没有性能采样数据，请先开始采集。');
+      setError('当前没有性能采样数据，请先开始采集或选择一条采集记录。');
       return;
     }
 
     const result = await window.electronAPI!.exportPerformanceSession({
       device: selectedDevice,
-      startedAt: performanceSessionStartedAtByDeviceId[selectedDevice.id] || samples[0].capturedAt,
+      startedAt: (!capturing && loadedReport?.session.startedAt) || performanceSessionStartedAtByDeviceId[selectedDevice.id] || samples[0].capturedAt,
       endedAt: new Date(),
       samples,
     });
@@ -1865,10 +1927,12 @@ function SimpleApp() {
   const selectedPerformance = selectedDeviceId ? performanceByDeviceId[selectedDeviceId] || null : null;
   const selectedPerformanceSamples = selectedDeviceId ? performanceSamplesByDeviceId[selectedDeviceId] || [] : [];
   const isSelectedCapturing = Boolean(selectedDeviceId && activeCaptureByDeviceId[selectedDeviceId]);
-  // 展示会话：采集中=活动会话，否则=最近一次报告会话（停止后留存）。
-  const selectedCaptureSession = selectedDeviceId
-    ? activeCaptureByDeviceId[selectedDeviceId] || reportSessionByDeviceId[selectedDeviceId] || null
-    : null;
+  const liveCaptureSession = selectedDeviceId ? activeCaptureByDeviceId[selectedDeviceId] || null : null;
+  // 报告区展示：采集中=活动会话+实时样本；否则=已加载的回看/刚停止报告（loadedReport）。
+  const shownCaptureSession = isSelectedCapturing ? liveCaptureSession : loadedReport?.session ?? null;
+  const shownCaptureSamples = isSelectedCapturing ? selectedPerformanceSamples : loadedReport?.samples ?? [];
+  const shownCaptureMarkers = isSelectedCapturing ? [] : loadedReport?.markers ?? [];
+  const loadedSessionId = loadedReport?.session.id ?? null;
   const isSelectedCaptureBusy = Boolean(selectedDeviceId && captureBusyDeviceIds.has(selectedDeviceId));
   const selectedCaptureElapsed = selectedDeviceId ? captureElapsedByDeviceId[selectedDeviceId] || 0 : 0;
   const selectedSoftLimitNotice = selectedDeviceId ? softLimitNoticeByDeviceId[selectedDeviceId] || null : null;
@@ -3077,15 +3141,22 @@ function SimpleApp() {
                   <PerformancePanel
                     device={selectedDevice}
                     performance={selectedPerformance}
-                    captureSession={selectedCaptureSession}
-                    captureSamples={selectedPerformanceSamples}
+                    captureSession={shownCaptureSession}
+                    captureSamples={shownCaptureSamples}
                     isCapturing={isSelectedCapturing}
                     isCaptureBusy={isSelectedCaptureBusy}
                     elapsedMs={selectedCaptureElapsed}
                     softLimitNotice={selectedSoftLimitNotice}
+                    captureMarkers={shownCaptureMarkers}
+                    captureSessions={captureSessions}
+                    loadedSessionId={loadedSessionId}
                     onToggleCapture={toggleCaptureSession}
                     onDismissSoftLimit={() => selectedDeviceId && dismissSoftLimit(selectedDeviceId)}
                     onSaveCaptureMarkers={saveCaptureMarkers}
+                    onSaveCaptureFrame={saveCaptureFrame}
+                    onSelectCaptureSession={selectCaptureSession}
+                    onRenameCaptureSession={renameCaptureSession}
+                    onDeleteCaptureSession={deleteCaptureSession}
                     onExportSession={exportPerformanceSession}
                   />
                 )}

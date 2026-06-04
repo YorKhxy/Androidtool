@@ -1,5 +1,6 @@
 import type { DeviceInfo, PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceMetrics, PerformanceSample, PicoMetricsState } from '../../shared/types';
 import { CaptureReport } from './CaptureReport';
+import { CaptureHistoryList } from './CaptureHistoryList';
 import { formatClock, formatMemoryMb } from './perfFormat';
 
 type PerformancePanelProps = {
@@ -16,9 +17,17 @@ type PerformancePanelProps = {
   softLimitNotice: string | null;
   /** 当前会话已存的过滤标记（加载历史会话时带入）。 */
   captureMarkers?: PerformanceCaptureMarker[];
+  /** 采集回看列表（倒序）。 */
+  captureSessions: PerformanceCaptureSession[];
+  /** 当前在报告区展示的会话 id（列表高亮用）。 */
+  loadedSessionId: string | null;
   onToggleCapture: () => void;
   onDismissSoftLimit: () => void;
   onSaveCaptureMarkers: (sessionId: string, markers: PerformanceCaptureMarker[]) => void;
+  onSaveCaptureFrame: (sessionId: string, dataUrl: string) => Promise<string | undefined>;
+  onSelectCaptureSession: (sessionId: string) => void;
+  onRenameCaptureSession: (sessionId: string, title: string) => void;
+  onDeleteCaptureSession: (sessionId: string) => void;
   onExportSession: () => void;
 };
 
@@ -105,9 +114,15 @@ export function PerformancePanel({
   elapsedMs,
   softLimitNotice,
   captureMarkers,
+  captureSessions,
+  loadedSessionId,
   onToggleCapture,
   onDismissSoftLimit,
   onSaveCaptureMarkers,
+  onSaveCaptureFrame,
+  onSelectCaptureSession,
+  onRenameCaptureSession,
+  onDeleteCaptureSession,
   onExportSession,
 }: PerformancePanelProps) {
   const isPicoView = performance?.provider === 'pico' || (!performance && isLikelyPicoDevice(device));
@@ -205,6 +220,21 @@ export function PerformancePanel({
           elapsedMs={elapsedMs}
           markers={captureMarkers}
           onSaveMarkers={onSaveCaptureMarkers}
+          onSaveFrame={onSaveCaptureFrame}
+        />
+      </div>
+
+      <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', alignItems: 'center' }}>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>采集回看</div>
+          <div style={{ fontSize: '12px', color: '#94a3b8' }}>{`共 ${captureSessions.length} 次`}</div>
+        </div>
+        <CaptureHistoryList
+          sessions={captureSessions}
+          selectedSessionId={loadedSessionId}
+          onSelect={onSelectCaptureSession}
+          onRename={onRenameCaptureSession}
+          onDelete={onDeleteCaptureSession}
         />
       </div>
     </div>
