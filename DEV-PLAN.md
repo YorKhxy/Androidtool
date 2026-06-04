@@ -43,12 +43,14 @@ Phase 1 基础框架
       -> Phase 4 性能 / 进程 / Activity 监控
         -> Phase 5 网络请求抓取
           -> Phase 6 优化、测试与发布
+        -> Phase 14 性能模块重构（持续采集 + 报告联动 + 回看，取代 Phase 4 快照/短录制）
     -> Phase 7 投屏镜像与操控（普通设备一键投屏）
       -> Phase 8 投屏参数配置 + Pico 单眼裁切 + 快捷键速查
     -> Phase 9 卸载应用
     -> Phase 10 批量安装
     -> Phase 11 设备文件管理
     -> Phase 12 历史设备保存与快速重连
+    -> Phase 13 文件传输中断恢复
 ```
 
 依赖关系说明：
@@ -58,6 +60,7 @@ Phase 1 基础框架
 - Phase 7/8 是新增的「投屏镜像与设备操控」模块（Product-Spec 2.5）。只依赖 Phase 2 的设备连接与内置 ADB 分发能力，与 Phase 4 的 Pico 检测能力复用同一套判定，不依赖 Phase 5/6。Phase 7 先打通普通 Android 的一键投屏与操控；Phase 8 在其上补参数配置、Pico 单眼裁切与快捷键速查。
 - Phase 9（卸载）、Phase 10（批量安装）、Phase 11（设备文件管理）都是设备运维类功能，只依赖 Phase 2 的设备连接与内置 ADB，彼此独立，复用同一套主界面页签和 IPC 通道模式，不依赖 Phase 4/5/6/7/8。
 - Phase 12（历史设备保存与快速重连）是对 Phase 2 设备连接体验的增量增强，只依赖 Phase 2 已有的 WiFi 连接（`CONNECT_WIFI`）能力与 `DeviceInfo.serialNo` 字段，不引入新的主进程 ADB 命令，几乎是纯渲染层 + 本地持久化，与 Phase 4/5/6/7/8/9/10/11 互不依赖。Phase 2 已标记完成不再改动，本能力以独立 Phase 落地。
+- Phase 14（性能模块重构）取代 Phase 4 中「性能快照」与「短时性能录制」两块已落地能力，复用 Phase 4 的指标采样、Pico 官方指标与进程/Activity 链路。依赖 Phase 4 的采样基础，与 Phase 5/6/7/8/9/10/11/12/13 互不依赖。落地后 Phase 4 文档保留为历史记录，运行态以 Phase 14 为准。
 
 ---
 
@@ -195,6 +198,8 @@ Phase 1 基础框架
 ### Phase 4: 性能监控
 
 **状态**：主链路已落地，Pico 官方指标与快照链路已验收
+
+> ⚠️ **重构提示（2026-06-04）**：本 Phase 的「性能快照」与「短时 10/30/60 秒录制」已被 **Phase 14: 性能模块重构** 取代——快照整链路移除，录制改为持续分段采集 + 报告联动 + 回看归档。以下内容保留为历史实现记录；运行态能力以 Phase 14 为准。指标采样、Pico 官方指标、进程/Activity 链路仍由本 Phase 提供并被 Phase 14 复用。
 
 **目标**：展示 CPU、内存、FPS、进程列表与 Activity 栈等运行态信息，并在性能模块内支持实时设备画面预览与性能快照截图。
 
@@ -663,6 +668,106 @@ Phase 1 基础框架
 
 ---
 
+### Phase 14: 性能模块重构（持续采集 + 报告联动 + 回看）
+
+**状态**：待开发
+
+**目标**：重构性能模块。删除「性能快照」整链路；把「短时 10/30/60 秒录制」改为「从开始采集持续录制到关闭采集」的分段持续录制；整次采集的曲线数据与视频分开归档到工具根目录、支持回看列表加载/删除；采集报告内曲线填满区域、视频合并展示，时间轴拖动联动曲线游标与视频画面；新增参数过滤打标记与视频快捷截图。对齐 Product-Spec 2.2 功能清单、4.3 性能诊断流程、5.4 性能采集会话、6.1 非功能要求与 CHANGELOG（2026-06-04）。性能指标采集口径（CPU/MEM/FPS/Pico 官方指标）沿用 Phase 4 现有实现，不改采样命令。
+
+**与 Phase 4 的关系**：本 Phase 取代 Phase 4 中「性能快照」与「短时性能录制」两块已落地能力。Phase 4 的指标采样（`runtimeInspector.getPerformanceMetrics`）、Pico 官方指标（`picoMetrics.ts`）、进程/Activity 链路保留复用。
+
+**设计约束（复用现有结构，遵守项目铁律）**
+- 存储锚点用 `resolveRuntimeAppRoot(app)`（当前在 `performanceSnapshots.ts`，Task 14.1 删该文件时须先把此工具迁到公共位置，见下），落在工具根目录、不进 C 盘 userData、UI 只见相对路径不暴露宿主绝对路径（CLAUDE.md 路径铁律 + CONTEXT.md）。
+- 视频相对路径经现有 `performanceMedia.ts` 的应用内媒体协议读取，复用其 `performance-recordings/...` 映射并扩展到新会话目录。
+- `screenrecord` 单段最长 180s 是 Android 硬限制，分段录制是必须项，不是可选优化。
+- `index.ts` 与 `index-prod.ts` 两个入口的 handler 必须同步增删（项目既有约定）。
+- 曲线指标多选/隔离逻辑与波峰波谷标识沿用 `PerformancePanel.tsx` 现有 `selectedSeriesKeys` / `toggleSeries` 实现，不重造。
+
+**Task 14.1 — 移除性能快照整链路**
+- [ ] 迁移工具函数：把 `performanceSnapshots.ts` 中的 `resolveRuntimeAppRoot(app)` 迁到新文件 `src/main/runtimeAppRoot.ts`（或并入 Task 14.3 的存储模块），其余引用方（录制、新存储模块）改 import 新位置，避免随快照文件删除而丢失。
+- [ ] 删除主进程快照：删 `src/main/performanceSnapshots.ts`（`persistPerformanceSnapshot` / `readSnapshotImageAsDataUrl` / 本地 PNG 指标烙印）；删 `src/main/adb/runtimeInspector.ts` 的 `capturePerformanceSnapshot()` 方法（保留 `getPerformanceMetrics()`）。
+- [ ] 评估并处理 `src/main/adb/screenshotCapture.ts`：该模块当前仅服务快照截图（raw framebuffer + PNG 回退）。若无其他调用方则删除；若 Pico 单眼裁切尺寸计算被投屏（Phase 8）复用，则保留模块但移除快照专用导出。开发时以全局引用搜索结果为准。
+- [ ] 删除快照 IPC：`src/shared/ipc/channels.ts` 移除 `CAPTURE_PERFORMANCE_SNAPSHOT` / `READ_SNAPSHOT_IMAGE`；`index.ts` / `index-prod.ts` 移除对应 `ipcMain.handle`；`preload.js` 移除 `capturePerformanceSnapshot` / `readSnapshotImage`；`electronApi.ts` 移除对应封装。
+- [ ] 删除快照类型：`src/shared/types/index.ts` 移除 `PerformanceSnapshot` 接口及导出 payload 中的 `snapshots` 字段。
+- [ ] 删除快照 UI：`PerformancePanel.tsx` 移除「抓取快照」按钮、「性能快照」卡片网格、快照全屏预览弹层、曲线图上的快照金色标记点；`SimpleApp.tsx` 移除 `performanceSnapshots` state 及相关采集/裁剪逻辑。
+- [ ] 清理导出：`performanceSessionExport.ts` 的 `buildPerformanceSessionWorkbook()` 移除 Snapshots 工作表与快照统计列（导出能力本身保留）。
+
+**Task 14.2 — 持续分段录制引擎（主进程地基）**
+- [ ] 重构 `src/main/adb/performanceRecording.ts`：把 `startRecording(deviceId, {duration})` 改为持续模式 `startCaptureRecording(deviceId, { onSegment, onSizeBytes })` + `stopCaptureRecording(deviceId)`。移除 `VALID_DURATIONS`（10/30/60）与时长校验。
+- [ ] 分段循环：内部维护「录制中」状态，循环执行设备端 `adb shell screenrecord --time-limit 180 <devTmp/seg-N.mp4>`；每段到时或被停止后 `adb pull` 该段到会话目录 `video/seg-N.mp4`，随即删除设备端临时文件，并立刻发起下一段，使分段在时间上尽量连续；记录每段的序号、起止相对时间（毫秒）、本地相对路径，回传给会话存储（Task 14.3）。
+- [ ] 停止语义：`stopCaptureRecording` 终止设备端当前 `screenrecord` 子进程，pull 回最后一段（可能不足 180s），结束循环。进程被杀/崩溃时，已 pull 的分段已在磁盘，最多丢失当前正在录、未 pull 回的一段。
+- [ ] Pico 分流：保留现有 Android / Pico provider 判定（`android-screenrecord` / `pico-screenrecord`，扩展位 `pico-sdk`）；Pico 原始 MP4 不在录制阶段裁切（单眼裁切留到播放阶段，见 Task 14.5）。
+- [ ] 体积上报：每 pull 回一段累加视频体积，连同样本数据体积通过 `onSizeBytes` 上报，供软上限提醒（Task 14.5）使用。
+
+**Task 14.3 — 采集会话存储与归档（主进程地基）**
+- [ ] 新增 `src/main/performanceCaptureStore.ts`：以 `resolveRuntimeAppRoot(app)` 为根，定义会话目录 `performance-captures/<sessionId>/`，内部分目录 `video/`（分段 MP4）、`data/`（样本与标记）、`screenshots/`（快捷截图）。会话目录与 `data/` 分开存放，满足「数据和视频分开」。
+- [ ] 会话生命周期：`createSession(deviceInfo): PerformanceCaptureSession`（生成 sessionId、记录 deviceSn/起始时间/provider，写入会话 `manifest.json`，status=`recording`）；`appendSamples(sessionId, samples)` 定期把采样批量 flush 追加到 `data/samples.jsonl`（流式落盘防崩溃，不在内存攒到结束）；`appendSegment(sessionId, segmentMeta)` 记录分段；`finalizeSession(sessionId, {endedAt,durationMs,sizeBytes})` 写回 manifest，status=`completed`。
+- [ ] 回看读写：`listSessions(): PerformanceCaptureSession[]`（扫描 `performance-captures/`，读各 `manifest.json`，按起始时间倒序）；`loadSession(sessionId)`（返回会话元数据 + 样本序列 + 标记 + 分段视频相对路径）；`renameSession(sessionId, title)`；`deleteSession(sessionId)`（递归删除整个会话文件夹，含 video/data/screenshots）。
+- [ ] 标记持久化：`saveMarkers(sessionId, markers: PerformanceCaptureMarker[])` 写 `data/markers.json`，随会话加载返回（过滤标记可持久化复用）。
+- [ ] 媒体协议扩展：`performanceMedia.ts` 的相对路径映射扩展到 `performance-captures/<sessionId>/video/*.mp4` 与 `screenshots/*.png`，仍只对渲染层暴露相对路径。
+
+**Task 14.4 — IPC 契约 + 共享类型 + 采集编排**
+- [ ] 共享类型：`src/shared/types/index.ts` 新增 `PerformanceCaptureSession`、`PerformanceCaptureMarker`（字段与 Product-Spec 5.4 一致：session 含 id/deviceId/deviceSn/title/provider/status/startedAt/endedAt/durationMs/singleEyeVideo/videoSegments/dataRelativePath/screenshotDir/packageName/activityName/sizeBytes/error；marker 含 id/metricKey/op/threshold/atMs[]）。
+- [ ] IPC 通道：`channels.ts` 新增 `START_CAPTURE_SESSION` / `STOP_CAPTURE_SESSION` / `LIST_CAPTURE_SESSIONS` / `LOAD_CAPTURE_SESSION` / `DELETE_CAPTURE_SESSION` / `RENAME_CAPTURE_SESSION` / `SAVE_CAPTURE_MARKERS` / `SAVE_CAPTURE_FRAME`（快捷截图归档）；事件通道 `CAPTURE_SIZE_LIMIT`（软上限提醒）。`index.ts` / `index-prod.ts` 注册 handler 委托给录制引擎（14.2）+ 存储模块（14.3）；`preload.js` 暴露对应方法与 `onCaptureSizeLimit` 订阅；`electronApi.ts` 类型化封装。
+- [ ] 采集编排：在 `START_CAPTURE_SESSION` handler 中，点开始即 `createSession` + 同时启动 `startCaptureRecording`（14.2）与性能采样循环（复用 Phase 4 `getPerformanceMetrics`，采样间隔沿用现有 1s）；采样结果经 `appendSamples` 流式落盘并实时推送渲染层（供采集中实时曲线）。`STOP_CAPTURE_SESSION` 停止采样与录制并 `finalizeSession`。
+- [ ] 软上限提醒：录制累计时长达 30 分钟 **或** `sizeBytes` 达 2GB（先到先触发，阈值定义为常量便于后续调整）时，主进程经 `CAPTURE_SIZE_LIMIT` 通知渲染层弹提醒，不强制停止录制。
+
+**Task 14.5 — 采集报告 UI：曲线填充 + 视频合并 + 时间轴联动**
+- [ ] 采集控制：`PerformancePanel.tsx` 顶部操作区改为「开始采集 / 关闭采集」单一开关（替代原取证操作区的快照+短录制控件）。采集进行中：曲线区随实时样本刷新填满区域，视频区显示「录制中」占位块（不在工具内回传画面），并展示已用时长。
+- [ ] 报告渲染：重构 `renderSessionReport()`，停止采集后或加载历史会话时，曲线填满区域、下方/侧边合并嵌入 HTML5 `<video>` 播放器；分段视频通过媒体协议按序加载，回看时把多段缝合为一条连续逻辑时间轴。
+- [ ] 时间轴联动：在报告区新增可拖动时间轴（播放头）。拖动时：曲线游标移动到对应样本（复用现有 `findRecordingSampleAt` 思路按相对时间匹配），同时视频 `seek` 到对应时间点——seek 实现把连续轴时间映射到「分段索引 + 段内偏移」，切换 `<video>` 源到对应分段并设 `currentTime`。视频播放时反向驱动曲线游标同步移动。
+- [ ] 指标多选/隔离：沿用 `selectedSeriesKeys` / `toggleSeries`（选哪个隐藏其他、可多选、空集全显）与波峰波谷标识，作用于报告曲线。
+- [ ] 软上限提醒 UI：订阅 `onCaptureSizeLimit`，弹非阻塞提示条「已录制 30 分钟 / 2GB，是否继续？」，用户可继续或手动关闭采集。
+
+**Task 14.6 — 参数过滤打标记**
+- [ ] 过滤控件：报告区新增过滤面板——选指标（FPS / CPU / MEM / GPU，GPU 仅 Pico）、运算符（`>` / `=` / `<`）、阈值输入；支持添加多条件，多条件按 AND 组合（对齐用户确认的「可多参数 AND 组合」）。
+- [ ] 命中标记：点「过滤」对样本序列逐点求值，命中区间在曲线上打标记（区别于波峰波谷的独立标记样式），并把结果整理为 `PerformanceCaptureMarker[]` 经 `SAVE_CAPTURE_MARKERS` 持久化到会话。
+- [ ] 标记跳转：单击某个标记，时间轴播放头与视频一起跳转到该命中时间点，并暂停视频（`<video>.pause()`），曲线游标对齐。
+- [ ] 清除/重设：提供清除过滤，移除曲线标记并清空会话内已存标记。
+
+**Task 14.7 — 采集回看列表 + 视频快捷截图**
+- [ ] 回看列表：`PerformancePanel.tsx`（或新增 `components/CaptureHistoryList.tsx`）展示采集记录列表，经 `LIST_CAPTURE_SESSIONS` 加载，每条显示「设备 SN + 起始时间（本地时间格式，复用项目本地时间格式化）+ 时长」，标题可双击改名（`RENAME_CAPTURE_SESSION`）。
+- [ ] 选中加载：点列表项经 `LOAD_CAPTURE_SESSION` 把该次曲线样本、标记、分段视频还原到报告区（Task 14.5 渲染），切换会话时正确卸载上一会话的视频与状态。
+- [ ] 删除二次确认：每条带删除按钮，点击弹行内二次确认（复用项目现有二次确认交互模式），确认后 `DELETE_CAPTURE_SESSION` 递归删除该会话整个文件夹（video/data/screenshots），并从列表移除。
+- [ ] 视频快捷截图：播放器上提供「截图」按钮，把 `<video>` 当前帧绘到 `<canvas>` 取 PNG，经 `SAVE_CAPTURE_FRAME` 写入该会话 `screenshots/` 子目录并以相对路径记录，不弹系统保存框（对齐用户确认的「截当前帧自动归档」）；Pico 会话截图按单眼区域裁切，与播放显示口径一致。
+- [ ] 空状态：无采集记录时回看列表显示温和空状态提示，不留空白。
+
+**关键文件**
+| 文件路径 | 说明 |
+|----------|------|
+| `android-device-monitor/src/main/runtimeAppRoot.ts` | 新增：从 `performanceSnapshots.ts` 迁出的 `resolveRuntimeAppRoot`，供录制与会话存储复用 |
+| `android-device-monitor/src/main/performanceSnapshots.ts` | 删除（快照落盘整文件移除） |
+| `android-device-monitor/src/main/adb/runtimeInspector.ts` | 移除 `capturePerformanceSnapshot`，保留 `getPerformanceMetrics` |
+| `android-device-monitor/src/main/adb/screenshotCapture.ts` | 评估删除或保留（仅服务快照则删；Pico 裁切被复用则保留） |
+| `android-device-monitor/src/main/adb/performanceRecording.ts` | 重构为持续分段录制引擎（start/stop、180s 分段、逐段 pull 落盘、体积上报） |
+| `android-device-monitor/src/main/performanceCaptureStore.ts` | 新增：采集会话目录结构、样本流式落盘、列出/加载/删除/改名、标记持久化 |
+| `android-device-monitor/src/main/performanceMedia.ts` | 媒体协议映射扩展到 `performance-captures/<id>/video|screenshots` |
+| `android-device-monitor/src/main/performanceSessionExport.ts` | 移除 Snapshots 工作表与快照列 |
+| `android-device-monitor/src/main/index.ts` / `index-prod.ts` | 删快照 handler；新增采集会话/标记/截图/软上限 IPC handler 与采集编排 |
+| `android-device-monitor/src/main/preload.js` | 删快照桥接；新增采集会话相关桥接与 `onCaptureSizeLimit` |
+| `android-device-monitor/src/renderer/lib/electronApi.ts` | 删快照封装；新增采集会话 API 类型化封装 |
+| `android-device-monitor/src/shared/ipc/channels.ts` | 删 `CAPTURE_PERFORMANCE_SNAPSHOT`/`READ_SNAPSHOT_IMAGE`；新增采集会话/标记/截图/软上限通道 |
+| `android-device-monitor/src/shared/types/index.ts` | 删 `PerformanceSnapshot`；新增 `PerformanceCaptureSession` / `PerformanceCaptureMarker` |
+| `android-device-monitor/src/renderer/components/PerformancePanel.tsx` | 删快照 UI；重构报告区（曲线填充+视频合并+时间轴联动+过滤标记+截图） |
+| `android-device-monitor/src/renderer/components/CaptureHistoryList.tsx` | 新增（可选）：采集回看列表（SN+时间+时长、改名、加载、删除二次确认、空状态） |
+| `android-device-monitor/src/renderer/SimpleApp.tsx` | 删快照 state；编排采集会话状态、实时样本订阅、报告挂载 |
+
+**验收标准**
+- `npm run build` 通过；`npm test` 通过（含更新后的 smoke 断言）
+- 性能页无任何「快照」入口与残留代码；全局搜索无 `PerformanceSnapshot` / `CAPTURE_PERFORMANCE_SNAPSHOT` / `capturePerformanceSnapshot` 引用
+- 点「开始采集」同时启动采样与录制；采集中曲线实时刷新填满区域、视频区显示「录制中」占位、不回传画面
+- 点「关闭采集」后生成采集报告：曲线填满、视频可在报告内播放
+- 录制超过 180s 仍连续（底层自动分段），回看拖动时间轴跨段无明显断裂；拖动时曲线游标与视频画面同步切到对应时间点
+- 曲线指标可多选/隔离（选哪个隐藏其他），波峰波谷标识正常
+- 选指标配阈值（>/=/<，可多参数 AND）点过滤，曲线出现命中标记；单击标记时间轴与视频跳转到对应位置并暂停
+- 播放中点截图，当前帧 PNG 自动存入该会话 `screenshots/`，不弹保存框；Pico 截图为单眼画面
+- 采集结束后数据与视频分开存于工具根目录 `performance-captures/<id>/`（video/ 与 data/ 分离），不落 C 盘 userData、UI 不暴露绝对路径
+- 回看列表展示「设备 SN + 时间 + 时长」可改名；选中加载还原报告；删除经二次确认后整次（数据+视频+截图）被删除，列表移除
+- 录制达 30 分钟或 2GB 时弹软上限提醒，不强制停止
+- 工具录制中被强杀后重启，已落盘分段与已 flush 样本仍可在回看列表加载（最多丢失最后一个未 pull 回的分段）
+
+---
+
 ## 4. 当前真实目录结构
 
 ```text
@@ -831,6 +936,8 @@ android-device-monitor/
 | Phase 10: 批量安装 | 已落地 | 单 APK 多设备并发安装、并发限流、逐台状态与重试已落地（已整合进设备页安装面板） |
 | Phase 11: 设备文件管理 | 已落地待真机回归 | 设备文件浏览/上传/下载/多选批量下载/删除/打开所在文件夹/快捷入口容错已落地 |
 | Phase 12: 历史设备保存与快速重连 | 待开发 | WiFi 历史设备卡片、一键快速重连、IP 变更就地输入重连、移除二次确认；复用现有 `CONNECT_WIFI` 与 localStorage 持久化，无新增 IPC |
+| Phase 13: 文件传输中断恢复 | 待开发 | 临时名+原子落地、主进程 journal 持久化、文件级续传、进入设备文件管理时「继续/丢弃」提示 |
+| Phase 14: 性能模块重构 | 待开发 | 删快照链路、持续分段录制、采集会话归档、报告时间轴联动、参数过滤打标记、回看列表加载/删除、视频快捷截图；取代 Phase 4 快照/短录制 |
 
 **当前阶段判断**
 - 项目已经越过“脚手架阶段”
@@ -864,5 +971,9 @@ android-device-monitor/
    - 先做 Phase 7：打包 scrcpy、主进程 spawn 调起独立窗口、普通 Android 一键投屏与操控、子进程生命周期回收
    - 再做 Phase 8：启动参数配置、Pico 单眼裁切、物理键快捷键速查与能力边界提示
    - 注意：scrcpy 子进程必须通过 `ADB` 环境变量复用内置 adb，避免与主程序 adb server 冲突
+
+5. 开发 Phase 14（性能模块重构，本轮重点）
+   - 严格按 Task 14.1 → 14.7 顺序推进：先删快照腾地（14.1），再打地基（14.2 分段录制引擎、14.3 会话存储、14.4 IPC/类型/编排），最后做 UI（14.5 报告联动、14.6 过滤标记、14.7 回看+截图）
+   - 关键风险点：① 删 `performanceSnapshots.ts` 前先迁出 `resolveRuntimeAppRoot`；② 分段录制的连续轴缝合与视频跨段 seek 是最易出问题处，需真机回归长录制拖动；③ 样本流式落盘防崩溃，不在内存攒到结束
 
 **进入下一轮实现时，建议优先调用**：`/dev-builder`
