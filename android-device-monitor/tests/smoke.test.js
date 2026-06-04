@@ -578,6 +578,11 @@ describe('project smoke checks', () => {
     expect(rendererSource).toContain('开启采集');
     expect(rendererSource).toContain('关闭采集');
     expect(rendererSource).toContain('本次采集报告');
+    // 曲线图：图例可点切换可见性（多选），可见曲线标峰谷
+    expect(rendererSource).toContain('selectedSeriesKeys');
+    expect(rendererSource).toContain('toggleSeries');
+    expect(rendererSource).toContain('visibleSeries');
+    expect(rendererSource).toContain('波峰');
     expect(rendererSource).toContain('hoveredSnapshotId');
     expect(rendererSource).toContain('hoverPoint');
     expect(rendererSource).toContain('getSampleValues');
