@@ -58,7 +58,9 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
         <div style={{ color: '#6b7280', fontSize: '12px' }}>添加条件后点「过滤」，在曲线上标出命中时间点。</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {conditions.map((condition) => (
+          {conditions.map((condition) => {
+            const thresholdEmpty = !Number.isFinite(condition.threshold);
+            return (
             <div key={condition.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
               <select
                 value={condition.metricKey}
@@ -86,17 +88,19 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
                 placeholder="阈值"
                 value={Number.isFinite(condition.threshold) ? condition.threshold : ''}
                 onChange={(e) => updateCondition(condition.id, { threshold: e.target.value === '' ? NaN : Number(e.target.value) })}
-                style={{ ...selectStyle, width: '88px' }}
+                style={{ ...selectStyle, width: '88px', border: `1px solid ${thresholdEmpty ? '#ef4444' : '#334155'}` }}
                 aria-label="阈值"
               />
+              {thresholdEmpty && <span style={{ color: '#fca5a5', fontSize: '11px' }}>阈值不能为空</span>}
               <button
                 type="button"
                 onClick={() => removeCondition(condition.id)}
-                style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer', width: '28px', height: '28px', fontSize: '14px' }}
+                style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer', width: '28px', height: '28px', fontSize: '14px', marginLeft: 'auto' }}
                 aria-label="删除条件"
               >×</button>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

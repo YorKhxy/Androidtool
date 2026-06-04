@@ -644,6 +644,7 @@ describe('project smoke checks', () => {
     // 阈值输入可留空/删空（默认 NaN 而非删不掉的 0），求值时跳过未填阈值的条件
     expect(filterSource).toContain('threshold: NaN');
     expect(filterSource).toContain("e.target.value === '' ? NaN : Number(e.target.value)");
+    expect(filterSource).toContain('阈值不能为空'); // 留空给明确提示（红框+红字）
     expect(formatSource).toContain('conditions.filter((condition) => Number.isFinite(condition.threshold))');
 
     // 曲线命中标记（独立样式）+ 点击回调
