@@ -912,6 +912,13 @@ describe('project smoke checks', () => {
     // 安装模式（-r / -r -d）
     expect(managerSource).toContain("options?.allowDowngrade ? ['-r', '-d'] : ['-r']");
     expect(managerSource).toContain('async installApk(deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean })');
+    // 安装失败精准提示：识别签名不一致 / 降级等常见 INSTALL_FAILED_* 码
+    expect(managerSource).toContain('classifyInstallFailure');
+    expect(managerSource).toContain('INSTALL_FAILED_UPDATE_INCOMPATIBLE');
+    expect(managerSource).toContain('签名不一致');
+    expect(managerSource).toContain('INSTALL_FAILED_VERSION_DOWNGRADE');
+    // 签名/降级冲突提示带上冲突包名
+    expect(managerSource).toContain('pkgSuffix');
     expect(preloadSource).toContain('installApk: (deviceId, apkPath, options)');
     expect(electronApiSource).toContain('options?: { allowDowngrade?: boolean }');
 
@@ -919,6 +926,13 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('renderUnifiedInstallPanel');
     expect(simpleAppSource).toContain('startUnifiedInstall');
     expect(simpleAppSource).toContain('installItemsOnDevice');
+    // 应用安装内分「操作区 / 安装详情」，详情含进度 + 错误 + 安装日志
+    expect(simpleAppSource).toContain('安装详情');
+    expect(simpleAppSource).toContain('appendInstallLog');
+    expect(simpleAppSource).toContain('installLog');
+    // 新装应用「NEW」标识：按设备存（批量装多台切设备不丢），每台装前后 diff 出新增包，并浮到列表顶部
+    expect(simpleAppSource).toContain('newlyInstalledByDevice');
+    expect(simpleAppSource).toContain("{'NEW'}");
     expect(simpleAppSource).toContain('const limit = installConcurrency > 0 ? installConcurrency : targetIds.length');
     expect(simpleAppSource).toContain('installApk(deviceId, item.path, { allowDowngrade: installAllowDowngrade })');
     expect(simpleAppSource).toContain('pendingApks');
