@@ -20,6 +20,9 @@ import type {
   ProcessInfo,
   WeakNetworkProfile,
   WeakNetworkHelperStatus,
+  TransferResumeBatch,
+  TransferBatchResult,
+  UpdateStatus,
 } from '../../shared/types';
 
 export type ElectronResult<T> = {
@@ -49,11 +52,18 @@ export interface ElectronAPI {
   startPerformanceRecording: (deviceId: string, options: PerformanceRecordingOptions) => Promise<ElectronResult<PerformanceRecording>>;
   readSnapshotImage: (screenshotPath: string) => Promise<ElectronResult<string>>;
   getProcesses: (deviceId: string) => Promise<ElectronResult<ProcessInfo[]>>;
+  getRunningPackages: (deviceId: string) => Promise<ElectronResult<string[]>>;
   connectUSB: () => Promise<ElectronResult<DeviceInfo[]>>;
   getActivityStack: (deviceId: string, packageName?: string) => Promise<ElectronResult<ActivityStackEntry[]>>;
   getNetworkRequests: (deviceId: string, packageName?: string) => Promise<ElectronResult<NetworkRequest[]>>;
   startMirror: (deviceId: string, options?: MirrorStartOptions) => Promise<ElectronResult<MirrorSession>>;
   stopMirror: (deviceId: string) => Promise<ElectronResult<undefined>>;
+  setMirrorAudio: (deviceId: string, forward: boolean) => Promise<ElectronResult<MirrorSession>>;
+  checkForUpdate: () => Promise<ElectronResult<undefined>>;
+  getUpdateStatus: () => Promise<ElectronResult<UpdateStatus | null>>;
+  downloadUpdate: () => Promise<ElectronResult<undefined>>;
+  quitAndInstallUpdate: () => Promise<ElectronResult<undefined>>;
+  onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
   onMirrorStatus: (callback: (session: MirrorSession) => void) => () => void;
   selectApkFiles: () => Promise<ElectronResult<string[]>>;
   installApk: (deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean }) => Promise<ElectronResult<ApkInstallResult>>;
@@ -66,12 +76,19 @@ export interface ElectronAPI {
   listDeviceFiles: (deviceId: string, dirPath: string) => Promise<ElectronResult<DeviceFileList>>;
   pullDeviceFile: (deviceId: string, remotePath: string, name: string, isDir: boolean) => Promise<ElectronResult<string>>;
   deleteDeviceFile: (deviceId: string, remotePath: string, isDir: boolean) => Promise<ElectronResult<undefined>>;
+  createDeviceFolder: (deviceId: string, dirPath: string, name: string) => Promise<ElectronResult<string>>;
   showItemInFolder: (localPath: string) => Promise<ElectronResult<undefined>>;
+  openPath: (targetPath: string) => Promise<ElectronResult<undefined>>;
+  getAppVersion: () => Promise<ElectronResult<string>>;
+  getReleaseNotes: () => Promise<ElectronResult<string>>;
   pullDeviceFiles: (deviceId: string, items: { path: string; name: string }[], pullId: string) => Promise<ElectronResult<PullFilesResult>>;
   onPullProgress: (callback: (progress: PullProgress) => void) => () => void;
   selectUploadFiles: () => Promise<ElectronResult<string[]>>;
   pushDeviceFile: (deviceId: string, remoteDir: string, localPaths: string[], uploadId: string) => Promise<ElectronResult<number>>;
   onPushProgress: (callback: (progress: PushProgress) => void) => () => void;
+  resumeTransfers: (batchId: string, transferId: string) => Promise<ElectronResult<TransferBatchResult>>;
+  discardTransfers: (batchId: string) => Promise<ElectronResult<undefined>>;
+  getResumeBatches: () => Promise<ElectronResult<TransferResumeBatch[]>>;
   launchApp: (deviceId: string, packageName: string) => Promise<ElectronResult<{ packageName: string; output: string }>>;
   forceStopApp: (deviceId: string, packageName: string) => Promise<ElectronResult<undefined>>;
   sleepDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
@@ -79,6 +96,8 @@ export interface ElectronAPI {
   unlockDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
   rebootDevice: (deviceId: string) => Promise<ElectronResult<undefined>>;
   exportLogs: (logs: LogEntry[]) => Promise<ElectronResult<string>>;
+  exportFullLogs: (deviceId: string) => Promise<ElectronResult<string>>;
+  exportFullLogsByPackage: (deviceId: string, packageName: string) => Promise<ElectronResult<string>>;
   exportPerformanceSession: (payload: PerformanceSessionExportPayload) => Promise<ElectronResult<string>>;
   onLogEntry: (callback: (entry: LogEntry) => void) => () => void;
   onLogBatch: (callback: (entries: LogEntry[]) => void) => () => void;

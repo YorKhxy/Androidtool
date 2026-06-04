@@ -49,7 +49,8 @@ Phase 1 基础框架
     -> Phase 10 批量安装
     -> Phase 11 设备文件管理
     -> Phase 12 历史设备保存与快速重连
-    -> Phase 13 Pico 弱网控制桌面集成
+    -> Phase 13 文件传输中断恢复
+    -> Phase 14 Pico 弱网控制桌面集成
 ```
 
 依赖关系说明：
@@ -58,7 +59,8 @@ Phase 1 基础框架
 - Phase 6 不是完全独立的新模块，而是对前面各 Phase 的质量补齐和可发布化收尾。
 - Phase 7/8 是新增的「投屏镜像与设备操控」模块（Product-Spec 2.5）。只依赖 Phase 2 的设备连接与内置 ADB 分发能力，与 Phase 4 的 Pico 检测能力复用同一套判定，不依赖 Phase 5/6。Phase 7 先打通普通 Android 的一键投屏与操控；Phase 8 在其上补参数配置、Pico 单眼裁切与快捷键速查。
 - Phase 9（卸载）、Phase 10（批量安装）、Phase 11（设备文件管理）都是设备运维类功能，只依赖 Phase 2 的设备连接与内置 ADB，彼此独立，复用同一套主界面页签和 IPC 通道模式，不依赖 Phase 4/5/6/7/8。
-- Phase 13（Pico 弱网控制桌面集成）是把桌面工具接成 `pico-network-helper` 助手 APK 的控制台（Product-Spec 2.6）。只依赖 Phase 2 的设备连接与内置 ADB、以及已落地的应用安装（`INSTALL_APK`）与已安装列表（`LIST_INSTALLED_PACKAGES`）能力，复用 platform-tools/scrcpy 的随包分发模式，与 Phase 4/5/6/7/8/9/10/11/12 互不依赖。助手端 APK 代码已完成，本 Phase 仅覆盖桌面端。
+- Phase 13（文件传输中断恢复）是对 Phase 11 设备文件管理的可靠性增强，依赖其上传/下载链路，引入主进程 journal 持久化 + 临时名原子落地。
+- Phase 14（Pico 弱网控制桌面集成）是把桌面工具接成 `pico-network-helper` 助手 APK 的控制台（Product-Spec 2.6/2.7）。只依赖 Phase 2 的设备连接与内置 ADB、以及已落地的应用安装（`INSTALL_APK`）与已安装列表（`LIST_INSTALLED_PACKAGES`）能力，复用 platform-tools/scrcpy 的随包分发模式，与 Phase 4/5/6/7/8/9/10/11/12/13 互不依赖。助手端 APK 代码已完成，本 Phase 仅覆盖桌面端。
 - Phase 12（历史设备保存与快速重连）是对 Phase 2 设备连接体验的增量增强，只依赖 Phase 2 已有的 WiFi 连接（`CONNECT_WIFI`）能力与 `DeviceInfo.serialNo` 字段，不引入新的主进程 ADB 命令，几乎是纯渲染层 + 本地持久化，与 Phase 4/5/6/7/8/9/10/11 互不依赖。Phase 2 已标记完成不再改动，本能力以独立 Phase 落地。
 
 ---
@@ -518,7 +520,8 @@ Phase 1 基础框架
 - [x] 后端下载：`ADBManager.pullDeviceFile(deviceId, remotePath, localPath)` 单文件/目录拉取到 PC
 - [x] 后端批量下载：多选文件并发拉取到 PC 同一文件夹，逐个回传 `PULL_DEVICE_FILE_PROGRESS` 进度（文件名、序号、总数、状态）
 - [x] 后端上传：`ADBManager.pushDeviceFile` 推送本地文件到设备目录，回传 `PUSH_DEVICE_FILE_PROGRESS` 进度
-- [x] 后端删除：`ADBManager.deleteDeviceFile(deviceId, remotePath, isDir)`
+- [x] 后端删除：`ADBManager.deleteDeviceFile(deviceId, remotePath, isDir)`（目录走 `rm -rf`，可删空/非空文件夹）
+- [x] 后端新建文件夹：`ADBManager.createDeviceFolder(deviceId, dirPath, name)` 执行 `shell mkdir`，名称校验（非空、禁含 `/ \`），同名/无权限给明确错误；`CREATE_DEVICE_FOLDER` 通道，UI 工具栏「📁+ 新建文件夹」行内输入名称后创建并刷新当前目录
 - [x] 打开所在文件夹：`SHOW_ITEM_IN_FOLDER` 通过 `shell.showItemInFolder` 在系统文件管理器定位下载结果
 - [x] IPC 打通：`channels.ts` 新增 `LIST_DEVICE_FILES` / `PULL_DEVICE_FILE` / `PULL_DEVICE_FILES` / `PULL_DEVICE_FILE_PROGRESS` / `DELETE_DEVICE_FILE` / `PUSH_DEVICE_FILE` / `PUSH_DEVICE_FILE_PROGRESS` / `SELECT_UPLOAD_FILES` / `SHOW_ITEM_IN_FOLDER`；`index.ts`/`index-prod.ts` 注册 handler；`preload.js` 暴露；`electronApi.ts` 类型封装
 - [x] 共享类型：`PushProgress` / `PullProgress` / `PullFilesResult` / `DeviceFileEntry` / `DeviceFileList`
@@ -596,11 +599,11 @@ Phase 1 基础框架
 
 ---
 
-### Phase 13: Pico 弱网控制桌面集成
+### Phase 14: Pico 弱网控制桌面集成
 
 **状态**：待开发
 
-**目标**：把桌面工具做成 Pico 弱网助手（`pico-network-helper` APK）的控制台：一键安装助手、选目标应用包名、设置弱网参数（延迟/抖动/丢包/上行/下行限速）、启动/停止弱网、展示助手运行状态。对齐 Product-Spec 功能需求 2.6、用户流程 4.5、数据模型 5.8。助手端 APK 代码已完成，本 Phase 只做桌面端集成。架构见 `docs/adr/0002`，tun2socks 内核见 `docs/adr/0003`。
+**目标**：把桌面工具做成 Pico 弱网助手（`pico-network-helper` APK）的控制台：一键安装助手、选目标应用包名、设置弱网参数（延迟/抖动/丢包/上行/下行限速）、启动/停止弱网、展示助手运行状态。对齐 Product-Spec 功能需求 2.7、用户流程 4.5、数据模型 5.8。助手端 APK 代码已完成，本 Phase 只做桌面端集成。架构见 `docs/adr/0002`，tun2socks 内核见 `docs/adr/0003`。
 
 **设计约束（复用现有实现，不另造轮子）**
 - 助手 APK 随包分发沿用 `platform-tools` / `scrcpy` 的「`vendor/` 暂存 + `extraResources` 拷贝 + `prepare` 脚本」模式；运行时定位沿用 `src/main/scrcpy/scrcpyBinary.ts` 的 `process.resourcesPath`（生产）+ `path.resolve(__dirname, ...)`（开发）双路径回退，**禁止硬编码绝对路径**（CLAUDE.md 路径规范）。
@@ -632,7 +635,7 @@ Phase 1 基础框架
 | `android-device-monitor/src/main/adb/helperApkBinary.ts` | 新增：助手 APK 运行时定位（resourcesPath + __dirname 双回退） |
 | `android-device-monitor/src/shared/ipc/channels.ts` | 修改：新增 4 个弱网 IPC 通道 |
 | `android-device-monitor/src/shared/types/index.ts` | 修改：`WeakNetworkProfile`/`WeakNetworkPreset`/`WeakNetworkHelperStatus` + `WEAK_NETWORK_PRESETS` |
-| `android-device-monitor/src/main/adb/ADBManager.ts` | 修改：安装助手、START/STOP 下发、dumpsys 状态查询、VPN 授权拉起 |
+| `android-device-monitor/src/main/adb/ADBManager.ts` | 修改：安装助手、START/STOP 下发、状态查询、参数裁剪 |
 | `android-device-monitor/src/main/index.ts` | 修改：注册 4 个弱网 IPC handler |
 | `android-device-monitor/src/main/index-prod.ts` | 修改：与 index.ts 同步注册 4 个弱网 IPC handler |
 | `android-device-monitor/src/main/preload.js` | 修改：暴露 4 个弱网 invoke 包装 |
@@ -647,11 +650,79 @@ Phase 1 基础框架
 - 「弱网」标签页可见并可切换；进入时按当前设备拉取并展示助手状态
 - 助手未安装时，点「安装助手」用内置 APK 成功 `adb install`，状态刷新为「已就绪」
 - 目标应用下拉来自真实已安装列表；选预设档位即时填入 5 个参数，手动改参数超范围被裁剪
-- 点「启动弱网」下发 START 后状态变「运行中」；点「停止」下发 STOP 后状态变「已停止」
-- 首次启动且未授权 VPN 时，状态显示「待授权」并提供「在设备上授权」按钮，点击可在头显拉起授权弹窗
+- 点「启动弱网」下发 START 后状态变「运行中」；点「停止」下发 STOP 后状态变「已停止/已就绪」
+- 状态查询用 VPN 隧道地址（`10.88.0.2`）判据，停止后立即反映为已就绪
 - 打包（`npm run dist`）时 `helper:prepare` 把助手 APK 纳入 `extraResources`，安装包内含 `pico-helper/pico-network-helper.apk`
 - 全程无硬编码绝对路径；真机（Pico）端到端验证目标 App 弱网生效列为本 Phase 的真机验收项
-- 已知降级项（待真机细化）：助手状态查询仅可靠产出「未安装/已就绪/运行中/异常」四态；`need-vpn-permission`（待授权）与 `stopped` 无法仅凭 adb/dumpsys 稳定推断，首次授权改由 UI 的「在设备上授权 VPN」按钮手动触发。VPN 授权态的自动探测留待真机验证后再评估实现
+- 已知降级项（待真机细化）：助手状态查询仅可靠产出「未安装/已就绪/运行中/异常」四态；`need-vpn-permission`（待授权）与 `stopped` 无法仅凭 adb 稳定推断，首次授权改由 UI 的「在设备上授权 VPN」按钮手动触发
+
+---
+
+### Phase 13: 文件传输中断恢复
+
+**状态**：待开发
+
+**目标**：让文件批量上传/下载在被进程崩溃、任务管理器强杀打断后，重启应用能识别未完成任务并文件级续传。对齐 Product-Spec 功能需求 2.6「传输中断恢复」。解决两个现存缺陷：(1) 传输被打断时当前文件传成半截、且用最终文件名无法区分完整与损坏；(2) 批量任务清单只在内存（IPC handler 的 for 循环 + 渲染层 `fileTransferManager.ts`），进程一被杀就丢、无法恢复。**不做单文件字节级断点续传**（adb 协议不支持指定偏移续传，成本高收益窄）。
+
+**设计约束（复用现有结构，不另造轮子）**
+- journal 落在**主进程**（传输实际跑在主进程），物理路径用 `app.getPath('userData')` 下的 `transfer-journal.json`，UI 不暴露宿主绝对路径（遵循 CONTEXT.md 与 CLAUDE.md 路径规范，禁止硬编码绝对路径）。
+- 批量循环已在 `index.ts` / `index-prod.ts` 的 `PUSH_DEVICE_FILE`、`PULL_DEVICE_FILES` handler 内逐文件调用 `ADBManager`，journal 的写入埋点就接在这两个循环里，不改动 `ADBManager` 的批量职责划分。
+- 恢复语义 = **仅崩溃/被杀残留**：只有状态停留在 `pending`/`transferring`（没来得及了结就被杀）的任务算需恢复；用户主动取消、传输报错 `failed` 的任务在了结时即从 journal 移除，不进恢复队列、不弹窗。
+- 恢复以**原设备**为前提：任务绑定原 `deviceId`，恢复时原设备未连接则等待，不允许改投其他设备。
+- `index.ts` / `index-prod.ts` 两个入口的 handler 与生命周期钩子必须同步修改（项目既有约定）。
+
+**Task 13.1 — journal 持久化模块（主进程）**
+- [ ] 共享类型：`src/shared/types/index.ts` 新增 `TransferDirection`（`'upload' | 'download'`）、`TransferTaskStatus`（`'pending' | 'transferring' | 'done' | 'failed'`）、`TransferTask`（`id: string`、`batchId: string`、`direction`、`deviceId: string`、`sourcePath: string`（上传=本地路径/下载=设备路径）、`targetPath: string`（上传=设备目录/下载=本地保存目录）、`fileName: string`、`size: number`、`status`、`createdAt: number`、`updatedAt: number`）
+- [ ] 新增 `src/main/transferJournal.ts`：单例，封装对 `path.join(app.getPath('userData'), 'transfer-journal.json')` 的读写。提供 `createBatch(tasks: TransferTask[]): void`（写入一批 `pending` 任务）、`markStatus(taskId, status)`（更新单任务状态与 `updatedAt`）、`removeBatch(batchId)`、`removeTask(taskId)`、`loadUnfinished(): TransferTask[]`（返回 `pending`/`transferring` 的任务，按 batchId 分组用）、`clearAll()`。写盘用**原子方式**：先写 `transfer-journal.json.tmp` 再 `fs.renameSync` 覆盖，避免写一半崩溃损坏 journal。读盘解析失败时容错返回空（参照项目 `historyDeviceStore.ts` / `loadStoredDeviceNames` 的 try/catch 兜底写法）。
+
+**Task 13.2 — 临时名 + 原子落地（ADBManager）**
+- [ ] `ADBManager.pushDeviceFile`：改为先 `adb push` 到设备端临时名（同目录 `.<fileName>.part`），push 成功后 `adb shell mv` 临时名→最终名；任一步失败保留 `.part`（可识别可清理），不污染最终文件名。进度轮询的 `stat` 目标路径同步改成 `.part` 路径。push 前若残留同名 `.part` 先 `rm -f` 清掉再传（支持重传）。
+- [ ] `ADBManager.pullDeviceFile` / `runAdbPull`：统一走「先拉到临时文件再 rename」——把现有「盘根用系统临时目录中转」的方案（`pullDeviceFile` 已有的 `isDriveRoot` 分支）推广到**所有**下载：始终 pull 到目标同目录的 `.<fileName>.part`（盘根场景仍用系统临时目录），完成后校验大小>0 再 rename 成最终名；rename 跨卷失败时沿用现有 copy+rm 兜底。pull 前清理残留 `.part`。
+- [ ] 不改这两个方法的对外签名（`index.ts` 调用处不动），仅内部实现改造。
+
+**Task 13.3 — 批量 handler 接入 journal + 文件级续传 + 恢复入口**
+- [ ] `index.ts` / `index-prod.ts` 的 `PUSH_DEVICE_FILE` handler：进入循环前 `createBatch`（按 `localPaths` 生成 `upload` 任务，`targetPath`=remoteDir）；每个文件传输前 `markStatus(taskId,'transferring')`，成功 `markStatus('done')`，失败 `markStatus('failed')`；整批结束（正常跑完或抛错了结）后把本批 `done`/`failed` 任务 `removeBatch` 清出 journal。
+- [ ] `PULL_DEVICE_FILES` handler：把 `savedDir` 的获取与传输循环**解耦**——新建传输时仍弹 dialog 选目录，并把 `savedDir` 作为每个 `download` 任务的 `targetPath` 写进 journal；恢复传输时**不弹 dialog**，直接用 journal 里记录的 `targetPath`。其余 journal 埋点同上。
+- [ ] 新增续传执行函数（主进程内复用）：给定一批未完成任务，跳过 `done`，对 `pending`/`transferring`/被打断的逐个重传（重传即从头，Task 13.2 已保证清理半截 `.part`），过程照常回传 `PUSH_DEVICE_FILE_PROGRESS` / `PULL_DEVICE_FILE_PROGRESS` 进度。
+- [ ] 新增 IPC 通道 `RESUME_TRANSFERS`（`'adb:resume-transfers'`）：入参 batchId（或全部未完成），调用续传执行函数；`DISCARD_TRANSFERS`（`'adb:discard-transfers'`）：`removeBatch` 并清理设备端/本地残留 `.part`。`channels.ts` 加常量、`index.ts`/`index-prod.ts` 注册 handler。
+
+**Task 13.4 — 恢复提示（进入设备文件管理时触发）+ IPC 契约 + 渲染层**
+
+> 设计修订（2026-06-03）：原方案「应用启动即全局弹窗」存在硬伤——WiFi 设备启动时尚未连接（需手动重连），且启动时主进程 `did-finish-load` 推送早于渲染层订阅会丢事件。改为**拉取式 + 进入设备文件管理时就地提示**：用户点开某设备的文件管理时，该设备必然已连上、且正处于传输语境，此刻再提示「继续/丢弃」最自然。废弃 `TRANSFER_RESUME_AVAILABLE` 推送通道，改用 `GET_RESUME_BATCHES` invoke 主动拉取。
+
+- [ ] 新增 IPC 通道 `GET_RESUME_BATCHES`（`'adb:get-resume-batches'`）：返回 `transferJournal.getResumeBatches()`（按 batch 聚合的摘要：`batchId`、`direction`、`deviceId`、未完成文件数、文件名样例）。`index.ts`/`index-prod.ts` 注册 handler。
+- [ ] IPC 契约三件套同步：`channels.ts` 新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS`/`GET_RESUME_BATCHES`；`preload.js` 暴露 `resumeTransfers(batchId, transferId)`/`discardTransfers(batchId)`/`getResumeBatches()`；`electronApi.ts` 类型化封装。
+- [ ] 渲染层提示：在 `FilesPanel.tsx` 中，进入/切换设备时 `getResumeBatches()` 并过滤出本设备的未完成批次，在面板顶部就地展示提示条「上次有 N 个文件未上传/下载完，继续 / 丢弃」。
+  - 「继续」：调 `resumeTransfers(batchId, transferId)`，进度复用现有 `fileTransferManager` 进度条展示；传输进行中时「继续」按钮禁用。任务绑定原 `deviceId`，提示只在该设备的文件管理里出现，天然不改投其他设备。
+  - 「丢弃」：调 `discardTransfers(batchId)`，清理残留 `.part` 并移出 journal。
+- [ ] `fileTransferManager.ts`：扩展 `startResumeTransfer`，复用现有 `activeUploadId`/`activePullId` + `onPushProgress`/`onPullProgress` 订阅机制，恢复传输复用同一套 uploadId/pullId 进度通道。
+
+**Task 13.5 — 优雅关闭兜底 + 残留语义收口**
+- [ ] `index.ts` app `before-quit`（`index-prod.ts` 同步）：若当前有传输在进行，先 `transferJournal` flush（确保最新状态落盘），再向正在跑的 adb 子进程发 SIGTERM。需要 `ADBManager` 暴露「取消/终止当前传输子进程」的能力（如 `cancelActiveTransfers()`，记录 push/pull 的 `child` 引用并 `child.kill('SIGTERM')`）。注意 SIGKILL（强杀/崩溃）拦不住，最终兜底仍是 journal。
+- [ ] 收口残留语义：确认「用户主动取消传输」「传输报错 failed」两条路径都会把对应任务从 journal 移除（`removeTask`），只有未及了结即被杀的 `pending`/`transferring` 残留进 `loadUnfinished`。
+
+**关键文件**
+| 文件路径 | 说明 |
+|----------|------|
+| `android-device-monitor/src/main/transferJournal.ts` | 新增：传输日志持久化（userData/transfer-journal.json，原子写盘、未完成任务加载、容错解析） |
+| `android-device-monitor/src/main/adb/ADBManager.ts` | `pushDeviceFile`/`pullDeviceFile`/`runAdbPull` 改临时名+原子 rename；新增 `cancelActiveTransfers()` |
+| `android-device-monitor/src/main/transferRunner.ts` | 新增：双入口共用的批量传输执行核心（buildUploadBatch/buildDownloadBatch/runUploadBatch/runDownloadBatch/discardBatch + journal 埋点） |
+| `android-device-monitor/src/main/index.ts` / `index-prod.ts` | `PUSH_DEVICE_FILE`/`PULL_DEVICE_FILES` handler 接入 journal 埋点；新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS`/`GET_RESUME_BATCHES` handler；`before-quit` cancelActiveTransfers（journal 每步原子落盘即最新状态）+SIGTERM |
+| `android-device-monitor/src/shared/ipc/channels.ts` | 新增 `RESUME_TRANSFERS`/`DISCARD_TRANSFERS`/`GET_RESUME_BATCHES` 通道常量 |
+| `android-device-monitor/src/main/preload.js` | 暴露 `resumeTransfers`/`discardTransfers`/`getResumeBatches` |
+| `android-device-monitor/src/renderer/lib/electronApi.ts` | 恢复相关 API 类型化封装 |
+| `android-device-monitor/src/renderer/lib/fileTransferManager.ts` | `startResumeTransfer` 复用现有 uploadId/pullId 进度通道 |
+| `android-device-monitor/src/renderer/components/FilesPanel.tsx` | 进入设备文件管理时拉取本设备未完成批次，顶部就地提示「继续/丢弃」 |
+| `android-device-monitor/src/shared/types/index.ts` | 新增 `TransferDirection`/`TransferTaskStatus`/`TransferTask`/`TransferResumeBatch`/`TransferBatchResult` |
+
+**验收标准**
+- `npm run build` 通过；`npm test` 通过
+- 上传/下载进行中强杀进程（任务管理器结束进程），设备端/本地不残留**最终文件名**的半截文件——半截产物均为 `.part`（可识别）
+- 重启应用、进入该设备的文件管理 → 顶部提示「上次有 N 个文件未上传/下载完，继续/丢弃」
+- 点「继续」→ 跳过已完成文件，重传被打断的与剩余文件，进度条正常显示，全部完成后 journal 清空、提示消失
+- 点「丢弃」→ 任务从 journal 移除、残留 `.part` 被清理，再进文件管理不再提示
+- 用户主动取消的传输、传输报错失败的任务，重启后进文件管理**不**触发恢复提示
+- 正常退出（关闭窗口/退出应用）时若有传输在跑，journal 为最新状态、adb 子进程被终止
 
 ---
 
@@ -823,7 +894,8 @@ android-device-monitor/
 | Phase 10: 批量安装 | 已落地 | 单 APK 多设备并发安装、并发限流、逐台状态与重试已落地（已整合进设备页安装面板） |
 | Phase 11: 设备文件管理 | 已落地待真机回归 | 设备文件浏览/上传/下载/多选批量下载/删除/打开所在文件夹/快捷入口容错已落地 |
 | Phase 12: 历史设备保存与快速重连 | 待开发 | WiFi 历史设备卡片、一键快速重连、IP 变更就地输入重连、移除二次确认；复用现有 `CONNECT_WIFI` 与 localStorage 持久化，无新增 IPC |
-| Phase 13: Pico 弱网控制桌面集成 | 待开发 | 「弱网」标签页、内置助手 APK 一键安装、目标包名选择、预设档位+手动参数、START/STOP 下发、dumpsys 状态查询、VPN 授权引导；新增 4 个弱网 IPC（三处同步 + 双 entry 注册），助手端 APK 已完成 |
+| Phase 13: 文件传输中断恢复 | 待开发 | 主进程 journal 持久化 + 临时名原子落地，进程被杀后重启可识别未完成任务并文件级续传 |
+| Phase 14: Pico 弱网控制桌面集成 | 待开发 | 「弱网」标签页、内置助手 APK 一键安装、目标包名选择、预设档位+手动参数、START/STOP 下发、tun 地址状态查询、VPN 授权引导；新增 4 个弱网 IPC（三处同步 + 双 entry 注册），助手端 APK 已完成 |
 
 **当前阶段判断**
 - 项目已经越过“脚手架阶段”

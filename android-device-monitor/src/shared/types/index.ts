@@ -11,6 +11,8 @@ export interface DeviceInfo {
   latencyMs?: number;
   latencyStatus?: 'ok' | 'timeout' | 'unknown';
   batteryLevel?: number;
+  // 屏幕电源状态：on=唤醒亮屏，off=息屏，unknown=识别不出/查询失败（不臆测）。
+  screenState?: 'on' | 'off' | 'unknown';
 }
 
 // 仅保存通过 WiFi 成功连过的设备，用于「快速重连」历史卡片。
@@ -68,6 +70,46 @@ export interface PullFilesResult {
   savedDir: string;    // 保存到的 PC 文件夹
   succeeded: number;   // 成功下载的文件数
   failed: number;      // 失败的文件数
+}
+
+/** 文件传输方向：上传到设备 / 从设备下载。 */
+export type TransferDirection = 'upload' | 'download';
+
+/** 单个传输任务的状态。pending=未开始，transferring=进行中，done=已完成，failed=失败。 */
+export type TransferTaskStatus = 'pending' | 'transferring' | 'done' | 'failed';
+
+/**
+ * 一次文件传输任务（批量中的单个文件）。持久化到 userData/transfer-journal.json，
+ * 用于进程崩溃 / 被强杀后识别未完成任务并文件级续传。只有停留在 pending/transferring
+ * 的任务才算「需恢复的残留」；用户主动取消或失败的任务在了结时即移除，不进恢复队列。
+ */
+export interface TransferTask {
+  id: string;                  // 任务唯一 id
+  batchId: string;             // 所属批次 id（一次批量上传/下载共享同一 batchId）
+  direction: TransferDirection;
+  deviceId: string;            // 任务绑定的设备，恢复以原设备为前提
+  sourcePath: string;          // 上传=本地文件路径；下载=设备文件路径
+  targetPath: string;          // 上传=设备目标目录；下载=PC 保存目录
+  fileName: string;            // 文件名
+  size: number;                // 文件大小（字节），未知填 0
+  status: TransferTaskStatus;
+  createdAt: number;           // 创建时间戳
+  updatedAt: number;           // 最后更新时间戳
+}
+
+/** 启动时推送给渲染层的「可恢复批次」摘要，用于弹窗提示。 */
+export interface TransferResumeBatch {
+  batchId: string;
+  direction: TransferDirection;
+  deviceId: string;
+  remaining: number;           // 该批次未完成文件数
+  sampleNames: string[];       // 文件名样例（最多几个，供提示展示）
+}
+
+/** 一批传输（新建或恢复）执行完毕的结果统计。 */
+export interface TransferBatchResult {
+  succeeded: number;
+  failed: number;
 }
 
 export interface ProcessInfo {
@@ -252,6 +294,10 @@ export interface MirrorSession {
   crop?: string; // scrcpy --crop 参数，Pico 单眼裁切，如 "1920:1920:0:0"
   maxSize?: number; // scrcpy --max-size 分辨率上限
   bitRate?: string; // scrcpy --video-bit-rate 码率，如 "8M"
+  audioForwarded?: boolean; // 当前是否把设备声音转到电脑（由独立音频进程承载，可投屏中实时切换）
+  // 转到电脑时的实际音频模式：'both'=设备与电脑同时出声（audio-dup，Android 13+）；
+  // 'pc-only'=仅电脑出声、设备静音（设备不支持 audio-dup 时自动降级）。未转发时为 undefined。
+  audioMode?: 'both' | 'pc-only';
 }
 
 /** 启动投屏的可选参数。 */
@@ -260,6 +306,21 @@ export interface MirrorStartOptions {
   isPico?: boolean; // Pico 设备自动附加单眼裁切
   maxSize?: number; // --max-size
   bitRate?: string; // --video-bit-rate，如 "8M"
+  // 投屏启动时是否就把设备声音转到电脑。默认 false：声音留在设备本机输出。
+  // 音频由独立的「纯音频」scrcpy 进程承载，投屏过程中可随时起停切换（见 setMirrorAudio）。
+  forwardAudio?: boolean;
+}
+
+/** 自动更新状态机。checking=检查中，available=发现新版本，not-available=已最新，
+ *  downloading=下载中（带 percent），downloaded=下好待重启安装，error=出错。 */
+export type UpdateState = 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+
+export interface UpdateStatus {
+  state: UpdateState;
+  version?: string; // available / downloaded 时的新版本号
+  percent?: number; // downloading 时的进度百分比（0-100，整数）
+  error?: string;   // error 时的错误信息
+  releaseNotes?: string; // available / downloaded 时的本次更新说明（来自 latest.yml）
 }
 
 export type IpcChannel =
@@ -286,9 +347,14 @@ export type IpcChannel =
   | 'adb:pull-device-file-progress'
   | 'adb:delete-device-file'
   | 'app:show-item-in-folder'
+  | 'app:get-version'
+  | 'app:get-release-notes'
   | 'adb:push-device-file'
   | 'adb:push-device-file-progress'
   | 'adb:select-upload-files'
+  | 'adb:resume-transfers'
+  | 'adb:discard-transfers'
+  | 'adb:get-resume-batches'
   | 'adb:sleep-device'
   | 'adb:wake-device'
   | 'adb:unlock-device'
@@ -299,7 +365,13 @@ export type IpcChannel =
   | 'mirror:start'
   | 'mirror:stop'
   | 'mirror:status'
+  | 'mirror:set-audio'
+  | 'update:status'
+  | 'update:check'
+  | 'update:download'
+  | 'update:quit-and-install'
   | 'log:export'
+  | 'log:export-full'
   | 'log:entry'
   | 'log:batch'
   | 'device:list-changed';

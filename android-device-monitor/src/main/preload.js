@@ -13,11 +13,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startPerformanceRecording: (deviceId, options) => ipcRenderer.invoke('adb:start-performance-recording', deviceId, options),
   readSnapshotImage: (screenshotPath) => ipcRenderer.invoke('performance:read-snapshot-image', screenshotPath),
   getProcesses: (deviceId) => ipcRenderer.invoke('adb:get-processes', deviceId),
+  getRunningPackages: (deviceId) => ipcRenderer.invoke('adb:get-running-packages', deviceId),
   connectUSB: () => ipcRenderer.invoke('adb:connect-usb'),
   getActivityStack: (deviceId, packageName) => ipcRenderer.invoke('adb:get-activity-stack', deviceId, packageName),
   getNetworkRequests: (deviceId, packageName) => ipcRenderer.invoke('adb:get-network-requests', deviceId, packageName),
   startMirror: (deviceId, options) => ipcRenderer.invoke('mirror:start', deviceId, options),
   stopMirror: (deviceId) => ipcRenderer.invoke('mirror:stop', deviceId),
+  setMirrorAudio: (deviceId, forward) => ipcRenderer.invoke('mirror:set-audio', deviceId, forward),
+  checkForUpdate: () => ipcRenderer.invoke('update:check'),
+  getUpdateStatus: () => ipcRenderer.invoke('update:get-status'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  quitAndInstallUpdate: () => ipcRenderer.invoke('update:quit-and-install'),
+  onUpdateStatus: (callback) => {
+    const listener = (_, status) => callback(status);
+    ipcRenderer.on('update:status', listener);
+    return () => ipcRenderer.removeListener('update:status', listener);
+  },
   onMirrorStatus: (callback) => {
     const listener = (_, session) => callback(session);
     ipcRenderer.on('mirror:status', listener);
@@ -34,7 +45,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listDeviceFiles: (deviceId, dirPath) => ipcRenderer.invoke('adb:list-device-files', deviceId, dirPath),
   pullDeviceFile: (deviceId, remotePath, name, isDir) => ipcRenderer.invoke('adb:pull-device-file', deviceId, remotePath, name, isDir),
   deleteDeviceFile: (deviceId, remotePath, isDir) => ipcRenderer.invoke('adb:delete-device-file', deviceId, remotePath, isDir),
+  createDeviceFolder: (deviceId, dirPath, name) => ipcRenderer.invoke('adb:create-device-folder', deviceId, dirPath, name),
   showItemInFolder: (localPath) => ipcRenderer.invoke('app:show-item-in-folder', localPath),
+  openPath: (targetPath) => ipcRenderer.invoke('app:open-path', targetPath),
+  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+  getReleaseNotes: () => ipcRenderer.invoke('app:get-release-notes'),
   pullDeviceFiles: (deviceId, items, pullId) => ipcRenderer.invoke('adb:pull-device-files', deviceId, items, pullId),
   onPullProgress: (callback) => {
     const listener = (_, progress) => callback(progress);
@@ -48,6 +63,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('adb:push-device-file-progress', listener);
     return () => ipcRenderer.removeListener('adb:push-device-file-progress', listener);
   },
+  resumeTransfers: (batchId, transferId) => ipcRenderer.invoke('adb:resume-transfers', batchId, transferId),
+  discardTransfers: (batchId) => ipcRenderer.invoke('adb:discard-transfers', batchId),
+  getResumeBatches: () => ipcRenderer.invoke('adb:get-resume-batches'),
   launchApp: (deviceId, packageName) => ipcRenderer.invoke('adb:launch-app', deviceId, packageName),
   forceStopApp: (deviceId, packageName) => ipcRenderer.invoke('adb:force-stop-app', deviceId, packageName),
   sleepDevice: (deviceId) => ipcRenderer.invoke('adb:sleep-device', deviceId),
@@ -55,6 +73,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   unlockDevice: (deviceId) => ipcRenderer.invoke('adb:unlock-device', deviceId),
   rebootDevice: (deviceId) => ipcRenderer.invoke('adb:reboot-device', deviceId),
   exportLogs: (logs) => ipcRenderer.invoke('log:export', logs),
+  exportFullLogs: (deviceId) => ipcRenderer.invoke('log:export-full', deviceId),
+  exportFullLogsByPackage: (deviceId, packageName) => ipcRenderer.invoke('log:export-full-by-package', deviceId, packageName),
   exportPerformanceSession: (payload) => ipcRenderer.invoke('performance:export-session', payload),
   onLogEntry: (callback) => {
     const listener = (_, entry) => callback(entry);

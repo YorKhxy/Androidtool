@@ -1,6 +1,6 @@
 {
   "name": "android-device-monitor",
-  "version": "1.0.0",
+  "version": "1.0.15",
   "description": "安卓设备监控 - 设备监控工具",
   "main": "./dist/main/main/index.js",
   "scripts": {
@@ -16,6 +16,8 @@
     "start": "electron .",
     "pack": "npm run adb:prepare && npm run scrcpy:prepare && npm run helper:prepare && electron-builder --dir",
     "dist": "npm run adb:prepare && npm run scrcpy:prepare && npm run helper:prepare && electron-builder",
+    "serve:updates": "node ./scripts/serve-updates.js",
+    "update:pack": "powershell -ExecutionPolicy Bypass -File ./scripts/make-update-package.ps1",
     "release": "powershell -ExecutionPolicy Bypass -File ./scripts/build-and-package.ps1",
     "release-bat": "scripts\\build-and-package.bat",
     "test": "jest"
@@ -48,6 +50,7 @@
   },
   "dependencies": {
     "adbkit": "^2.11.1",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^0.290.0",
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
@@ -58,10 +61,20 @@
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://192.168.1.158:8384/"
+      }
+    ],
+    "releaseInfo": {
+      "releaseNotesFile": "release-notes.md"
+    },
     "files": [
       "dist/main/**/*",
       "dist/renderer/**/*",
-      "index.html"
+      "index.html",
+      "release-notes.md"
     ],
     "extraResources": [
       {
@@ -92,6 +105,14 @@
     "win": {
       "target": "nsis",
       "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
     "linux": {
       "target": "deb"

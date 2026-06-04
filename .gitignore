@@ -6,11 +6,13 @@ dist/
 android-device-monitor/dist/
 android-device-monitor/src/release/
 android-device-monitor/release/
+android-device-monitor/update-releases/
 android-device-monitor/out/
 
 # Runtime artifacts
 android-device-monitor/performance-snapshots/
 android-device-monitor/performance-recordings/
+android-device-monitor/device-logs/
 android-device-monitor/.playwright-cli/
 android-device-monitor/.electron_cache/
 android-device-monitor/node_modules/.electron-*/

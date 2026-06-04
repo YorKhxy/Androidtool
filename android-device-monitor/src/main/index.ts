@@ -9,6 +9,16 @@ import { AdbCommandError } from './adb/adbError';
 import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
+import { initAutoUpdate, checkForUpdates, downloadUpdate, quitAndInstallUpdate, getLastUpdateStatus } from './autoUpdate';
+import * as fullLogRecorder from './fullLogRecorder';
+import * as transferJournal from './transferJournal';
+import {
+  buildUploadBatch,
+  buildDownloadBatch,
+  runUploadBatch,
+  runDownloadBatch,
+  discardBatch,
+} from './transferRunner';
 
 let mainWindow: BrowserWindow | null = null;
 let adbManager: ADBManager;
@@ -40,8 +50,13 @@ const cleanupBeforeQuit = async () => {
 
   cleanupPromise = (async () => {
     clearLogQueue();
+    fullLogRecorder.stopAll();
     scrcpyManager.stopAll();
     if (adbManager) {
+      // 先置位「退出中」：让被 SIGTERM 中断的传输保留为 transferring（可恢复），不被当成失败清出 journal。
+      transferJournal.setQuitting(true);
+      // 退出前终止正在跑的传输子进程（SIGTERM）；journal 已逐步落盘，崩溃/强杀靠它兜底恢复。
+      adbManager.cancelActiveTransfers();
       await adbManager.cleanup();
     }
     isCleanupComplete = true;
@@ -224,11 +239,15 @@ const setupIpcHandlers = () => {
 
   ipcMain.handle(IPC_CHANNELS.START_LOGCAT, async (_event, deviceId: string, minLevel: 'V' | 'D' | 'I' | 'W' | 'E' | 'F' = 'D', packageName?: string, pid?: string) => {
     try {
+      // 先开完整日志落盘文件（覆盖旧会话），再启动采集，保证第一行起就被记录。
+      fullLogRecorder.start(deviceId);
       await adbManager.startLogcat(deviceId, (entry) => {
+        fullLogRecorder.write(deviceId, entry); // 完整落盘（不受渲染层 2 万条上限/背压影响）
         enqueueLogForRenderer(entry);
       }, minLevel, packageName, pid);
       return { success: true };
     } catch (error) {
+      fullLogRecorder.stop(deviceId);
       return toIpcErrorResponse(error, '启动日志采集失败');
     }
   });
@@ -236,6 +255,7 @@ const setupIpcHandlers = () => {
   ipcMain.handle(IPC_CHANNELS.STOP_LOGCAT, async (_event, deviceId: string) => {
     try {
       await adbManager.stopLogcat(deviceId);
+      fullLogRecorder.stop(deviceId);
       return { success: true };
     } catch (error) {
       return toIpcErrorResponse(error, '停止日志采集失败');
@@ -289,6 +309,15 @@ const setupIpcHandlers = () => {
       return { success: true, data: processes };
     } catch (error) {
       return toIpcErrorResponse(error, '获取进程列表失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GET_RUNNING_PACKAGES, async (_event, deviceId: string) => {
+    try {
+      const data = await adbManager.getRunningPackages(deviceId);
+      return { success: true, data };
+    } catch (error) {
+      return toIpcErrorResponse(error, '获取运行中应用失败');
     }
   });
 
@@ -400,6 +429,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.CREATE_DEVICE_FOLDER, async (_event, deviceId: string, dirPath: string, name: string) => {
+    try {
+      const createdPath = await adbManager.createDeviceFolder(deviceId, dirPath, name);
+      return { success: true, data: createdPath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '创建文件夹失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.SHOW_ITEM_IN_FOLDER, async (_event, localPath: string) => {
     try {
       // 在系统文件管理器中定位并选中该文件
@@ -407,6 +445,35 @@ const setupIpcHandlers = () => {
       return { success: true };
     } catch (error) {
       return toIpcErrorResponse(error, '打开文件位置失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.OPEN_PATH, async (_event, targetPath: string) => {
+    try {
+      // 直接打开该目录/文件（下载完成后打开存放目录）。openPath 失败时返回非空错误串。
+      const error = await shell.openPath(targetPath);
+      if (error) return { success: false, error };
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '打开目录失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GET_APP_VERSION, async () => {
+    try {
+      return { success: true, data: app.getVersion() };
+    } catch (error) {
+      return toIpcErrorResponse(error, '获取版本号失败');
+    }
+  });
+
+  // 读取打进安装包的本版本更新日志（release-notes.md），供「更新日志」弹窗展示。读不到返回空串。
+  ipcMain.handle(IPC_CHANNELS.GET_RELEASE_NOTES, async () => {
+    try {
+      const content = await fs.readFile(path.join(app.getAppPath(), 'release-notes.md'), 'utf-8');
+      return { success: true, data: content };
+    } catch {
+      return { success: true, data: '' };
     }
   });
 
@@ -454,28 +521,12 @@ const setupIpcHandlers = () => {
           return { success: false, error: '取消下载' };
         }
         const savedDir = dirResult.filePaths[0];
-        const total = items.length;
-        let succeeded = 0;
-        let failed = 0;
-
-        for (let index = 0; index < total; index++) {
-          const item = items[index];
-          mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
-            pullId, fileName: item.name, index, total, status: 'downloading',
-          });
-          try {
-            await adbManager.pullDeviceFile(deviceId, item.path, path.join(savedDir, item.name));
-            succeeded++;
-            mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
-              pullId, fileName: item.name, index, total, status: 'done',
-            });
-          } catch (err) {
-            failed++;
-            mainWindow?.webContents.send(IPC_CHANNELS.PULL_DEVICE_FILE_PROGRESS, {
-              pullId, fileName: item.name, index, total, status: 'error', error: (err as Error).message,
-            });
-          }
-        }
+        // 先把整批任务落盘（pending），再逐个执行；中途崩溃靠 journal 恢复。
+        const batch = buildDownloadBatch(deviceId, savedDir, items);
+        transferJournal.createBatch(batch);
+        const send = (channel: string, payload: unknown) =>
+          mainWindow?.webContents.send(channel, payload);
+        const { succeeded, failed } = await runDownloadBatch(adbManager, send, batch, pullId);
         return { success: true, data: { savedDir, succeeded, failed } };
       } catch (error) {
         return toIpcErrorResponse(error, '批量下载失败');
@@ -501,34 +552,60 @@ const setupIpcHandlers = () => {
   ipcMain.handle(
     IPC_CHANNELS.PUSH_DEVICE_FILE,
     async (_event, deviceId: string, remoteDir: string, localPaths: string[], uploadId: string) => {
-      const total = localPaths.length;
       try {
-        for (let index = 0; index < total; index++) {
-          const localPath = localPaths[index];
-          const fileName = path.basename(localPath);
-          try {
-            await adbManager.pushDeviceFile(deviceId, localPath, remoteDir, fileName, (percent) => {
-              mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
-                uploadId, fileName, index, total, percent, status: 'uploading',
-              });
-            });
-            mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
-              uploadId, fileName, index, total, percent: 100, status: 'done',
-            });
-          } catch (err) {
-            mainWindow?.webContents.send(IPC_CHANNELS.PUSH_DEVICE_FILE_PROGRESS, {
-              uploadId, fileName, index, total, percent: 0, status: 'error',
-              error: (err as Error).message,
-            });
-            throw err;
-          }
-        }
-        return { success: true, data: total };
+        const batch = buildUploadBatch(deviceId, remoteDir, localPaths);
+        transferJournal.createBatch(batch);
+        const send = (channel: string, payload: unknown) =>
+          mainWindow?.webContents.send(channel, payload);
+        // 新建上传保持「首个失败即中止整批」语义（stopOnError=true）。
+        const { succeeded } = await runUploadBatch(adbManager, send, batch, uploadId, true);
+        return { success: true, data: succeeded };
       } catch (error) {
         return toIpcErrorResponse(error, '上传文件失败');
       }
     }
   );
+
+  // 恢复一批未完成传输：从 journal 取回任务，按方向走对应执行器（跳过已 done）。
+  // transferId 由渲染层传入，作为进度通道的 uploadId/pullId，复用现有进度展示。
+  ipcMain.handle(
+    IPC_CHANNELS.RESUME_TRANSFERS,
+    async (_event, batchId: string, transferId: string) => {
+      try {
+        const batch = transferJournal.getBatch(batchId);
+        if (batch.length === 0) {
+          return { success: false, error: '没有可恢复的任务' };
+        }
+        const send = (channel: string, payload: unknown) =>
+          mainWindow?.webContents.send(channel, payload);
+        const result = batch[0].direction === 'upload'
+          ? await runUploadBatch(adbManager, send, batch, transferId, false)
+          : await runDownloadBatch(adbManager, send, batch, transferId);
+        return { success: true, data: result };
+      } catch (error) {
+        return toIpcErrorResponse(error, '恢复传输失败');
+      }
+    }
+  );
+
+  // 丢弃一批未完成传输：清理残留 .part 并移出 journal，下次启动不再提示。
+  ipcMain.handle(IPC_CHANNELS.DISCARD_TRANSFERS, async (_event, batchId: string) => {
+    try {
+      await discardBatch(adbManager, batchId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '丢弃传输失败');
+    }
+  });
+
+  // 渲染层挂载后主动拉取可恢复批次（拉取式，避免 did-finish-load 推送早于订阅的竞态）。
+  ipcMain.handle(IPC_CHANNELS.GET_RESUME_BATCHES, async () => {
+    try {
+      return { success: true, data: transferJournal.getResumeBatches() };
+    } catch (error) {
+      return toIpcErrorResponse(error, '读取未完成传输失败');
+    }
+  });
 
   ipcMain.handle(IPC_CHANNELS.UNINSTALL_APP, async (_event, deviceId: string, packageName: string) => {
     try {
@@ -621,6 +698,61 @@ const setupIpcHandlers = () => {
     }
   });
 
+  // 导出完整原始日志：把该设备本次监控落盘的全量日志文件另存到用户选择的位置。
+  // 不受渲染层 2 万条上限/筛选影响，是从监控第一行到当前的完整记录。
+  ipcMain.handle(IPC_CHANNELS.EXPORT_FULL_LOGS, async (_event, deviceId: string) => {
+    try {
+      const src = fullLogRecorder.getPath(deviceId);
+      if (!src || !nodeFs.existsSync(src)) {
+        return { success: false, error: '没有可导出的完整日志，请先开始日志采集' };
+      }
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: '导出完整日志',
+        defaultPath: `android-full-logs-${Date.now()}.log`,
+        filters: [{ name: '日志文件', extensions: ['log', 'txt'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: '取消导出' };
+      }
+      await fs.copyFile(src, result.filePath);
+      return { success: true, data: result.filePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '导出完整日志失败');
+    }
+  });
+
+  // 按当前包名导出完整日志：在「全量落盘文件」基础上用用户填的包名做关联过滤，切出一份完整子集
+  //（多行堆栈整条保留），不需要重新采集。0 命中时删掉空文件并提示。
+  ipcMain.handle(IPC_CHANNELS.EXPORT_FULL_LOGS_BY_PACKAGE, async (_event, deviceId: string, packageName: string) => {
+    try {
+      const src = fullLogRecorder.getPath(deviceId);
+      if (!src || !nodeFs.existsSync(src)) {
+        return { success: false, error: '没有可导出的完整日志，请先开始日志采集' };
+      }
+      const pkg = (packageName || '').trim();
+      if (!pkg) {
+        return { success: false, error: '请先在「应用/包名」里填写要导出的包名' };
+      }
+      const safePkg = pkg.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: '按包名导出完整日志',
+        defaultPath: `android-full-logs-${safePkg}-${Date.now()}.log`,
+        filters: [{ name: '日志文件', extensions: ['log', 'txt'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: '取消导出' };
+      }
+      const matched = await fullLogRecorder.exportByPackage(deviceId, pkg, result.filePath);
+      if (matched === 0) {
+        try { await fs.unlink(result.filePath); } catch { /* noop */ }
+        return { success: false, error: `「${pkg}」没有匹配到任何完整日志` };
+      }
+      return { success: true, data: result.filePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '按包名导出完整日志失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.EXPORT_PERFORMANCE_SESSION, async (_event, payload: PerformanceSessionExportPayload) => {
     try {
       const result = await dialog.showSaveDialog(mainWindow!, {
@@ -658,6 +790,55 @@ const setupIpcHandlers = () => {
     }
   });
 
+  // 投屏中实时切换音频去向（设备本机 / 电脑），不影响主视频窗口。
+  ipcMain.handle(IPC_CHANNELS.MIRROR_SET_AUDIO, async (_event, deviceId: string, forward: boolean) => {
+    try {
+      const session = scrcpyManager.setAudioForward(deviceId, forward);
+      return { success: true, data: session };
+    } catch (error) {
+      return toIpcErrorResponse(error, '切换投屏声音失败');
+    }
+  });
+
+  // 手动触发检查更新（设置里「检查更新」按钮可用）。
+  ipcMain.handle(IPC_CHANNELS.UPDATE_CHECK, async () => {
+    try {
+      checkForUpdates();
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '检查更新失败');
+    }
+  });
+
+  // 渲染层挂载后拉取最近一次更新状态：补回启动自动检查时因 push 早于订阅而丢失的「有新版本」提示。
+  ipcMain.handle(IPC_CHANNELS.UPDATE_GET_STATUS, async () => {
+    try {
+      return { success: true, data: getLastUpdateStatus() };
+    } catch (error) {
+      return toIpcErrorResponse(error, '获取更新状态失败');
+    }
+  });
+
+  // 手动开始下载更新（autoDownload=false，由「立即更新」按钮触发）。
+  ipcMain.handle(IPC_CHANNELS.UPDATE_DOWNLOAD, async () => {
+    try {
+      downloadUpdate();
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '下载更新失败');
+    }
+  });
+
+  // 立即重启并安装已下载好的更新。
+  ipcMain.handle(IPC_CHANNELS.UPDATE_QUIT_AND_INSTALL, async () => {
+    try {
+      quitAndInstallUpdate();
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '安装更新失败');
+    }
+  });
+
   scrcpyManager.onStatus((session) => {
     mainWindow?.webContents.send(IPC_CHANNELS.MIRROR_STATUS, session);
   });
@@ -686,6 +867,10 @@ app.whenReady().then(() => {
   setupIpcHandlers();
   adbManager.startDeviceMonitoring();
   void adbManager.getAdbStatus(true);
+
+  // 自动更新：初始化事件转发，并在启动后检查一次（开发期默认跳过）。
+  initAutoUpdate(() => mainWindow);
+  checkForUpdates();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

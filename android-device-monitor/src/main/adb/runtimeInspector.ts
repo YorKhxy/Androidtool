@@ -263,41 +263,48 @@ export class AdbRuntimeInspector {
     return this.parseActivityStack(stdout, packageName);
   }
 
+  // 解析 dumpsys power 文本判断屏幕开关，多版本兼容；识别不出返回 unknown（不臆测）。
+  private parseScreenState(raw: string): 'on' | 'off' | 'unknown' {
+    const wakefulness = raw.match(/mWakefulness=(\w+)/i)?.[1]?.toLowerCase();
+    if (wakefulness === 'awake') return 'on';
+    if (wakefulness === 'asleep') return 'off';
+
+    const displayPowerState = raw.match(/Display Power:.*state=(ON|OFF)/i)?.[1]?.toLowerCase();
+    if (displayPowerState === 'on') return 'on';
+    if (displayPowerState === 'off') return 'off';
+
+    const screenState = raw.match(/mScreenState=(ON|OFF)/i)?.[1]?.toLowerCase();
+    if (screenState === 'on') return 'on';
+    if (screenState === 'off') return 'off';
+
+    return 'unknown';
+  }
+
+  // 供设备卡片用：返回 on/off/unknown。异常或识别不出一律 unknown——状态徽标宁可显示「未知」也不臆测。
+  async getScreenState(deviceId: string): Promise<'on' | 'off' | 'unknown'> {
+    try {
+      const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'power'], {
+        maxBuffer: 1024 * 1024 * 4,
+      });
+      return this.parseScreenState(stdout);
+    } catch (error) {
+      logger.warn('AdbRuntimeInspector: getScreenState failed:', error);
+      return 'unknown';
+    }
+  }
+
   private async getScreenPowerState(deviceId: string): Promise<{ isOn: boolean; raw?: string }> {
     try {
       const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'power'], {
         maxBuffer: 1024 * 1024 * 4,
       });
-      const raw = stdout;
-      const wakefulness = raw.match(/mWakefulness=(\w+)/i)?.[1]?.toLowerCase();
-      if (wakefulness === 'awake') {
-        return { isOn: true, raw };
+      const state = this.parseScreenState(stdout);
+      if (state === 'unknown') {
+        // 快照场景沿用旧的保守策略：识别不出时按「亮屏」处理，照常抓取截图，避免误判息屏拦截。
+        logger.warn('AdbRuntimeInspector: unknown screen power state, capturing screenshot conservatively.');
+        return { isOn: true, raw: stdout };
       }
-
-      if (wakefulness === 'asleep') {
-        return { isOn: false, raw };
-      }
-
-      const displayPowerState = raw.match(/Display Power:.*state=(ON|OFF)/i)?.[1]?.toLowerCase();
-      if (displayPowerState === 'on') {
-        return { isOn: true, raw };
-      }
-
-      if (displayPowerState === 'off') {
-        return { isOn: false, raw };
-      }
-
-      const screenState = raw.match(/mScreenState=(ON|OFF)/i)?.[1]?.toLowerCase();
-      if (screenState === 'on') {
-        return { isOn: true, raw };
-      }
-
-      if (screenState === 'off') {
-        return { isOn: false, raw };
-      }
-
-      logger.warn('AdbRuntimeInspector: unknown screen power state, capturing screenshot conservatively.');
-      return { isOn: true, raw };
+      return { isOn: state === 'on', raw: stdout };
     } catch (error) {
       logger.warn('AdbRuntimeInspector: getScreenPowerState failed, capturing screenshot:', error);
       return { isOn: true };

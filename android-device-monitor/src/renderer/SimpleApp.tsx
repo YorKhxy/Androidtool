@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest, WeakNetworkHelperStatus, WeakNetworkProfile } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest, WeakNetworkHelperStatus, WeakNetworkProfile, UpdateStatus } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
@@ -15,16 +15,42 @@ import {
   upsertHistoryDevice,
 } from './lib/historyDeviceStore';
 import {
+  addSearchHistory,
+  loadSearchHistory,
+  removeSearchHistory,
+  saveSearchHistory,
+} from './lib/searchHistoryStore';
+import { isTransferActive } from './lib/fileTransferManager';
+import {
   BATCH_UPDATE_DELAY,
   BATCH_UPDATE_SIZE,
   createDeviceLogState,
   createLogCounts,
   DeviceLogState,
+  LOG_LINE_HEIGHT,
   LOG_OVERSCAN_ROWS,
   LOG_ROW_HEIGHT,
   MAX_LOG_ENTRIES,
   MAX_PENDING_LOG_BUFFER,
 } from './lib/logStore';
+
+// 多行日志（异常堆栈等）在列表里整条铺开，每条高度 = 文本行数 × LOG_LINE_HEIGHT + 垂直内边距。
+// 行数按 message 的换行数确定性计算（WeakMap 缓存，条目不可变，避免重复计算），
+// 供变高虚拟滚动用——高度可预测，无需测量 DOM。
+const logEntryLineCounts = new WeakMap<LogEntry, number>();
+const getLogEntryLineCount = (log: LogEntry): number => {
+  const cached = logEntryLineCounts.get(log);
+  if (cached !== undefined) return cached;
+  let lines = 1;
+  const message = log.message;
+  for (let i = 0; i < message.length; i++) {
+    if (message.charCodeAt(i) === 10) lines++;
+  }
+  logEntryLineCounts.set(log, lines);
+  return lines;
+};
+const getLogRowHeight = (log: LogEntry): number =>
+  getLogEntryLineCount(log) * LOG_LINE_HEIGHT + (LOG_ROW_HEIGHT - LOG_LINE_HEIGHT);
 
 const isLikelyPicoDevice = (device: DeviceInfo | null): boolean => {
   const identity = [device?.manufacturer, device?.name, device?.model, device?.id]
@@ -124,9 +150,45 @@ const renderBatteryBadge = (device: DeviceInfo) => {
   );
 };
 
+// 屏幕状态徽标：唤醒（亮绿点）/息屏（暗灰点）/未知。仅已连接且拿到状态时显示。
+const renderScreenStateBadge = (device: DeviceInfo) => {
+  if (device.status !== 'connected' || !device.screenState) return null;
+  const meta =
+    device.screenState === 'on'
+      ? { label: '唤醒', color: '#22c55e', dot: '#22c55e', glow: true }
+      : device.screenState === 'off'
+        ? { label: '息屏', color: '#9ca3af', dot: '#6b7280', glow: false }
+        : { label: '未知', color: '#9ca3af', dot: '#6b7280', glow: false };
+  return (
+    <span title={`屏幕状态：${meta.label}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: meta.color, lineHeight: 1 }}>
+      <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: meta.dot, boxShadow: meta.glow ? '0 0 5px #22c55e' : 'none', flexShrink: 0 }} />
+      {meta.label}
+    </span>
+  );
+};
+
+// 复用的空集合：作为「该设备暂无 NEW」的稳定默认值，避免每次渲染新建 Set。
+const EMPTY_PACKAGE_SET: Set<string> = new Set();
+
 function SimpleApp() {
   const [adbStatus, setAdbStatus] = useState<AdbStatus | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  // 工具是否初始化完成（IPC 就绪 + 初始数据加载 + 事件订阅完毕）。未就绪时全屏「启动中」遮罩挡住所有操作。
+  const [appReady, setAppReady] = useState(false);
+  // 应用版本号（显示在标题栏，便于确认是否已更新到最新版）。
+  const [appVersion, setAppVersion] = useState<string>('');
+  // 更新日志弹窗：点版本号查看本版本更新内容（来自打进安装包的 release-notes.md）。
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
+  const [releaseNotesText, setReleaseNotesText] = useState<string>('');
+  // 手动「检查更新」：ref 标记本次为手动触发（后台检查静默，手动检查要给「已是最新/失败」反馈）。
+  const manualCheckRef = useRef(false);
+  const [checkResult, setCheckResult] = useState<string>('');
+  const lastCheckAtRef = useRef(0); // 上次点检查更新的时间戳，做 0.5s 冷却防狂点刷爆服务器
+  // 自动更新状态（来自主进程 electron-updater 事件），驱动右下角更新提示条。
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  // 点「安装并重启」后显示全屏「正在安装…」遮罩，随后退出安装（文件被锁需退出后由 NSIS 替换）。
+  const [installing, setInstalling] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
   const [customDeviceNames, setCustomDeviceNames] = useState<Record<string, string>>(() => loadStoredDeviceNames());
   const [activeTab, setActiveTab] = useState<TabType>('devices');
@@ -149,8 +211,32 @@ function SimpleApp() {
   const [installedPackages, setInstalledPackages] = useState<string[]>([]);
   const [installedPackagesLoading, setInstalledPackagesLoading] = useState(false);
   const [appFilter, setAppFilter] = useState('');
+  // 当前设备上在运行的应用包名集合：用于已安装列表标「运行中」并禁止重复启动。轮询刷新，反映真实状态。
+  const [runningPackages, setRunningPackages] = useState<Set<string>>(new Set());
+  // 刚通过工具新装上的包名，按设备分别存（批量装多台时切设备查看各自的 NEW，互不清除）。
+  // 每台设备在自己安装前后各拉一次包列表 diff 得到，与「当前选中设备」无关。
+  const [newlyInstalledByDevice, setNewlyInstalledByDevice] = useState<Record<string, Set<string>>>({});
   const [busyPackage, setBusyPackage] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<'launch' | 'stop' | 'uninstall' | null>(null);
+  // 应用内确认弹窗：取代原生 window.confirm —— 后者在 Electron 渲染层关闭后会让网页文档丢键盘焦点，
+  // 导致弹窗取消/确认后输入框（如「搜索包名」）点进去敲不了字。用受控 React 弹窗彻底规避。
+  const [confirmDialog, setConfirmDialog] = useState<{
+    message: string;
+    confirmText: string;
+    danger: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+  const requestConfirm = useCallback(
+    (opts: { message: string; confirmText?: string; danger?: boolean; onConfirm: () => void }) => {
+      setConfirmDialog({
+        message: opts.message,
+        confirmText: opts.confirmText || '确定',
+        danger: opts.danger ?? false,
+        onConfirm: opts.onConfirm,
+      });
+    },
+    []
+  );
   const [networkRequests, setNetworkRequests] = useState<NetworkRequest[]>([]);
   const [selectedNetworkRequestId, setSelectedNetworkRequestId] = useState<string | null>(null);
   const [runningLogDeviceIds, setRunningLogDeviceIds] = useState<Set<string>>(() => new Set());
@@ -172,6 +258,10 @@ function SimpleApp() {
   const [pairing, setPairing] = useState(false);
   const [packageFilter, setPackageFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  // 日志搜索关键字历史：重启工具仍在，可在搜索框下拉直接选。
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => loadSearchHistory());
+  // 自定义历史下拉的显隐（不用原生 datalist，以统一暗色 UI 风格）。
+  const [showSearchHistory, setShowSearchHistory] = useState(false);
   const [filterLevel, setFilterLevel] = useState<LogLevelFilter>('all');
   const [logTagFilter, setLogTagFilter] = useState('');
   const [logPackageFilter, setLogPackageFilter] = useState('');
@@ -188,6 +278,9 @@ function SimpleApp() {
   const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
   const [apkInstallStates, setApkInstallStates] = useState<Record<string, DeviceApkInstallState>>({});
   const [pendingApks, setPendingApks] = useState<{ path: string; fileName: string }[]>([]);
+  const [isApkDragOver, setIsApkDragOver] = useState(false); // 拖拽 APK 到待安装区时高亮
+  // 安装过程日志：每条带时间戳，最新在上。展示在「安装详情」模块里。
+  const [installLog, setInstallLog] = useState<{ text: string; level: 'info' | 'success' | 'error' }[]>([]);
   const [installTargets, setInstallTargets] = useState<Set<string>>(new Set());
   const [installConcurrency, setInstallConcurrency] = useState(4);
   const [installAllowDowngrade, setInstallAllowDowngrade] = useState(false);
@@ -223,6 +316,19 @@ function SimpleApp() {
     const customName = customDeviceNames[device.id]?.trim();
     return customName || device.name || device.model || device.id;
   }, [customDeviceNames]);
+
+  // 列表/日志里用的显示名：基名相同（如两台都改成同一自定义名）时补区分符，避免分不清是哪台。
+  // WiFi 用 IP，USB 用 SN 尾号；都取不到就退回设备 id。
+  const getDeviceLabel = useCallback((device: DeviceInfo) => {
+    const base = getDeviceDisplayName(device);
+    const collision = devices.some((d) => d.id !== device.id && getDeviceDisplayName(d) === base);
+    if (!collision) return base;
+    const snTail = device.serialNo && device.serialNo !== 'Unknown' ? device.serialNo.slice(-4) : '';
+    const distinguisher = device.connectionType === 'wifi'
+      ? ((device.id || '').split(':')[0] || snTail || device.id)
+      : (snTail || device.id);
+    return `${base}（${distinguisher}）`;
+  }, [getDeviceDisplayName, devices]);
 
   const updateCustomDeviceName = useCallback((deviceId: string, value: string) => {
     setCustomDeviceNames(prev => {
@@ -469,6 +575,13 @@ function SimpleApp() {
             return nextDevices;
           });
           removeDeviceLogState(deviceId);
+          // 设备断开：清掉它的「NEW」记录（设备没了，标识也无意义，顺便不留过期数据）。
+          setNewlyInstalledByDevice((prev) => {
+            if (!(deviceId in prev)) return prev;
+            const next = { ...prev };
+            delete next[deviceId];
+            return next;
+          });
         });
         
         const unsubscribeLogEntry = window.electronAPI!.onLogEntry((entry) => {
@@ -477,6 +590,39 @@ function SimpleApp() {
         const unsubscribeLogBatch = window.electronAPI!.onLogBatch((entries) => {
           enqueueLogEntries(entries);
         });
+        const unsubscribeUpdateStatus = window.electronAPI!.onUpdateStatus((status) => {
+          setUpdateStatus(status);
+          if (status.state === 'available' || status.state === 'downloading' || status.state === 'downloaded') {
+            setUpdateDismissed(false); // 有实质更新动作时重新弹出提示
+          }
+          // 手动检查时给按钮旁文字反馈（后台检查不反馈，保持静默）。
+          if (manualCheckRef.current) {
+            if (status.state === 'checking') {
+              setCheckResult('检查中…');
+            } else if (status.state === 'not-available') {
+              manualCheckRef.current = false;
+              setCheckResult('已是最新版本');
+              window.setTimeout(() => setCheckResult(''), 4000);
+            } else if (status.state === 'error') {
+              manualCheckRef.current = false;
+              setCheckResult('检查失败，请确认更新服务器');
+              window.setTimeout(() => setCheckResult(''), 5000);
+            } else {
+              manualCheckRef.current = false;
+              setCheckResult(''); // available/downloading/downloaded → 交给提示框展示
+            }
+          }
+        });
+        // 启动即拉取主进程已知的最近更新状态：补回 whenReady 那次自动检查因 push 早于本订阅而丢失的提示，
+        // 实现「打开工具就自动提示有新版本」，无需手动点「检查更新」。后台拉取，不走手动反馈（不弹「已是最新」）。
+        void window.electronAPI!.getUpdateStatus?.().then((res) => {
+          const status = res?.success ? res.data : null;
+          if (!status) return;
+          setUpdateStatus(status);
+          if (status.state === 'available' || status.state === 'downloading' || status.state === 'downloaded') {
+            setUpdateDismissed(false);
+          }
+        }).catch(() => undefined);
         const unsubscribeMirrorStatus = window.electronAPI!.onMirrorStatus((session) => {
           setMirrorSessionsByDeviceId(prev => ({ ...prev, [session.deviceId]: session }));
           setMirrorStartingDeviceIds(prev => {
@@ -487,6 +633,9 @@ function SimpleApp() {
           });
         });
 
+        // 初始数据加载完、所有 IPC 事件订阅就绪 → 标记 app 就绪，撤掉「启动中」遮罩，放开操作。
+        setAppReady(true);
+
         return () => {
           unsubscribeAdbStatusChanged();
           unsubscribeDeviceListChanged();
@@ -495,6 +644,7 @@ function SimpleApp() {
           unsubscribeLogEntry();
           unsubscribeLogBatch();
           unsubscribeMirrorStatus();
+          unsubscribeUpdateStatus();
           logStatesRef.current.forEach(state => {
             if (state.flushTimer !== null) {
               window.clearTimeout(state.flushTimer);
@@ -504,6 +654,7 @@ function SimpleApp() {
           apkInstallProgressTimersRef.current.clear();
         };
       }
+      setAppReady(true); // 无 Electron（纯网页环境）也放开操作
     };
 
     const cleanupPromise = initApp();
@@ -514,7 +665,60 @@ function SimpleApp() {
     };
   }, [applyDeviceList, enqueueLogEntries, removeDeviceLogState]);
 
-  
+  // 启动时取一次应用版本号，显示在标题栏，便于确认是否已更新到最新版。
+  useEffect(() => {
+    if (!hasElectronAPI() || !window.electronAPI?.getAppVersion) return;
+    void window.electronAPI.getAppVersion().then((result) => {
+      if (result.success && result.data) setAppVersion(result.data);
+    });
+  }, []);
+
+  // 全局拖拽守卫：拦掉窗口默认的「拖入文件即导航到 file://」行为——否则把 APK 拖偏到拖放区之外，
+  // 整个界面会被替换成该文件，体验崩坏。真正的接收逻辑在待安装拖放区里单独处理。
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', prevent);
+    window.addEventListener('drop', prevent);
+    return () => {
+      window.removeEventListener('dragover', prevent);
+      window.removeEventListener('drop', prevent);
+    };
+  }, []);
+
+  // 安全兜底：万一初始化某步卡住，最多 15 秒后也撤掉「启动中」遮罩，避免永久锁死。
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAppReady(true), 15000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // 手动检查更新：标记为手动触发并显示「检查中…」，结果由 onUpdateStatus 回调据 manualCheckRef 给反馈。
+  const handleCheckUpdate = async () => {
+    if (!hasElectronAPI() || !window.electronAPI?.checkForUpdate) return;
+    // 0.5s 冷却 + 上次检查未出结果时忽略：防止狂点把更新服务器刷爆。
+    const now = Date.now();
+    if (now - lastCheckAtRef.current < 500 || manualCheckRef.current) return;
+    lastCheckAtRef.current = now;
+    manualCheckRef.current = true;
+    setCheckResult('检查中…');
+    setUpdateDismissed(false);
+    try {
+      await window.electronAPI.checkForUpdate();
+    } catch {
+      manualCheckRef.current = false;
+      setCheckResult('检查失败');
+    }
+  };
+
+  // 点版本号：读取本版本更新日志（打进安装包的 release-notes.md）并弹窗展示。
+  const openReleaseNotes = async () => {
+    if (hasElectronAPI() && window.electronAPI?.getReleaseNotes) {
+      const result = await window.electronAPI.getReleaseNotes();
+      setReleaseNotesText(result.success && result.data ? result.data : '');
+    }
+    setShowReleaseNotes(true);
+  };
+
+
 
   useEffect(() => {
     if (selectedDevice && activeTab === 'performance' && performanceEnabledDeviceIds.has(selectedDevice.id)) {
@@ -539,6 +743,7 @@ function SimpleApp() {
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
   useEffect(() => {
+    // 切设备只是切换显示哪台，NEW 按设备存（newlyInstalledByDevice），不清除——否则批量装多台后切看就丢标识。
     if (selectedDevice?.id) {
       setInstalledPackages([]);
       setAppFilter('');
@@ -549,6 +754,20 @@ function SimpleApp() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDevice?.id]);
+
+  // 轮询当前设备「运行中」应用：仅设备页 + 设备已连接时，每 4s 刷新，让运行标识反映真实状态
+  //（不管谁启动的）。离开设备页 / 切设备 / 断开即清空，避免显示过期运行态。
+  useEffect(() => {
+    const deviceId = selectedDevice?.id;
+    if (!deviceId || selectedDevice?.status !== 'connected' || activeTab !== 'devices') {
+      setRunningPackages(new Set());
+      return;
+    }
+    void loadRunningPackages();
+    const timer = window.setInterval(() => { void loadRunningPackages(); }, 4000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDevice?.id, selectedDevice?.status, activeTab]);
 
   useEffect(() => {
     setSelectedNetworkRequestId(null);
@@ -693,6 +912,48 @@ function SimpleApp() {
       return next;
     });
   }, []);
+
+  // 记录一次搜索关键字到历史（去重置顶 + 持久化）。在搜索框回车或失焦时调用。
+  const recordSearchHistory = useCallback((keyword: string) => {
+    if (!keyword.trim()) return;
+    setSearchHistory(prev => {
+      const next = addSearchHistory(prev, keyword);
+      saveSearchHistory(next);
+      return next;
+    });
+  }, []);
+
+  // 关闭文件管理：若该设备有文件传输进行中，先确认（关闭后传输仍在后台继续，重开可看回进度）。
+  const closeFileBrowser = useCallback(() => {
+    if (fileBrowserDevice && isTransferActive(fileBrowserDevice.id)) {
+      requestConfirm({
+        message: '正在传输文件，确定关闭文件管理吗？\n关闭后传输会在后台继续，重新打开可看到进度。',
+        confirmText: '关闭',
+        onConfirm: () => setFileBrowserDevice(null),
+      });
+      return;
+    }
+    setFileBrowserDevice(null);
+  }, [fileBrowserDevice, requestConfirm]);
+
+  // 从历史移除一条关键字。
+  const removeOneSearchHistory = useCallback((keyword: string) => {
+    setSearchHistory(prev => {
+      const next = removeSearchHistory(prev, keyword);
+      saveSearchHistory(next);
+      return next;
+    });
+  }, []);
+
+  // 历史下拉里展示的条目：按当前输入做前缀联想（输入为空则全部），排除与输入完全相同的项。
+  const visibleSearchHistory = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    if (!query) return searchHistory;
+    return searchHistory.filter(item => {
+      const lower = item.toLowerCase();
+      return lower.includes(query) && lower !== query;
+    });
+  }, [searchHistory, searchTerm]);
 
   // \u5386\u53f2\u5361\u7247\u300c\u5feb\u901f\u8fde\u63a5\u300d\uff1a\u7528\u8bb0\u5f55\u7684 lastAddress \u76f4\u63a5\u8fde\u3002\u5931\u8d25\u591a\u534a\u662f\u8bbe\u5907 IP \u53d8\u4e86\uff0c
   // \u5c31\u5730\u5c55\u5f00\u8f93\u5165\u6846\u5e76\u9884\u586b\u4e0a\u6b21\u5730\u5740\u4f9b\u7528\u6237\u4fee\u6539\u540e\u91cd\u8fde\uff0c\u4e0d\u5220\u9664\u5386\u53f2\u8bb0\u5f55\u3002
@@ -881,7 +1142,9 @@ function SimpleApp() {
     } else {
       const sourcePackage = logPackageFilter.trim() || packageFilter.trim() || undefined;
       const sourcePid = logPidFilter.trim() || undefined;
-      const sourceLevel: LogEntry['level'] = filterLevel === 'all' ? 'V' : filterLevel;
+      // 抓取恒定按 all levels（*:V），不受日志等级下拉框限制——等级只做显示筛选（见 filteredLogs）。
+      // 这样切换等级无需重新采集，也不会因选了高等级而漏抓低等级日志。
+      const sourceLevel: LogEntry['level'] = 'V';
       const result = await window.electronAPI!.startLogcat(selectedDevice.id, sourceLevel, sourcePackage, sourcePid);
       if (result.success) {
         state.running = true;
@@ -1057,6 +1320,17 @@ function SimpleApp() {
     }
   };
 
+  // 把一批宿主路径加入待安装列表：仅留 .apk、按路径去重。供「选择 APK」与拖拽共用。
+  const addApkFilesByPath = (paths: string[]) => {
+    setPendingApks((prev) => {
+      const existing = new Set(prev.map((a) => a.path));
+      const added = paths
+        .filter((p) => p.toLowerCase().endsWith('.apk') && !existing.has(p))
+        .map((p) => ({ path: p, fileName: p.split(/[\\/]/).pop() || p }));
+      return [...prev, ...added];
+    });
+  };
+
   const selectApkFiles = async () => {
     if (!hasElectronAPI()) {
       setError('Electron 接口不可用');
@@ -1069,17 +1343,29 @@ function SimpleApp() {
         return;
       }
       if (result.data.length === 0) return;
-      setPendingApks((prev) => {
-        const existing = new Set(prev.map((a) => a.path));
-        const added = result.data!
-          .filter((p) => p.toLowerCase().endsWith('.apk') && !existing.has(p))
-          .map((p) => ({ path: p, fileName: p.split(/[\\/]/).pop() || p }));
-        return [...prev, ...added];
-      });
+      addApkFilesByPath(result.data);
       setError('');
     } catch (err) {
       setError('选择安装包失败：' + (err as Error).message);
     }
+  };
+
+  // 拖拽 APK 到待安装区：Electron 28 的 drop File 仍带 .path（宿主绝对路径），直接取用。
+  const handleApkDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsApkDragOver(false);
+    if (isUnifiedInstalling) return;
+    const files = Array.from(e.dataTransfer.files || []);
+    const paths = files
+      .map((f) => (f as File & { path?: string }).path || '')
+      .filter(Boolean);
+    const apks = paths.filter((p) => p.toLowerCase().endsWith('.apk'));
+    if (apks.length === 0) {
+      if (files.length > 0) setError('只能拖入 .apk 安装包');
+      return;
+    }
+    addApkFilesByPath(apks);
+    setError('');
   };
 
   const removePendingApk = (path: string) => {
@@ -1097,8 +1383,28 @@ function SimpleApp() {
   };
 
   // 给指定设备安装一组 items（items 直接传入，避免读取尚未刷新的队列状态）。
+  // 往安装日志追加一条（带本地时间戳，最新在最上面，最多留 200 条）。
+  const appendInstallLog = (text: string, level: 'info' | 'success' | 'error' = 'info') => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const ts = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    setInstallLog((prev) => [{ text: `[${ts}] ${text}`, level }, ...prev].slice(0, 200));
+  };
+
   const installItemsOnDevice = async (deviceId: string, items: ApkInstallQueueItem[]) => {
+    const deviceLabel = (() => {
+      const d = devices.find((x) => x.id === deviceId);
+      return d ? getDeviceLabel(d) : deviceId;
+    })();
+    const installFlags = installAllowDowngrade ? '-r -d' : '-r';
+    // 安装前快照本设备的包集合，用于装完后 diff 出新增的包标「NEW」（每台设备各自算，与当前选中无关）。
+    const beforeRes = await window.electronAPI!.listInstalledPackages(deviceId).catch(() => null);
+    const baseline = new Set(beforeRes && beforeRes.success && beforeRes.data ? beforeRes.data : []);
     for (const item of items) {
+      const startedAt = Date.now();
+      appendInstallLog(
+        `${deviceLabel} ▶ 开始安装 ${item.fileName}\n    命令: adb install ${installFlags}\n    源文件: ${item.path}`
+      );
       updateDeviceApkInstallState(deviceId, (previousState) => ({
         ...previousState,
         queue: previousState.queue.map((q) =>
@@ -1109,25 +1415,57 @@ function SimpleApp() {
       try {
         const result = await window.electronAPI!.installApk(deviceId, item.path, { allowDowngrade: installAllowDowngrade });
         stopApkInstallProgressTimer(item.id);
+        const failMsg = result.success ? undefined : formatOperationError(result, '安装失败');
+        // 进度卡只存「一句话原因」（result.error 的标题，不含建议/adb 原文）；完整详情交给下方安装日志，避免两处重复。
         updateDeviceApkInstallState(deviceId, (previousState) => ({
           ...previousState,
           queue: previousState.queue.map((q) =>
             q.id === item.id
-              ? { ...q, status: result.success ? 'success' : 'failed', progress: 100, output: result.data?.output, error: result.success ? undefined : formatOperationError(result, '安装失败') }
+              ? { ...q, status: result.success ? 'success' : 'failed', progress: 100, output: undefined, error: result.success ? undefined : (result.error || '安装失败') }
               : q
           ),
         }));
+        const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+        const indent = (text: string) => text.trim().split(/\r?\n/).filter(Boolean).map((l) => `    ${l}`).join('\n');
+        if (result.success) {
+          const out = (result.data?.output || '').trim();
+          appendInstallLog(
+            `${deviceLabel} ✓ ${item.fileName} 安装成功 · 耗时 ${elapsed}s` + (out ? `\n${indent(out)}` : ''),
+            'success'
+          );
+        } else {
+          const details = (result.details || '').trim();
+          appendInstallLog(
+            `${deviceLabel} ✗ ${item.fileName} 安装失败 · 耗时 ${elapsed}s\n    ${failMsg}` + (details ? `\n    ── adb 原始输出 ──\n${indent(details)}` : ''),
+            'error'
+          );
+        }
       } catch (err) {
         stopApkInstallProgressTimer(item.id);
+        const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+        const msg = (err as Error).message;
         updateDeviceApkInstallState(deviceId, (previousState) => ({
           ...previousState,
-          queue: previousState.queue.map((q) => (q.id === item.id ? { ...q, status: 'failed', progress: 100, error: (err as Error).message } : q)),
+          queue: previousState.queue.map((q) => (q.id === item.id ? { ...q, status: 'failed', progress: 100, error: msg } : q)),
         }));
+        appendInstallLog(`${deviceLabel} ✗ ${item.fileName} 安装异常 · 耗时 ${elapsed}s\n    ${msg}`, 'error');
       }
     }
     updateDeviceApkInstallState(deviceId, (previousState) => ({ ...previousState, isInstalling: false }));
-    if (selectedDeviceRef.current?.id === deviceId) {
-      void loadInstalledPackages();
+    // 装完再拉一次本设备包列表：diff 出新增的包记成该设备的「NEW」（累加，按设备存）；顺便刷新可见列表。
+    const afterRes = await window.electronAPI!.listInstalledPackages(deviceId).catch(() => null);
+    if (afterRes && afterRes.success && afterRes.data) {
+      const after = afterRes.data;
+      const newly = after.filter((p) => !baseline.has(p));
+      if (newly.length > 0) {
+        setNewlyInstalledByDevice((prev) => ({
+          ...prev,
+          [deviceId]: new Set([...(prev[deviceId] || []), ...newly]),
+        }));
+      }
+      if (selectedDeviceRef.current?.id === deviceId) {
+        setInstalledPackages(after);
+      }
     }
   };
 
@@ -1136,6 +1474,14 @@ function SimpleApp() {
     if (isUnifiedInstalling || !hasElectronAPI()) return;
     const targetIds = Array.from(installTargets).filter((id) => devices.find((d) => d.id === id)?.status === 'connected');
     if (pendingApks.length === 0 || targetIds.length === 0) return;
+
+    appendInstallLog(`开始安装 ${pendingApks.length} 个 APK 到 ${targetIds.length} 台设备（并发 ${installConcurrency > 0 ? installConcurrency : '不限'}${installAllowDowngrade ? '，允许降级' : ''}）`);
+    // 新批次：重置本次目标设备的「NEW」——只标最新这一批装上的（批次内含重试会继续累加）。
+    setNewlyInstalledByDevice((prev) => {
+      const next = { ...prev };
+      targetIds.forEach((id) => { delete next[id]; });
+      return next;
+    });
 
     const perDeviceItems: Record<string, ApkInstallQueueItem[]> = {};
     targetIds.forEach((id) => {
@@ -1370,7 +1716,7 @@ function SimpleApp() {
   const handleAuthorizeWeakNet = () =>
     runWeakNetAction(() => window.electronAPI!.launchApp(selectedDevice!.id, 'com.androidtool.piconetworkhelper'), '拉起助手授权页失败');
 
-  const handleStartMirror = async (params: { maxSize?: number; bitRate?: string }) => {
+  const handleStartMirror = async (params: { maxSize?: number; bitRate?: string; forwardAudio?: boolean }) => {
     if (!selectedDevice || !hasElectronAPI()) return;
     const deviceId = selectedDevice.id;
     setError('');
@@ -1380,6 +1726,7 @@ function SimpleApp() {
         isPico: isLikelyPicoDevice(selectedDevice),
         maxSize: params.maxSize,
         bitRate: params.bitRate,
+        forwardAudio: params.forwardAudio,
       });
       if (!result.success) {
         setMirrorStartingDeviceIds(prev => {
@@ -1412,6 +1759,44 @@ function SimpleApp() {
     }
   };
 
+  // 点「立即更新」：手动开始下载新版本（autoDownload 已关，需显式触发）。
+  const handleDownloadUpdate = async () => {
+    if (!hasElectronAPI() || !window.electronAPI?.downloadUpdate) return;
+    try {
+      await window.electronAPI.downloadUpdate();
+    } catch (err) {
+      setError('下载更新失败：' + (err as Error).message);
+    }
+  };
+
+  // 安装并重启：先显示全屏「正在安装」遮罩（留一帧给 UI 渲染），再触发静默安装+自动重启。
+  const handleInstallUpdate = async () => {
+    if (!hasElectronAPI()) return;
+    setInstalling(true);
+    window.setTimeout(() => {
+      window.electronAPI!.quitAndInstallUpdate().catch((err) => {
+        setInstalling(false);
+        setError('安装更新失败：' + (err as Error).message);
+      });
+    }, 300);
+  };
+
+  // 投屏中实时切换音频去向（设备本机 / 电脑）。主进程返回更新后的会话，乐观更新本地状态。
+  const handleToggleMirrorAudio = async (forward: boolean) => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    const deviceId = selectedDevice.id;
+    try {
+      const result = await window.electronAPI!.setMirrorAudio(deviceId, forward);
+      if (result.success && result.data) {
+        setMirrorSessionsByDeviceId(prev => ({ ...prev, [deviceId]: result.data! }));
+      } else if (!result.success) {
+        setError(result.error || '切换投屏声音失败');
+      }
+    } catch (err) {
+      setError('切换投屏声音失败：' + (err as Error).message);
+    }
+  };
+
   const loadInstalledPackages = async () => {
     if (!selectedDevice || !hasElectronAPI()) return;
     const targetDeviceId = selectedDevice.id;
@@ -1437,8 +1822,24 @@ function SimpleApp() {
     }
   };
 
+  // 拉取当前设备在运行的应用包名集合（带设备切换防过期）。失败静默，不打扰用户。
+  const loadRunningPackages = async () => {
+    if (!selectedDevice || !hasElectronAPI() || !window.electronAPI?.getRunningPackages) return;
+    const targetDeviceId = selectedDevice.id;
+    try {
+      const result = await window.electronAPI.getRunningPackages(targetDeviceId);
+      if (selectedDeviceRef.current?.id !== targetDeviceId) return; // 设备已切换，丢弃过期结果
+      if (result.success && result.data) {
+        setRunningPackages(new Set(result.data));
+      }
+    } catch {
+      /* 运行态查询失败不影响主流程，忽略 */
+    }
+  };
+
   const handleLaunchApp = async (packageName: string) => {
     if (!selectedDevice || !hasElectronAPI() || busyPackage) return;
+    if (runningPackages.has(packageName)) return; // 已在运行，禁止重复启动
     setBusyPackage(packageName);
     setBusyAction('launch');
     try {
@@ -1452,6 +1853,8 @@ function SimpleApp() {
     } finally {
       setBusyPackage(null);
       setBusyAction(null);
+      // 进程要一会儿才起来，稍后刷新运行态让「运行中」标识跟上
+      window.setTimeout(() => { void loadRunningPackages(); }, 1200);
     }
   };
 
@@ -1470,17 +1873,28 @@ function SimpleApp() {
     } finally {
       setBusyPackage(null);
       setBusyAction(null);
+      window.setTimeout(() => { void loadRunningPackages(); }, 600); // 关闭后进程很快消失，稍后刷新运行态
     }
   };
 
-  const handleUninstallApp = async (packageName: string) => {
-    if (!selectedDevice || !hasElectronAPI() || busyPackage) return;
-    if (!window.confirm(`确定卸载应用「${packageName}」？此操作不可撤销。`)) return;
+  const handleUninstallApp = (packageName: string) => {
+    const device = selectedDevice; // 捕获当前设备：确认期间若切换设备，仍卸载用户当时看到的那台
+    if (!device || !hasElectronAPI() || busyPackage) return;
+    requestConfirm({
+      message: `确定卸载应用「${packageName}」？此操作不可撤销。`,
+      confirmText: '卸载',
+      danger: true,
+      onConfirm: () => { void doUninstallApp(device, packageName); },
+    });
+  };
+
+  const doUninstallApp = async (device: DeviceInfo, packageName: string) => {
+    if (!hasElectronAPI()) return;
     setBusyPackage(packageName);
     setBusyAction('uninstall');
     try {
       setError('');
-      const result = await window.electronAPI!.uninstallApp(selectedDevice.id, packageName);
+      const result = await window.electronAPI!.uninstallApp(device.id, packageName);
       if (result.success) {
         await loadInstalledPackages();
       } else {
@@ -1507,6 +1921,35 @@ function SimpleApp() {
       setLastExportedLogPath(result.data || null);
     } else if (result.error !== '\u53d6\u6d88\u5bfc\u51fa') {
       setError(result.error || '\u65e5\u5fd7\u5bfc\u51fa\u5931\u8d25');
+    }
+  };
+
+  // \u5bfc\u51fa\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\uff1a\u4ece\u76d1\u63a7\u7b2c\u4e00\u884c\u5230\u5f53\u524d\u7684\u5168\u91cf\uff08\u5168\u7b49\u7ea7\u3001\u4e0d\u53d7 2 \u4e07\u6761\u4e0a\u9650/\u7b5b\u9009\u5f71\u54cd\uff09\uff0c\u7531\u4e3b\u8fdb\u7a0b\u843d\u76d8\u6587\u4ef6\u53e6\u5b58\u3002
+  const exportFullLogs = async () => {
+    if (!hasElectronAPI() || !selectedDevice) return;
+    const result = await window.electronAPI!.exportFullLogs(selectedDevice.id);
+    if (result.success) {
+      setError('');
+      setLastExportedLogPath(result.data || null);
+    } else if (result.error !== '\u53d6\u6d88\u5bfc\u51fa') {
+      setError(result.error || '\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7\u5931\u8d25');
+    }
+  };
+
+  // \u6309\u5f53\u524d\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7\uff1a\u4e0d\u91cd\u65b0\u91c7\u96c6\uff0c\u76f4\u63a5\u7528\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u7684\u8bcd\u5173\u8054\u8fc7\u6ee4\u6574\u4efd\u843d\u76d8\u6587\u4ef6\uff0c\u5207\u51fa\u4e00\u4efd\u5b8c\u6574\u5b50\u96c6\u3002
+  const exportFullLogsByPackage = async () => {
+    if (!hasElectronAPI() || !selectedDevice) return;
+    const pkg = logPackageFilter.trim() || packageFilter.trim();
+    if (!pkg) {
+      setError('\u8bf7\u5148\u5728\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u5199\u8981\u5bfc\u51fa\u7684\u5305\u540d');
+      return;
+    }
+    const result = await window.electronAPI!.exportFullLogsByPackage(selectedDevice.id, pkg);
+    if (result.success) {
+      setError('');
+      setLastExportedLogPath(result.data || null);
+    } else if (result.error !== '\u53d6\u6d88\u5bfc\u51fa') {
+      setError(result.error || '\u6309\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7\u5931\u8d25');
     }
   };
 
@@ -1556,35 +1999,72 @@ function SimpleApp() {
     const selectedOnlineCount = Array.from(installTargets).filter((id) => onlineDevices.some((d) => d.id === id)).length;
     const canStart = pendingApks.length > 0 && selectedOnlineCount > 0 && !isUnifiedInstalling;
     const activeDeviceIds = devices.map((d) => d.id).filter((id) => (apkInstallStates[id]?.queue.length || 0) > 0);
+    const hasInstallDetail = activeDeviceIds.length > 0 || installLog.length > 0;
 
     return (
-      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{'应用安装'}</h2>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <button onClick={selectApkFiles} disabled={isUnifiedInstalling} style={{ padding: '8px 14px', backgroundColor: isUnifiedInstalling ? '#4b5563' : '#4a90d9', border: 'none', borderRadius: '6px', color: '#fff', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600 }}>选择 APK</button>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#cbd5e1' }}>并发数
-            <select value={installConcurrency} disabled={isUnifiedInstalling} onChange={(e) => setInstallConcurrency(Number(e.target.value))} style={{ padding: '6px 10px', fontSize: '13px', color: '#e5e7eb', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
-              <option value={2}>2</option><option value={4}>4</option><option value={8}>8</option><option value={0}>不限</option>
-            </select>
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#cbd5e1' }}>
-            <input type="checkbox" checked={installAllowDowngrade} disabled={isUnifiedInstalling} onChange={(e) => setInstallAllowDowngrade(e.target.checked)} />允许降级覆盖
-          </label>
+      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {/* 标题行：标题在左，并发数/降级收到右侧，省掉单独一行配置 */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', flexShrink: 0 }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{'应用安装'}</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#9ca3af' }}>并发数
+              <select value={installConcurrency} disabled={isUnifiedInstalling} onChange={(e) => setInstallConcurrency(Number(e.target.value))} style={{ padding: '5px 8px', fontSize: '13px', color: '#e5e7eb', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
+                <option value={2}>2</option><option value={4}>4</option><option value={8}>8</option><option value={0}>不限</option>
+              </select>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
+              <input type="checkbox" checked={installAllowDowngrade} disabled={isUnifiedInstalling} onChange={(e) => setInstallAllowDowngrade(e.target.checked)} />允许降级覆盖
+            </label>
+          </div>
         </div>
 
-        {pendingApks.length > 0 ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            {pendingApks.map((a) => (
-              <span key={a.path} title={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '999px', fontSize: '12px', color: '#e5e7eb' }}>
-                {a.fileName}
-                <button onClick={() => removePendingApk(a.path)} disabled={isUnifiedInstalling} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', padding: 0, fontSize: '13px' }}>✕</button>
+        {/* 操作区（占比 3）：选 APK + 目标设备 + 安装按钮 */}
+        <div style={{ flex: 3, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto' }}>
+        {/* 拖放区：无文件时图标提示，有文件时放 chip */}
+        <div
+          onClick={() => { if (!isUnifiedInstalling) selectApkFiles(); }}
+          onDragOver={(e) => { e.preventDefault(); if (!isUnifiedInstalling) setIsApkDragOver(true); }}
+          onDragEnter={(e) => { e.preventDefault(); if (!isUnifiedInstalling) setIsApkDragOver(true); }}
+          onDragLeave={(e) => { e.preventDefault(); setIsApkDragOver(false); }}
+          onDrop={handleApkDrop}
+          style={{
+            flex: 1,
+            minHeight: '90px',
+            display: 'flex',
+            flexDirection: 'column',
+            border: `1.5px dashed ${isApkDragOver ? '#4a90d9' : '#3a3a55'}`,
+            backgroundColor: isApkDragOver ? '#2a3550' : '#1f1f3320',
+            borderRadius: '10px',
+            padding: pendingApks.length > 0 ? '12px 14px' : '16px',
+            cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer',
+            transition: 'background-color 120ms ease, border-color 120ms ease',
+          }}
+        >
+          {pendingApks.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 0, overflowY: 'auto' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{`已选 ${pendingApks.length} 个安装包`}</span>
+                <span style={{ fontSize: '12px', color: '#60a5fa' }}>{'＋ 点击或拖拽继续添加'}</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {pendingApks.map((a) => (
+                  <span key={a.path} title={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '999px', fontSize: '12px', color: '#e5e7eb' }}>
+                    {a.fileName}
+                    <button onClick={(e) => { e.stopPropagation(); removePendingApk(a.path); }} disabled={isUnifiedInstalling} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', padding: 0, fontSize: '13px' }}>✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: isApkDragOver ? '#93c5fd' : '#9ca3af', pointerEvents: 'none' }}>
+              <span style={{ fontSize: '36px', lineHeight: 1, opacity: 0.85 }}>{'📦'}</span>
+              <span style={{ fontSize: '14px', fontWeight: 500 }}>
+                {isApkDragOver ? '松开以添加 APK' : '把 .apk 拖到这里，或点击选择'}
               </span>
-            ))}
-          </div>
-        ) : (
-          <div style={{ fontSize: '13px', color: '#6b7280' }}>还没有待安装文件，点「选择 APK」添加（可多选）</div>
-        )}
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>{'支持多选'}</span>
+            </div>
+          )}
+        </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -1600,7 +2080,7 @@ function SimpleApp() {
               return (
                 <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', cursor: online && !isUnifiedInstalling ? 'pointer' : 'not-allowed', opacity: online ? 1 : 0.5 }}>
                   <input type="checkbox" checked={installTargets.has(d.id)} disabled={!online || isUnifiedInstalling} onChange={() => toggleInstallTarget(d.id)} />
-                  <span style={{ fontSize: '13px', color: '#e5e7eb' }}>{getDeviceDisplayName(d)}</span>
+                  <span style={{ fontSize: '13px', color: '#e5e7eb' }}>{getDeviceLabel(d)}</span>
                   <span style={{ fontSize: '12px', color: d.connectionType === 'wifi' ? '#4ade80' : '#60a5fa' }}>{d.connectionType === 'wifi' ? 'WiFi' : 'USB'}</span>
                   {!online && <span style={{ fontSize: '12px', color: '#9ca3af' }}>离线</span>}
                 </label>
@@ -1612,7 +2092,20 @@ function SimpleApp() {
         <button onClick={startUnifiedInstall} disabled={!canStart} style={{ alignSelf: 'flex-start', padding: '10px 24px', fontSize: '14px', fontWeight: 600, color: '#fff', backgroundColor: canStart ? '#4a90d9' : '#3a3a55', border: 'none', borderRadius: '8px', cursor: canStart ? 'pointer' : 'not-allowed' }}>
           {isUnifiedInstalling ? '安装中…' : `安装到所选设备${selectedOnlineCount > 0 ? `（${selectedOnlineCount}）` : ''}`}
         </button>
+        </div>
 
+        {/* 安装详情（占比 7）：进度 + 错误 + 安装日志 */}
+        <div style={{ flex: 7, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+            <span style={{ fontSize: '14px', fontWeight: 600, color: '#cbd5e1' }}>{'安装详情'}</span>
+            {installLog.length > 0 && (
+              <button onClick={() => setInstallLog([])} style={{ fontSize: '12px', color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}>{'清空日志'}</button>
+            )}
+          </div>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: '#1b1b2e', border: '1px solid #353550', borderRadius: '8px', padding: '10px' }}>
+            {!hasInstallDetail && (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '13px' }}>{'安装进度、结果与日志会显示在这里'}</div>
+            )}
         {activeDeviceIds.map((deviceId) => {
           const device = devices.find((d) => d.id === deviceId);
           const queue = apkInstallStates[deviceId]?.queue || [];
@@ -1622,7 +2115,7 @@ function SimpleApp() {
           return (
             <div key={deviceId} style={{ border: '1px solid #353550', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{device ? getDeviceDisplayName(device) : deviceId}</span>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{device ? getDeviceLabel(device) : deviceId}</span>
                 <span style={{ fontSize: '12px', color: '#9ca3af' }}>{finished}/{queue.length} 完成</span>
                 {hasFailed && <button onClick={() => retryDeviceInstall(deviceId)} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#93c5fd', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>重试失败</button>}
                 {hasSuccess && <button onClick={() => clearCompletedApkInstalls(deviceId)} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#60a5fa', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', marginLeft: 'auto' }}>清空成功项</button>}
@@ -1648,8 +2141,8 @@ function SimpleApp() {
                         <div style={{ height: '100%', width: `${item.progress}%`, backgroundColor: item.status === 'failed' ? '#ef4444' : item.status === 'success' ? '#22c55e' : '#60a5fa', transition: 'width 260ms ease' }} />
                       </div>
                     </div>
-                    {(item.error || item.output) && (
-                      <div style={{ marginTop: '6px', color: item.error ? '#fca5a5' : '#86efac', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.error || item.output}</div>
+                    {item.error && (
+                      <div style={{ marginTop: '6px', color: '#fca5a5', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.error}</div>
                     )}
                   </div>
                 );
@@ -1657,6 +2150,18 @@ function SimpleApp() {
             </div>
           );
         })}
+            {installLog.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{'安装日志'}</span>
+                <div style={{ fontFamily: 'Consolas, monospace', fontSize: '12px', lineHeight: 1.7, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  {installLog.map((l, i) => (
+                    <div key={i} style={{ color: l.level === 'success' ? '#86efac' : l.level === 'error' ? '#fca5a5' : '#9ca3af', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.text}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </section>
     );
   };
@@ -1708,8 +2213,13 @@ function SimpleApp() {
         return false;
       }
 
-      if (packageFilter && !(log.packageName || '').toLowerCase().includes(packageFilter)) {
-        return false;
+      // 应用/包名过滤为「关联匹配」：跨 message+tag+包名+PID 命中即保留，与主进程抓取口径一致，
+      // 这样系统服务/其它进程里提到该应用的日志也能显示，而不是只剩应用自身进程那几行。
+      if (packageFilter) {
+        const packageHaystack = `${log.message} ${log.tag} ${log.packageName || ''} ${log.processId}`.toLowerCase();
+        if (!packageHaystack.includes(packageFilter)) {
+          return false;
+        }
       }
 
       if (pidFilter && String(log.processId) !== pidFilter) {
@@ -1725,22 +2235,50 @@ function SimpleApp() {
     });
   }, [logVersion, currentLogState, hasActiveLogFilter, searchTerm, filterLevel, logTagFilter, logPackageFilter, logPidFilter, useRegexSearch]);
 
-  const displayedLogCount = hasActiveLogFilter ? filteredLogs.length : allLogCount;
-  const visibleStartIndex = Math.max(0, Math.floor(logViewport.scrollTop / LOG_ROW_HEIGHT) - LOG_OVERSCAN_ROWS);
-  const visibleRowCount = Math.ceil(logViewport.height / LOG_ROW_HEIGHT) + LOG_OVERSCAN_ROWS * 2;
-  const visibleEndIndex = Math.min(displayedLogCount, visibleStartIndex + visibleRowCount);
+  // 变高虚拟滚动：每条日志高度按行数变化，需先把当前可见列表物化成数组以便算累计偏移。
+  const activeLogList = useMemo<LogEntry[]>(
+    () => (hasActiveLogFilter ? filteredLogs : currentLogState?.store.toArray() ?? []),
+    [logVersion, hasActiveLogFilter, filteredLogs, currentLogState]
+  );
+  const displayedLogCount = activeLogList.length;
+  // 前缀和：logRowOffsets[i] = 第 i 条之前所有行的累计高度（即第 i 条的 top）；末项为总高度。
+  const logRowOffsets = useMemo<number[]>(() => {
+    const offsets = new Array<number>(activeLogList.length + 1);
+    offsets[0] = 0;
+    for (let i = 0; i < activeLogList.length; i++) {
+      offsets[i + 1] = offsets[i] + getLogRowHeight(activeLogList[i]);
+    }
+    return offsets;
+  }, [activeLogList]);
+  const totalLogHeight = logRowOffsets[logRowOffsets.length - 1] || 0;
+  // 二分查找：返回最大的 i 使 logRowOffsets[i] <= y（即落在偏移 y 处的那一条）。
+  const findLogRowIndexAtOffset = (y: number): number => {
+    let lo = 0;
+    let hi = displayedLogCount;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (logRowOffsets[mid] <= y) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+  const visibleStartIndex = Math.max(0, findLogRowIndexAtOffset(logViewport.scrollTop) - LOG_OVERSCAN_ROWS);
+  const visibleEndIndex = Math.min(
+    displayedLogCount,
+    findLogRowIndexAtOffset(logViewport.scrollTop + logViewport.height) + 1 + LOG_OVERSCAN_ROWS
+  );
   const visibleLogs = useMemo(() => {
     const rows: Array<{ log: LogEntry; index: number }> = [];
     for (let index = visibleStartIndex; index < visibleEndIndex; index++) {
-      const log = hasActiveLogFilter ? filteredLogs[index] : currentLogState?.store.get(index);
+      const log = activeLogList[index];
       if (log) {
         rows.push({ log, index });
       }
     }
     return rows;
-  }, [logVersion, currentLogState, hasActiveLogFilter, filteredLogs, visibleStartIndex, visibleEndIndex]);
-  const virtualTopPadding = visibleStartIndex * LOG_ROW_HEIGHT;
-  const virtualBottomPadding = Math.max(0, (displayedLogCount - visibleEndIndex) * LOG_ROW_HEIGHT);
+  }, [activeLogList, visibleStartIndex, visibleEndIndex]);
+  const virtualTopPadding = logRowOffsets[visibleStartIndex] || 0;
+  const virtualBottomPadding = Math.max(0, totalLogHeight - (logRowOffsets[visibleEndIndex] ?? totalLogHeight));
 
   const scrollToBottom = useCallback(() => {
     if (logsContainerRef.current) {
@@ -1833,7 +2371,9 @@ function SimpleApp() {
           }}
           style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: '#d1d5db', fontSize: '13px', cursor: 'pointer' }}
         >{'\u6e05\u7a7a'}</button>
-        <button onClick={exportVisibleLogs} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa'}</button>
+        <button onClick={exportVisibleLogs} title={'导出当前可见 / 筛选后的日志（受等级、搜索与显示上限影响）'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa'}</button>
+        <button onClick={exportFullLogs} title={'从监控第一行到当前的完整原始日志（全等级，不受 2 万条上限与筛选影响）'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
+        <button onClick={exportFullLogsByPackage} title={'\u5728\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\u4e0a\uff0c\u7528\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u7684\u5305\u540d\u5173\u8054\u8fc7\u6ee4\uff0c\u5207\u51fa\u4e00\u4efd\u5b8c\u6574\u5b50\u96c6\uff08\u591a\u884c\u5806\u6808\u6574\u6761\u4fdd\u7559\uff0c\u4e0d\u91cd\u65b0\u91c7\u96c6\uff09'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u6309\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
         {lastExportedLogPath && (
           <button
             onClick={async () => {
@@ -1867,7 +2407,44 @@ function SimpleApp() {
         </select>
         <input value={logPackageFilter} onChange={(e) => setLogPackageFilter(e.target.value)} placeholder={'\u5e94\u7528/\u5305\u540d'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
         <input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
-        <input type="text" placeholder={useRegexSearch ? '\u6b63\u5219\u641c\u7d22' : '\u641c\u7d22\u65e5\u5fd7'} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
+        <div style={{ position: 'relative' }}>
+          <input
+            type="text"
+            placeholder={useRegexSearch ? '\u6b63\u5219\u641c\u7d22' : '\u641c\u7d22\u65e5\u5fd7'}
+            value={searchTerm}
+            // 每次输入变化都重新弹出并刷新匹配的历史（visibleSearchHistory 按输入联想过滤，无匹配则自动隐藏）。
+            onChange={(e) => { setSearchTerm(e.target.value); setShowSearchHistory(true); }}
+            onFocus={() => setShowSearchHistory(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { recordSearchHistory(searchTerm); setShowSearchHistory(false); }
+              else if (e.key === 'Escape') setShowSearchHistory(false);
+            }}
+            // \u8bb0\u5f55\u5173\u952e\u5b57\u5e76\u5ef6\u8fdf\u6536\u8d77\uff0c\u7559\u51fa\u65f6\u95f4\u8ba9\u4e0b\u62c9\u9879\u7684 mousedown \u5148\u89e6\u53d1\u9009\u62e9\u3002
+            onBlur={() => { recordSearchHistory(searchTerm); window.setTimeout(() => setShowSearchHistory(false), 150); }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
+          />
+          {showSearchHistory && visibleSearchHistory.length > 0 && (
+            <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, maxHeight: '260px', overflowY: 'auto', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.45)' }}>
+              {visibleSearchHistory.map((keyword) => (
+                <div
+                  key={keyword}
+                  // \u7528 onMouseDown + preventDefault\uff1a\u5728 input \u5931\u7126\u524d\u5b8c\u6210\u9009\u62e9\uff0c\u907f\u514d\u4e0b\u62c9\u5148\u88ab\u5173\u6389\u3002
+                  onMouseDown={(e) => { e.preventDefault(); setSearchTerm(keyword); recordSearchHistory(keyword); setShowSearchHistory(false); }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#33335a'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '7px 10px', cursor: 'pointer', color: '#e5e7eb', fontSize: '13px' }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{keyword}</span>
+                  <span
+                    onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeOneSearchHistory(keyword); }}
+                    title={'\u4ece\u5386\u53f2\u79fb\u9664'}
+                    style={{ flexShrink: 0, color: '#9ca3af', cursor: 'pointer', padding: '0 4px', fontSize: '14px', lineHeight: 1 }}
+                  >{'\u00d7'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <input value={logPidFilter} onChange={(e) => setLogPidFilter(e.target.value.replace(/\D/g, ''))} placeholder={'\u8fdb\u7a0b PID'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
         <button onClick={() => setUseRegexSearch(!useRegexSearch)} style={{ padding: '8px 10px', backgroundColor: useRegexSearch ? '#4a90d9' : '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u6b63\u5219'}</button>
       </div>
@@ -1890,8 +2467,9 @@ function SimpleApp() {
         ) : displayedLogCount === 0 ? (
           <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280' }}>{'\u6ca1\u6709\u5339\u914d\u7684\u65e5\u5fd7'}</div>
         ) : (
-          <div style={{ minHeight: displayedLogCount * LOG_ROW_HEIGHT }}>
-            <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'grid', gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, 1fr)', backgroundColor: '#1f2937', color: '#9ca3af', fontWeight: 700 }}>
+          // width:max-content + minWidth:100% 让内容随最长日志行增宽，超出容器时出现横向滚动条；行与表头同宽对齐。
+          <div style={{ minHeight: totalLogHeight, width: 'max-content', minWidth: '100%' }}>
+            <div style={{ position: 'sticky', top: 0, zIndex: 1, width: '100%', display: 'grid', gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, max-content)', backgroundColor: '#1f2937', color: '#9ca3af', fontWeight: 700 }}>
               <div style={{ padding: '8px' }}>{'\u65f6\u95f4'}</div>
               <div style={{ padding: '8px' }}>Level</div>
               <div style={{ padding: '8px' }}>PID</div>
@@ -1906,9 +2484,13 @@ function SimpleApp() {
                 onClick={() => setSelectedLogEntry(log)}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, 1fr)',
-                  height: `${LOG_ROW_HEIGHT}px`,
-                  lineHeight: `${LOG_ROW_HEIGHT - 1}px`,
+                  gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, max-content)',
+                  width: '100%',
+                  height: `${getLogRowHeight(log)}px`,
+                  lineHeight: `${LOG_LINE_HEIGHT}px`,
+                  padding: '4px 0',
+                  boxSizing: 'border-box',
+                  alignItems: 'start',
                   borderBottom: '1px solid #1f2937',
                   backgroundColor: selectedLogEntry?.id === log.id ? '#1e3a5f' : 'transparent',
                   cursor: 'pointer',
@@ -1919,7 +2501,9 @@ function SimpleApp() {
                 <div style={{ padding: '0 8px', color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden' }}>{log.processId || '--'}</div>
                 <div style={{ padding: '0 8px', color: '#60a5fa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.packageName || '--'}</div>
                 <div style={{ padding: '0 8px', color: '#93c5fd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.tag}</div>
-                <div style={{ padding: '0 8px', color: '#e5e7eb', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.message}</div>
+                {/* 整条铺开多行：white-space:pre 保留换行、每个逻辑行不自动换行（高度=行数×LOG_LINE_HEIGHT 可预测）。
+                    不裁切，过长单行靠日志窗口横向滚动条拖动查看；完整内容也可点开看底部详情面板。 */}
+                <div style={{ padding: '0 8px', color: '#e5e7eb', whiteSpace: 'pre' }}>{log.message}</div>
               </div>
             ))}
             <div style={{ height: virtualBottomPadding }} />
@@ -1939,21 +2523,154 @@ function SimpleApp() {
   );
 
   return (
-    <div style={{ 
-      width: '100%', 
-      height: '100vh', 
-      display: 'flex', 
-      flexDirection: 'column', 
+    <div style={{
+      width: '100%',
+      height: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
       backgroundColor: '#1a1a2e',
       color: 'white',
       overflow: 'hidden'
     }}>
+      {/* 全局深色滚动条：index.css 未被入口引入，这里就地注入，和工具深色主题统一。
+          仅用 webkit 规则——Electron 是 Chromium 内核，加 scrollbar-width 反而会接管并禁用自定义样式。 */}
+      <style>{`
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3a3a55; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+        ::-webkit-scrollbar-thumb:hover { background: #50506e; background-clip: content-box; }
+        ::-webkit-scrollbar-corner { background: transparent; }
+      `}</style>
+      {!appReady && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 3000, backgroundColor: '#1a1a2e', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: '320px', textAlign: 'center' }}>
+            <div style={{ fontSize: '16px', fontWeight: 700, color: '#fff', marginBottom: '6px' }}>{'安卓设备监控'}</div>
+            <div style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '16px' }}>{'工具启动中，请稍候…'}</div>
+            <div style={{ height: '6px', backgroundColor: '#252540', borderRadius: '3px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: '40%', backgroundColor: '#4a90d9', borderRadius: '3px', animation: 'admIndeterminate 1.1s ease-in-out infinite' }} />
+            </div>
+          </div>
+          <style>{'@keyframes admIndeterminate{0%{margin-left:-40%}100%{margin-left:100%}}'}</style>
+        </div>
+      )}
+      {installing && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 2000, backgroundColor: 'rgba(10,10,20,0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: '360px', textAlign: 'center', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '12px', padding: '28px 24px' }}>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: '10px' }}>
+              {`正在安装新版本${updateStatus?.version ? ` v${updateStatus.version}` : ''}…`}
+            </div>
+            <div style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: 1.7 }}>
+              {'工具会自动退出、安装到当前目录，'}<br />{'安装完成后自动重启，请稍候…'}
+            </div>
+            <div style={{ marginTop: '16px', height: '6px', backgroundColor: '#334155', borderRadius: '3px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: '40%', backgroundColor: '#4a90d9', borderRadius: '3px', animation: 'admIndeterminate 1.1s ease-in-out infinite' }} />
+            </div>
+          </div>
+          <style>{'@keyframes admIndeterminate{0%{margin-left:-40%}100%{margin-left:100%}}'}</style>
+        </div>
+      )}
+      {updateStatus && !updateDismissed && ['available', 'downloading', 'downloaded'].includes(updateStatus.state) && (
+        <div style={{ position: 'fixed', right: '16px', bottom: '16px', zIndex: 1100, width: '440px', maxWidth: 'calc(100vw - 32px)', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '10px', padding: '16px 18px', boxShadow: '0 6px 20px rgba(0,0,0,0.45)' }}>
+          {updateStatus.state === 'available' && (
+            <div>
+              <div style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 600, marginBottom: '8px' }}>{`发现新版本${updateStatus.version ? ` v${updateStatus.version}` : ''}`}</div>
+              {updateStatus.releaseNotes && (
+                <div style={{ marginBottom: '10px', maxHeight: '300px', overflowY: 'auto', fontSize: '13px', lineHeight: 1.6, color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', padding: '10px 12px' }}>
+                  <div style={{ color: '#9ca3af', marginBottom: '4px' }}>{'本次更新说明'}</div>
+                  {updateStatus.releaseNotes}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button onClick={() => setUpdateDismissed(true)} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>{'稍后'}</button>
+                <button onClick={handleDownloadUpdate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: '#16a34a', color: '#fff', cursor: 'pointer' }}>{'立即更新'}</button>
+              </div>
+            </div>
+          )}
+          {updateStatus.state === 'downloading' && (
+            <div>
+              <div style={{ fontSize: '13px', color: '#cbd5e1', marginBottom: '6px' }}>{`正在下载新版本${updateStatus.version ? ` v${updateStatus.version}` : ''} … ${updateStatus.percent ?? 0}%`}</div>
+              <div style={{ height: '6px', backgroundColor: '#334155', borderRadius: '3px', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${updateStatus.percent ?? 0}%`, backgroundColor: '#4a90d9', transition: 'width 240ms ease' }} />
+              </div>
+            </div>
+          )}
+          {updateStatus.state === 'downloaded' && (
+            <div>
+              <div style={{ fontSize: '13px', color: '#86efac', fontWeight: 600, marginBottom: '8px' }}>{`新版本${updateStatus.version ? ` v${updateStatus.version}` : ''} 已就绪`}</div>
+              {updateStatus.releaseNotes && (
+                <div style={{ marginBottom: '10px', maxHeight: '300px', overflowY: 'auto', fontSize: '13px', lineHeight: 1.6, color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', padding: '10px 12px' }}>
+                  <div style={{ color: '#9ca3af', marginBottom: '4px' }}>{'本次更新说明'}</div>
+                  {updateStatus.releaseNotes}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button onClick={() => setUpdateDismissed(true)} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>{'稍后'}</button>
+                <button onClick={handleInstallUpdate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: '#16a34a', color: '#fff', cursor: 'pointer' }}>{'立即安装并重启'}</button>
+              </div>
+            </div>
+          )}
+          {updateStatus.state === 'error' && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+              <span style={{ flex: 1, fontSize: '12px', color: '#fca5a5', wordBreak: 'break-all' }}>{`检查更新失败：${updateStatus.error ?? ''}`}</span>
+              <button onClick={() => setUpdateDismissed(true)} style={{ flexShrink: 0, padding: '2px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>{'知道了'}</button>
+            </div>
+          )}
+        </div>
+      )}
       <header style={{ height: '56px', backgroundColor: '#252540', borderBottom: '1px solid #353550', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between' }}>
-        <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+          <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
+          {appVersion && (
+            <button
+              onClick={openReleaseNotes}
+              title={'\u67e5\u770b\u672c\u7248\u672c\u66f4\u65b0\u65e5\u5fd7'}
+              style={{ fontSize: '12px', color: '#93c5fd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline dotted' }}
+            >v{appVersion}</button>
+          )}
+          <button
+            onClick={handleCheckUpdate}
+            disabled={checkResult === '\u68c0\u67e5\u4e2d\u2026'}
+            title={'\u5411\u66f4\u65b0\u670d\u52a1\u5668\u68c0\u67e5\u662f\u5426\u6709\u65b0\u7248\u672c'}
+            style={{ fontSize: '12px', color: '#cbd5e1', background: 'none', border: '1px solid #454560', borderRadius: '6px', cursor: checkResult === '\u68c0\u67e5\u4e2d\u2026' ? 'not-allowed' : 'pointer', padding: '2px 8px', opacity: checkResult === '\u68c0\u67e5\u4e2d\u2026' ? 0.6 : 1 }}
+          >{'\u68c0\u67e5\u66f4\u65b0'}</button>
+          {/* \u542f\u52a8\u65f6\u9759\u9ed8\u68c0\u67e5\u5230\u65b0\u7248 \u2192 \u5728\u6309\u94ae\u65c1\u5e38\u9a7b\u9192\u76ee\u63d0\u793a\uff08\u4e0d\u81ea\u52a8\u66f4\u65b0\uff0c\u7531\u7528\u6237\u70b9\u66f4\u65b0\uff09 */}
+          {updateStatus?.state === 'available' && (
+            <button
+              onClick={() => setUpdateDismissed(false)}
+              title={'\u70b9\u67e5\u770b\u5e76\u66f4\u65b0'}
+              style={{ fontSize: '12px', fontWeight: 700, color: '#fff', backgroundColor: '#dc2626', border: 'none', borderRadius: '6px', cursor: 'pointer', padding: '2px 8px' }}
+            >{`\u6709\u65b0\u7248\u672c${updateStatus.version ? ` v${updateStatus.version}` : ''}`}</button>
+          )}
+          {updateStatus?.state === 'downloaded' && (
+            <button
+              onClick={() => setUpdateDismissed(false)}
+              title={'\u70b9\u7acb\u5373\u5b89\u88c5\u5e76\u91cd\u542f'}
+              style={{ fontSize: '12px', fontWeight: 700, color: '#fff', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', cursor: 'pointer', padding: '2px 8px' }}
+            >{'\u65b0\u7248\u5df2\u5c31\u7eea'}</button>
+          )}
+          {checkResult && updateStatus?.state !== 'available' && updateStatus?.state !== 'downloaded' && (
+            <span style={{ fontSize: '12px', color: '#9ca3af' }}>{checkResult}</span>
+          )}
+        </div>
       </header>
+      {showReleaseNotes && (
+        <div onClick={() => setShowReleaseNotes(false)} style={{ position: 'fixed', inset: 0, zIndex: 1200, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: '460px', maxHeight: '70vh', display: 'flex', flexDirection: 'column', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '12px', padding: '18px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <h2 style={{ fontSize: '15px', fontWeight: 700, margin: 0 }}>{'\u66f4\u65b0\u65e5\u5fd7'} {appVersion ? `v${appVersion}` : ''}</h2>
+              <button onClick={() => setShowReleaseNotes(false)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>{'\u00d7'}</button>
+            </div>
+            <div style={{ overflowY: 'auto', fontSize: '13px', color: '#cbd5e1', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6 }}>
+              {releaseNotesText.trim() ? releaseNotesText : '\u6682\u65e0\u672c\u7248\u672c\u66f4\u65b0\u8bf4\u660e\u3002'}
+            </div>
+          </div>
+        </div>
+      )}
       
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <aside style={{ width: '288px', backgroundColor: '#252540', borderRight: '1px solid #353550', padding: '16px', overflowY: 'auto' }}>
+        {/* 侧栏用 flex 列 + 各区块 order 控制顺序：ADB状态(0) → WiFi连接(1) → 设备列表(2) → 设备信息(3) → 历史设备(4)。
+            用 order 而非物理调整 JSX 顺序，避免大段含中文的块搬运出错；ADB 状态保持默认 order 0 居首。 */}
+        <aside style={{ width: '288px', backgroundColor: '#252540', borderRight: '1px solid #353550', padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           {adbStatus && (
             <div
               style={{
@@ -1979,6 +2696,7 @@ function SimpleApp() {
             </div>
           )}
 
+          <div style={{ order: 2 }}>
           <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u8bbe\u5907\u5217\u8868'}</h2>
           <div style={{ display: 'flex', gap: '8px', margin: '0 0 12px 0' }}>
             <button onClick={loadDevices} style={{ flex: 1, padding: '6px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px' }}>刷新设备</button>
@@ -2011,7 +2729,7 @@ function SimpleApp() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                     <span>{device.connectionType === 'wifi' ? 'WiFi' : 'USB'}</span>
-                    <span style={{ fontWeight: '500', fontSize: '14px' }}>{getDeviceDisplayName(device)}</span>
+                    <span style={{ fontWeight: '500', fontSize: '14px' }}>{getDeviceLabel(device)}</span>
                     </div>
                     <span style={{ padding: '2px 8px', borderRadius: '999px', fontSize: '11px', backgroundColor: statusMeta.background, color: statusMeta.color, flexShrink: 0 }}>
                       {statusMeta.label}
@@ -2024,7 +2742,10 @@ function SimpleApp() {
                     <div style={{ fontSize: '12px', color: '#aaa' }}>{device.id}</div>
                   )}
                   <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                    {renderBatteryBadge(device)}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                      {renderBatteryBadge(device)}
+                      {renderScreenStateBadge(device)}
+                    </div>
                     {wifiLatencyLabel && (
                       <span style={{ fontSize: '12px', color: device.latencyStatus === 'timeout' ? '#fbbf24' : '#93c5fd' }}>
                         {wifiLatencyLabel}
@@ -2100,8 +2821,9 @@ function SimpleApp() {
               )})}
             </div>
           )}
-          
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550' }}>
+          </div>
+
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 1 }}>
             <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'WiFi \u8fde\u63a5'}</h2>
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
@@ -2177,7 +2899,7 @@ function SimpleApp() {
             )}
           </div>
 
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550' }}>
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 4 }}>
             <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u5386\u53f2\u8bbe\u5907'}</h2>
             {offlineHistoryDevices.length === 0 ? (
               <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
@@ -2230,7 +2952,7 @@ function SimpleApp() {
                           <button
                             onClick={() => handleQuickConnectHistory(item)}
                             disabled={connecting}
-                            title="\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5"
+                            title={'\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5'}
                             style={{ padding: '4px 10px', backgroundColor: '#2f6fb0', border: 'none', borderRadius: '4px', color: '#fff', cursor: connecting ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: connecting ? 0.6 : 1 }}
                           >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : '\u5feb\u901f\u8fde\u63a5'}</button>
                         )}
@@ -2254,7 +2976,7 @@ function SimpleApp() {
                         ) : (
                           <button
                             onClick={() => setConfirmRemoveSerial(item.serialNo)}
-                            title="\u4ece\u5386\u53f2\u5217\u8868\u79fb\u9664\u8be5\u8bbe\u5907\uff08\u4e0d\u5f71\u54cd\u5f53\u524d\u5df2\u5efa\u7acb\u7684\u8fde\u63a5\uff09"
+                            title={'\u4ece\u5386\u53f2\u5217\u8868\u79fb\u9664\u8be5\u8bbe\u5907\uff08\u4e0d\u5f71\u54cd\u5f53\u524d\u5df2\u5efa\u7acb\u7684\u8fde\u63a5\uff09'}
                             style={{ padding: '4px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: 'pointer', fontSize: '12px' }}
                           >{'\u79fb\u9664'}</button>
                         )}
@@ -2267,7 +2989,7 @@ function SimpleApp() {
           </div>
 
           {selectedDevice && (
-            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550' }}>
+            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 3 }}>
               <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u8bbe\u5907\u4fe1\u606f'}</h2>
               <div style={{ fontSize: '12px', color: '#888' }}>
                 <div style={{ marginBottom: '10px' }}>
@@ -2349,11 +3071,15 @@ function SimpleApp() {
 
               <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
                 {activeTab === 'devices' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    {renderUnifiedInstallPanel()}
+                  <div style={{ display: 'flex', flexDirection: 'row', gap: '16px', height: '100%', alignItems: 'stretch' }}>
+                    {/* 应用安装：放右侧（order 2），内部分操作区 + 安装详情两段 */}
+                    <div style={{ order: 2, flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                      {renderUnifiedInstallPanel()}
+                    </div>
 
-                  <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '12px' }}>
+                  {/* 已安装应用：放左侧（order 1），占更宽，列表内部滚动 */}
+                  <div style={{ order: 1, flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#252540', borderRadius: '8px', padding: '16px', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '12px', flexShrink: 0 }}>
                       <h2 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
                         {'已安装应用'}
                         <span style={{ fontSize: '13px', color: '#888', marginLeft: '8px', fontWeight: 400 }}>
@@ -2378,7 +3104,12 @@ function SimpleApp() {
 
                     {(() => {
                       const keyword = appFilter.trim().toLowerCase();
-                      const filtered = keyword ? installedPackages.filter(pkg => pkg.toLowerCase().includes(keyword)) : installedPackages;
+                      const matched = keyword ? installedPackages.filter(pkg => pkg.toLowerCase().includes(keyword)) : installedPackages;
+                      // 当前选中设备的「NEW」集合（按设备存，切设备不丢）。新装的包浮到列表顶部，稳定排序保留原顺序。
+                      const deviceNew = newlyInstalledByDevice[selectedDevice?.id || ''] || EMPTY_PACKAGE_SET;
+                      const filtered = deviceNew.size > 0
+                        ? [...matched].sort((a, b) => (deviceNew.has(b) ? 1 : 0) - (deviceNew.has(a) ? 1 : 0))
+                        : matched;
                       if (installedPackagesLoading && installedPackages.length === 0) {
                         return <div style={{ padding: '24px', textAlign: 'center', color: '#888', fontSize: '13px' }}>{'正在读取已安装应用…'}</div>;
                       }
@@ -2389,15 +3120,26 @@ function SimpleApp() {
                         return <div style={{ padding: '24px', textAlign: 'center', color: '#666', fontSize: '13px' }}>{'没有匹配的应用'}</div>;
                       }
                       return (
-                        <div style={{ maxHeight: '420px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                           {filtered.map(pkg => (
                             <div
                               key={pkg}
                               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', gap: '12px' }}
                             >
-                              <span style={{ fontSize: '13px', color: '#e5e7eb', fontFamily: 'monospace', wordBreak: 'break-all' }}>{pkg}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                                <span style={{ fontSize: '13px', color: '#e5e7eb', fontFamily: 'monospace', wordBreak: 'break-all' }}>{pkg}</span>
+                                {deviceNew.has(pkg) && (
+                                  <span title={'本次新安装'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', padding: '2px 7px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', color: '#7dd3fc', backgroundColor: '#0ea5e91f', border: '1px solid #38bdf855', borderRadius: '999px' }}>{'NEW'}</span>
+                                )}
+                                {runningPackages.has(pkg) && (
+                                  <span title={'应用正在运行'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 600, color: '#86efac', backgroundColor: '#22c55e1f', border: '1px solid #22c55e55', borderRadius: '999px' }}>
+                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#22c55e', boxShadow: '0 0 4px #22c55e' }} />{'运行中'}
+                                  </span>
+                                )}
+                              </div>
                               {(() => {
                                 const isBusy = busyPackage === pkg;
+                                const isRunning = runningPackages.has(pkg);
                                 const busyStyle = (base: React.CSSProperties): React.CSSProperties => ({
                                   ...base,
                                   cursor: isBusy ? 'not-allowed' : 'pointer',
@@ -2407,8 +3149,9 @@ function SimpleApp() {
                                   <div style={{ flexShrink: 0, display: 'flex', gap: '6px' }}>
                                     <button
                                       onClick={() => handleLaunchApp(pkg)}
-                                      disabled={isBusy}
-                                      style={busyStyle({ padding: '5px 12px', fontSize: '12px', color: '#86efac', backgroundColor: '#22c55e22', border: '1px solid #22c55e55', borderRadius: '6px' })}
+                                      disabled={isBusy || isRunning}
+                                      title={isRunning ? '应用已在运行，无需重复启动' : undefined}
+                                      style={{ padding: '5px 12px', fontSize: '12px', color: '#86efac', backgroundColor: '#22c55e22', border: '1px solid #22c55e55', borderRadius: '6px', cursor: (isBusy || isRunning) ? 'not-allowed' : 'pointer', opacity: (isBusy || isRunning) ? 0.4 : 1 }}
                                     >
                                       {isBusy && busyAction === 'launch' ? '启动中…' : '启动'}
                                     </button>
@@ -2477,6 +3220,7 @@ function SimpleApp() {
                     starting={mirrorStartingDeviceIds.has(selectedDevice.id)}
                     onStart={handleStartMirror}
                     onStop={handleStopMirror}
+                    onToggleAudio={handleToggleMirrorAudio}
                   />
                 )}
 
@@ -2511,7 +3255,7 @@ function SimpleApp() {
 
       {fileBrowserDevice && (
         <div
-          onClick={() => setFileBrowserDevice(null)}
+          onClick={closeFileBrowser}
           style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1500 }}
         >
           <div
@@ -2523,7 +3267,7 @@ function SimpleApp() {
                 {'📁 设备文件 · '}{customDeviceNames[fileBrowserDevice.id] || fileBrowserDevice.name || fileBrowserDevice.id}
               </span>
               <button
-                onClick={() => setFileBrowserDevice(null)}
+                onClick={closeFileBrowser}
                 style={{ width: '28px', height: '28px', background: '#1f2937', border: 'none', borderRadius: '6px', color: '#cbd5e1', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}
               >×</button>
             </div>
@@ -2570,6 +3314,32 @@ function SimpleApp() {
         }}>
           {success}
           <button onClick={() => setSuccess('')} style={{ cursor: 'pointer' }}>{'\u5173\u95ed'}</button>
+        </div>
+      )}
+
+      {confirmDialog && (
+        <div
+          onClick={() => setConfirmDialog(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 4000, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 'min(420px, 92vw)', backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '12px', padding: '20px 22px', boxShadow: '0 24px 60px rgba(0,0,0,0.5)' }}
+          >
+            <div style={{ fontSize: '14px', color: '#e5e7eb', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: '18px' }}>
+              {confirmDialog.message}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                onClick={() => setConfirmDialog(null)}
+                style={{ padding: '8px 16px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: '#d1d5db', fontSize: '13px', cursor: 'pointer' }}
+              >{'\u53d6\u6d88'}</button>
+              <button
+                onClick={() => { const cb = confirmDialog.onConfirm; setConfirmDialog(null); cb(); }}
+                style={{ padding: '8px 16px', backgroundColor: confirmDialog.danger ? '#dc2626' : '#2563eb', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer', fontWeight: 600 }}
+              >{confirmDialog.confirmText}</button>
+            </div>
+          </div>
         </div>
       )}
 

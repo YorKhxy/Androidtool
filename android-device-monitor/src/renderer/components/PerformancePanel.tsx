@@ -498,6 +498,9 @@ const findNearestSample = (samples: PerformanceSample[], snapshot: PerformanceSn
 const renderSessionReport = (samples: PerformanceSample[], snapshots: PerformanceSnapshot[]) => {
   const [hoveredSnapshotId, setHoveredSnapshotId] = useState<string | null>(null);
   const [hoverPoint, setHoverPoint] = useState<HoverPoint | null>(null);
+  // 选中的曲线 key 集合：空集 = 全显；非空 = 只显示集合内的。点图例：全显时首点=只看它，
+  // 之后点别的=多选追加，点已选的=取消，删空回到全显。
+  const [selectedSeriesKeys, setSelectedSeriesKeys] = useState<Set<string>>(new Set());
   const width = 720;
   const height = 220;
   const hoveredSnapshot = snapshots.find((snapshot) => snapshot.id === hoveredSnapshotId);
@@ -510,6 +513,16 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
     { key: 'gpu', label: 'GPU%', color: '#ec4899', axis: 'percent', getValue: getGpuValue },
     { key: 'mem', label: 'MEM MB', color: '#22c55e', axis: 'memory', getValue: (sample) => Number(formatMemoryMb(sample.metrics.memoryUsage)) },
   ];
+  const isSeriesVisible = (key: string) => selectedSeriesKeys.size === 0 || selectedSeriesKeys.has(key);
+  const toggleSeries = (key: string) =>
+    setSelectedSeriesKeys((prev) => {
+      if (prev.size === 0) return new Set([key]); // 全显状态首点 → 只看这一条
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next; // 删到空集会自动回到全显
+    });
+  const visibleSeries = series.filter((s) => isSeriesVisible(s.key));
   const snapshotMarkers = snapshots
     .map((snapshot, index) => ({ snapshot, label: `S${index + 1}`, nearest: findNearestSample(samples, snapshot) }))
     .filter((marker): marker is { snapshot: PerformanceSnapshot; label: string; nearest: { sample: PerformanceSample; index: number; delta: number } } => Boolean(marker.nearest));
@@ -568,7 +581,7 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
         <line x1={chartPadding.left} y1={chartPadding.top} x2={chartPadding.left} y2={chartPadding.top + plotHeight} stroke="#64748b" />
         <line x1={chartPadding.left + plotWidth} y1={chartPadding.top} x2={chartPadding.left + plotWidth} y2={chartPadding.top + plotHeight} stroke="#22c55e" />
         <line x1={chartPadding.left} y1={chartPadding.top + plotHeight} x2={chartPadding.left + plotWidth} y2={chartPadding.top + plotHeight} stroke="#64748b" />
-        {series.map((item) => (
+        {visibleSeries.map((item) => (
           <polyline
             key={item.key}
             points={buildPoints(samples, width, height, item.getValue, item.axis === 'memory' ? memoryAxisMax : leftAxisMax)}
@@ -579,6 +592,33 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
             strokeLinecap="round"
           />
         ))}
+        {/* 波峰 / 波谷标识：仅对可见曲线，各标最大、最小一处（▲峰 ▼谷 + 数值）。 */}
+        {samples.length >= 2 && visibleSeries.flatMap((item) => {
+          const axisMax = item.axis === 'memory' ? memoryAxisMax : leftAxisMax;
+          let maxI = 0, minI = 0, maxV = -Infinity, minV = Infinity;
+          samples.forEach((sample, i) => {
+            const v = Number(item.getValue(sample)) || 0;
+            if (v > maxV) { maxV = v; maxI = i; }
+            if (v < minV) { minV = v; minI = i; }
+          });
+          const at = (i: number, v: number) => ({
+            x: chartPadding.left + (i / (samples.length - 1)) * plotWidth,
+            y: chartPadding.top + plotHeight - (Math.max(0, v) / axisMax) * plotHeight,
+          });
+          const peak = at(maxI, maxV);
+          const valley = at(minI, minV);
+          const fmt = (v: number) => (item.axis === 'memory' ? Math.round(v).toString() : Math.round(v).toString());
+          return [
+            <g key={`${item.key}-peak`}>
+              <polygon points={`${peak.x},${peak.y - 9} ${peak.x - 4},${peak.y - 2} ${peak.x + 4},${peak.y - 2}`} fill={item.color} />
+              <text x={peak.x} y={peak.y - 12} fill={item.color} fontSize="10" fontWeight="600" textAnchor="middle">{fmt(maxV)}</text>
+            </g>,
+            <g key={`${item.key}-valley`}>
+              <polygon points={`${valley.x},${valley.y + 9} ${valley.x - 4},${valley.y + 2} ${valley.x + 4},${valley.y + 2}`} fill={item.color} />
+              <text x={valley.x} y={valley.y + 20} fill={item.color} fontSize="10" fontWeight="600" textAnchor="middle">{fmt(minV)}</text>
+            </g>,
+          ];
+        })}
         {snapshotMarkers.map(({ snapshot, label, nearest }) => {
           const x = chartPadding.left + (samples.length === 1 ? 0 : (nearest.index / (samples.length - 1)) * plotWidth);
           const y = chartPadding.top + plotHeight - (Math.max(0, nearest.sample.metrics.fps) / leftAxisMax) * plotHeight;
@@ -596,12 +636,17 @@ const renderSessionReport = (samples: PerformanceSample[], snapshots: Performanc
         })}
         <text x={chartPadding.left} y="16" fill="#94a3b8" fontSize="11">% / FPS</text>
         <text x={chartPadding.left + plotWidth - 32} y="16" fill="#86efac" fontSize="11">MEM MB</text>
-        {series.map((item, index) => (
-          <g key={item.key}>
-            <rect x={chartPadding.left + index * 86} y={height - 18} width="10" height="10" fill={item.color} rx="2" />
-            <text x={chartPadding.left + 14 + index * 86} y={height - 9} fill="#cbd5e1" fontSize="11">{item.label}</text>
-          </g>
-        ))}
+        {series.map((item, index) => {
+          const visible = isSeriesVisible(item.key);
+          const gx = chartPadding.left + index * 86;
+          return (
+            <g key={item.key} onClick={() => toggleSeries(item.key)} style={{ cursor: 'pointer' }} opacity={visible ? 1 : 0.4}>
+              <rect x={gx - 2} y={height - 21} width="82" height="18" fill="transparent" />
+              <rect x={gx} y={height - 18} width="10" height="10" fill={item.color} rx="2" />
+              <text x={gx + 14} y={height - 9} fill="#cbd5e1" fontSize="11" textDecoration={visible ? 'none' : 'line-through'}>{item.label}</text>
+            </g>
+          );
+        })}
       </svg>
       {hoveredSnapshot && (
         <div style={{ position: 'absolute', left: `${hoverPoint?.x || 16}px`, top: `${hoverPoint?.y || 16}px`, width: '220px', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '8px', padding: '8px', boxShadow: '0 12px 30px rgba(0,0,0,0.35)', pointerEvents: 'none', zIndex: 2 }}>

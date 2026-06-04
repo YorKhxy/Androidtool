@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { MirrorSession, MirrorSessionStatus } from '../../shared/types';
 
-type MirrorStartParams = { maxSize?: number; bitRate?: string };
+type MirrorStartParams = { maxSize?: number; bitRate?: string; forwardAudio?: boolean };
 
 type MirrorPanelProps = {
   deviceName: string;
@@ -10,6 +10,7 @@ type MirrorPanelProps = {
   starting: boolean;
   onStart: (params: MirrorStartParams) => void;
   onStop: () => void;
+  onToggleAudio: (forward: boolean) => void; // 投屏中实时切换音频去向
 };
 
 const STATUS_META: Record<MirrorSessionStatus, { label: string; color: string; background: string }> = {
@@ -52,12 +53,17 @@ const isActive = (session: MirrorSession | null, starting: boolean): boolean => 
   return session?.status === 'starting' || session?.status === 'running';
 };
 
-export function MirrorPanel({ deviceName, isPico, session, starting, onStart, onStop }: MirrorPanelProps) {
-  const [maxSize, setMaxSize] = useState<number | undefined>(undefined);
-  const [bitRate, setBitRate] = useState<string>('8M');
+export function MirrorPanel({ deviceName, isPico, session, starting, onStart, onStop, onToggleAudio }: MirrorPanelProps) {
+  // 默认分辨率上限 1280、码率 4M（流畅优先；可在投屏前下拉调整）。
+  const [maxSize, setMaxSize] = useState<number | undefined>(1280);
+  const [bitRate, setBitRate] = useState<string>('4M');
   const [showShortcuts, setShowShortcuts] = useState(false);
+  // 启动时是否把声音转到电脑（未投屏时由此控制初值）。默认 false：声音留在设备本机输出。
+  const [forwardAudio, setForwardAudio] = useState(false);
 
   const active = isActive(session, starting);
+  // 复选框的真值：投屏中以主进程会话的实际音频状态为准，未投屏时用本地初值。
+  const audioOn = active ? Boolean(session?.audioForwarded) : forwardAudio;
   const status: MirrorSessionStatus = starting ? 'starting' : session?.status ?? 'stopped';
   const meta = STATUS_META[status];
 
@@ -97,7 +103,7 @@ export function MirrorPanel({ deviceName, isPico, session, starting, onStart, on
         </div>
 
         <button
-          onClick={active ? onStop : () => onStart({ maxSize, bitRate })}
+          onClick={active ? onStop : () => onStart({ maxSize, bitRate, forwardAudio })}
           disabled={starting}
           style={{
             padding: '10px 22px',
@@ -151,7 +157,30 @@ export function MirrorPanel({ deviceName, isPico, session, starting, onStart, on
             ))}
           </select>
         </label>
-        {active && <span style={{ fontSize: '12px', color: '#6b7280' }}>投屏中不可改参数，停止后可调整</span>}
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#cbd5e1', cursor: starting ? 'not-allowed' : 'pointer', opacity: starting ? 0.6 : 1 }}
+          title="默认声音只在设备本机播放；勾选后电脑也出声。设备 Android 13+ 时两边同时出声（设备不静音），低版本会自动降级为仅电脑出声（设备静音）。投屏过程中可随时切换，不影响画面。"
+        >
+          <input
+            type="checkbox"
+            checked={audioOn}
+            disabled={starting}
+            onChange={(e) => {
+              // 投屏中实时切换；未投屏时仅记录启动初值。
+              if (active) onToggleAudio(e.target.checked);
+              else setForwardAudio(e.target.checked);
+            }}
+            style={{ cursor: starting ? 'not-allowed' : 'pointer' }}
+          />
+          把设备声音传到电脑{active ? '（可实时切换）' : ''}
+        </label>
+        {active && <span style={{ fontSize: '12px', color: '#6b7280' }}>分辨率 / 码率投屏中不可改，声音可随时切换</span>}
+        {active && audioOn && session?.audioMode === 'both' && (
+          <span style={{ fontSize: '12px', color: '#86efac' }}>🔊 设备与电脑同时出声</span>
+        )}
+        {active && audioOn && session?.audioMode === 'pc-only' && (
+          <span style={{ fontSize: '12px', color: '#fbbf24' }}>⚠ 该设备不支持两边同时出声（需 Android 13+），已改为仅电脑出声（设备静音）</span>
+        )}
       </div>
 
       {isPico && (

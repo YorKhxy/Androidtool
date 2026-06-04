@@ -40,6 +40,58 @@ describe('project smoke checks', () => {
     );
   });
 
+  test('auto-update wiring and update-package scripts are configured', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
+    const updatePackPs1 = fs.readFileSync(path.join(root, 'scripts/make-update-package.ps1'), 'utf-8');
+    const updatePackBat = fs.readFileSync(path.join(root, 'scripts/make-update-package.bat'), 'utf-8');
+    const serveSource = fs.readFileSync(path.join(root, 'scripts/serve-updates.js'), 'utf-8');
+    // electron-updater 依赖与 generic 更新源配置
+    expect(pkg.dependencies['electron-updater']).toBeDefined();
+    expect(pkg.build.publish).toEqual(
+      expect.arrayContaining([expect.objectContaining({ provider: 'generic' })])
+    );
+    // 打热更包脚本：必须先 build 主/渲染、切生产入口、再 electron-builder
+    expect(pkg.scripts['update:pack']).toContain('make-update-package.ps1');
+    expect(updatePackPs1).toContain('npm run build:main');
+    expect(updatePackPs1).toContain('npm run build:renderer');
+    expect(updatePackPs1).toContain('index-prod.js');
+    expect(updatePackPs1).toContain('electron-builder');
+    expect(updatePackPs1).toContain('npm version patch');
+    // 自动生成更新说明：releaseInfo 指向 release-notes.md，打包脚本调用生成器
+    expect(pkg.build.releaseInfo).toBeDefined();
+    expect(pkg.build.releaseInfo.releaseNotesFile).toBe('release-notes.md');
+    expect(updatePackPs1).toContain('gen-release-notes.js');
+    expect(updatePackBat).toContain('make-update-package.ps1');
+    // 更新服务器脚本支持 Range（差量下载需要）
+    expect(pkg.scripts['serve:updates']).toContain('serve-updates.js');
+    expect(serveSource).toContain('206');
+    expect(serveSource).toContain('Content-Range');
+  });
+
+  test('full log recorder captures all entries to disk and is exportable', () => {
+    const recorder = fs.readFileSync(path.join(root, 'src/main/fullLogRecorder.ts'), 'utf-8');
+    const indexSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const channels = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const preload = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    // 落盘到 exe 所在目录的 device-logs（打包=安装目录/开发=项目根），不可写时回退 userData；流式写入
+    expect(recorder).toContain('resolveRuntimeAppRoot');
+    expect(recorder).toContain("'device-logs'");
+    expect(recorder).toContain("app.getPath('userData')"); // 兜底
+    expect(recorder).toContain('createWriteStream');
+    expect(recorder).toContain('export const getPath');
+    // 在 logcat 回调里先于渲染层队列写盘，保证不丢
+    expect(indexSource).toContain('fullLogRecorder.write(deviceId, entry)');
+    expect(indexSource).toContain('fullLogRecorder.start(deviceId)');
+    expect(indexSource).toContain('fullLogRecorder.stopAll()');
+    // IPC 契约：导出完整日志通道齐全
+    expect(channels).toContain("EXPORT_FULL_LOGS: 'log:export-full'");
+    expect(preload).toContain('exportFullLogs');
+    // 按包名导出完整日志：事后在落盘文件上切一份，通道与落盘的切分函数齐全
+    expect(channels).toContain("EXPORT_FULL_LOGS_BY_PACKAGE: 'log:export-full-by-package'");
+    expect(preload).toContain('exportFullLogsByPackage');
+    expect(recorder).toContain('export const exportByPackage');
+  });
+
   test('logcat cleanup has bounded buffers and kills process trees on Windows', () => {
     const source = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
     expect(source).toContain('maxLogcatBufferChars');
@@ -87,7 +139,7 @@ describe('project smoke checks', () => {
     const logStoreSource = fs.readFileSync(path.join(root, 'src/renderer/lib/logStore.ts'), 'utf-8');
 
     expect(typeSource).toContain('deviceId: string');
-    expect(adbSource).toContain('parseLogcatLine(line, deviceId)');
+    expect(adbSource).toContain('parseLongLogHeader(line, deviceId)');
     expect(adbSource).toContain('deviceId,');
     expect(logStoreSource).toContain('type DeviceLogState');
     expect(rendererSource).toContain('new Map<string, DeviceLogState>()');
@@ -100,18 +152,33 @@ describe('project smoke checks', () => {
 
     expect(source).toContain('logcatPidPackageCache');
     expect(source).toContain('refreshLogcatPidPackageCacheIfNeeded(deviceId)');
-    expect(source).toContain('logEntry.packageName = this.getCachedLogcatPackageName(deviceId, logEntry.processId)');
+    expect(source).toContain('entry.packageName = this.getCachedLogcatPackageName(deviceId, entry.processId)');
     expect(source).toContain("this.execAdb(['-s', deviceId, 'shell', 'ps', '-A'])");
     expect(source).toContain('normalizeAndroidPackageName');
   });
 
-  test('logcat package filters do not fail startup when a package is not running', () => {
+  test('logcat package filters capture related logs across processes without failing when app is not running', () => {
     const source = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
 
-    expect(source).toContain('continuing unscoped logcat');
-    expect(source).toContain('return undefined');
-    expect(source).toContain('const sourcePackageName = sourcePid && packageName?.trim()');
+    // 用 -v long 输出，靠条目边界（[头]+消息行+空行）精确解析 PID/TID/TAG，并区分同头独立日志
+    expect(source).toContain("'logcat', '-v', 'long'");
+    // 按包名过滤改为「关联匹配」：全量抓取 + 关联过滤，而非用 --pid 锁死应用自身进程
+    expect(source).toContain('const relatedPackage =');
+    expect(source).toContain('haystack.includes(relatedPackage)');
+    // 仅显式数字 PID 才用 --pid；按包名不再 pidof，故应用未运行也不会导致启动失败
+    expect(source).toContain('resolveExplicitLogcatPid');
     expect(source).not.toContain('Package process is not running');
+  });
+
+  test('logcat assembles -v long entries by boundary (header + message lines + blank separator)', () => {
+    const source = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+
+    // 按 -v long 头行起新条目、空行结束条目、其余行累加 message：多行堆栈合一条、同头独立日志分开
+    expect(source).toContain('parseLongLogHeader');
+    expect(source).toContain('pendingHasMessage');
+    // 头行起新条目（先 flush 上一条）；空行作为条目分隔符
+    expect(source).toContain('flushPendingLog');
+    expect(source).toContain('flushTimer');
   });
 
   test('starting or stopping one device logcat does not clear all queued logs', () => {
@@ -126,11 +193,69 @@ describe('project smoke checks', () => {
     }
   });
 
-  test('renderer honors selected low log levels when starting logcat', () => {
+  test('renderer always captures all log levels; level dropdown only filters display', () => {
     const source = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
 
-    expect(source).toContain("const sourceLevel: LogEntry['level'] = filterLevel === 'all' ? 'V' : filterLevel");
-    expect(source).not.toContain("sourceLevel = 'W'");
+    // 抓取恒定 all levels（*:V），不受等级下拉框限制；等级仅作显示筛选（filteredLogs 用 filterLevel）
+    expect(source).toContain("const sourceLevel: LogEntry['level'] = 'V'");
+    expect(source).toContain('const hasLevelFilter = filterLevel !== ');
+  });
+
+  test('log search keeps a persisted, selectable history', () => {
+    const storeSource = fs.readFileSync(path.join(root, 'src/renderer/lib/searchHistoryStore.ts'), 'utf-8');
+    const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    // 历史持久化到 localStorage，去重置顶
+    expect(storeSource).toContain("'adm.logSearchHistory.v1'");
+    expect(storeSource).toContain('export const addSearchHistory');
+    expect(storeSource).toContain('export const loadSearchHistory');
+    // 自定义暗色下拉（非原生 datalist），回车/失焦记录历史，重启后从 localStorage 载入可选，支持移除
+    expect(rendererSource).toContain('loadSearchHistory()');
+    expect(rendererSource).toContain('recordSearchHistory');
+    expect(rendererSource).toContain('showSearchHistory');
+    expect(rendererSource).toContain('visibleSearchHistory');
+    expect(rendererSource).toContain('removeOneSearchHistory');
+    expect(rendererSource).not.toContain('<datalist');
+  });
+
+  test('file manager can create a folder in the current directory', () => {
+    const adbSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const channelsSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
+    const mainSource = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf-8');
+    const prodSource = fs.readFileSync(path.join(root, 'src/main/index-prod.ts'), 'utf-8');
+    const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
+    const apiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
+    const filesSource = fs.readFileSync(path.join(root, 'src/renderer/components/FilesPanel.tsx'), 'utf-8');
+
+    expect(adbSource).toContain('async createDeviceFolder');
+    expect(adbSource).toContain("'mkdir'");
+    expect(channelsSource).toContain("CREATE_DEVICE_FOLDER: 'adb:create-device-folder'");
+    expect(mainSource).toContain('IPC_CHANNELS.CREATE_DEVICE_FOLDER');
+    expect(prodSource).toContain('IPC_CHANNELS.CREATE_DEVICE_FOLDER');
+    expect(preloadSource).toContain('createDeviceFolder:');
+    expect(apiSource).toContain('createDeviceFolder:');
+    expect(filesSource).toContain('handleCreateFolder');
+  });
+
+  test('file transfers survive closing the file manager and progress resumes on reopen', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/renderer/lib/fileTransferManager.ts'), 'utf-8');
+    const filesSource = fs.readFileSync(path.join(root, 'src/renderer/components/FilesPanel.tsx'), 'utf-8');
+    const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+
+    // 传输状态在模块单例里，进度订阅常驻，不随 FilesPanel 卸载消失
+    expect(managerSource).toContain('export const startUpload');
+    expect(managerSource).toContain('export const startPullFiles');
+    expect(managerSource).toContain('export const subscribeTransfer');
+    expect(managerSource).toContain('export const isTransferActive');
+    // FilesPanel 改用管理器，不再持有本地上传/下载进度 setState
+    expect(filesSource).toContain('subscribeTransfer');
+    expect(filesSource).toContain('startUpload(');
+    expect(filesSource).toContain('startPullFiles(');
+    expect(filesSource).not.toContain('setUpload(');
+    expect(filesSource).not.toContain('setPull(');
+    // 关闭文件管理时若有传输进行中先确认
+    expect(rendererSource).toContain('closeFileBrowser');
+    expect(rendererSource).toContain('isTransferActive(fileBrowserDevice.id)');
   });
 
   test('renderer removes USB devices from the monitor view without adb disconnect', () => {
@@ -224,7 +349,9 @@ describe('project smoke checks', () => {
     expect(managerSource).toContain('measureWifiLatency');
     expect(managerSource).toContain('wifiLatencyCacheMs = 3000');
     expect(managerSource).toContain('refreshWifiLatencyForDevice');
-    expect(managerSource).toContain('connectedWifiDevices');
+    // 健康轮询遍历全部已连接设备（屏幕状态 USB/WiFi 都刷），WiFi 延迟/电量仍按 connectionType 仅 WiFi 刷
+    expect(managerSource).toContain('connectedDevices');
+    expect(managerSource).toContain("refreshed.connectionType === 'wifi'");
     expect(managerSource).toContain('hasDeviceHealthChanged');
     expect(managerSource).toContain("this.execAdb(['-s', deviceId, 'get-state']");
     expect(managerSource).not.toContain('net.createConnection');
@@ -242,6 +369,23 @@ describe('project smoke checks', () => {
     expect(managerSource).toContain("this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'battery']");
     expect(managerSource).toContain('hasDeviceHealthChanged');
     expect(managerSource).toContain('previousDevice?.batteryLevel !== device.batteryLevel');
+  });
+
+  test('device card surfaces screen on/off state', () => {
+    const managerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+    const inspectorSource = fs.readFileSync(path.join(root, 'src/main/adb/runtimeInspector.ts'), 'utf-8');
+    const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+    const typeSource = fs.readFileSync(path.join(root, 'src/shared/types/index.ts'), 'utf-8');
+
+    // 类型 + 多版本解析 + 带缓存采集 + 健康轮询纳入变更判断 + 动作后失效缓存 + 卡片徽标
+    expect(typeSource).toContain("screenState?: 'on' | 'off' | 'unknown'");
+    expect(inspectorSource).toContain('async getScreenState(deviceId: string)');
+    expect(inspectorSource).toContain('mWakefulness=');
+    expect(managerSource).toContain('refreshScreenStateForDevice');
+    expect(managerSource).toContain('screenStateCacheMs = 3000');
+    expect(managerSource).toContain('previousDevice?.screenState !== device.screenState');
+    expect(managerSource).toContain('this.screenStateCache.delete(deviceId)');
+    expect(rendererSource).toContain('renderScreenStateBadge');
   });
 
   test('renderer does not show phone text placeholders in empty states', () => {
@@ -434,6 +578,11 @@ describe('project smoke checks', () => {
     expect(rendererSource).toContain('开启采集');
     expect(rendererSource).toContain('关闭采集');
     expect(rendererSource).toContain('本次采集报告');
+    // 曲线图：图例可点切换可见性（多选），可见曲线标峰谷
+    expect(rendererSource).toContain('selectedSeriesKeys');
+    expect(rendererSource).toContain('toggleSeries');
+    expect(rendererSource).toContain('visibleSeries');
+    expect(rendererSource).toContain('波峰');
     expect(rendererSource).toContain('hoveredSnapshotId');
     expect(rendererSource).toContain('hoverPoint');
     expect(rendererSource).toContain('getSampleValues');
@@ -749,8 +898,10 @@ describe('project smoke checks', () => {
       expect(source).toContain('adbManager.listInstalledPackages(deviceId)');
     }
     expect(simpleAppSource).toContain('handleUninstallApp');
-    expect(simpleAppSource).toContain('window.confirm');
-    expect(simpleAppSource).toContain('uninstallApp(selectedDevice.id, packageName)');
+    // 卸载二次确认走应用内自定义弹窗，不用原生 window.confirm（后者在 Electron 取消后会让网页丢键盘焦点）。
+    expect(simpleAppSource).not.toContain('window.confirm(');
+    expect(simpleAppSource).toContain('requestConfirm');
+    expect(simpleAppSource).toContain('uninstallApp(device.id, packageName)');
     expect(simpleAppSource).toContain('loadInstalledPackages');
     expect(simpleAppSource).toContain('已安装应用');
   });
@@ -761,10 +912,18 @@ describe('project smoke checks', () => {
     const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
     const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
     const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+    const channelSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
 
     // 安装模式（-r / -r -d）
     expect(managerSource).toContain("options?.allowDowngrade ? ['-r', '-d'] : ['-r']");
     expect(managerSource).toContain('async installApk(deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean })');
+    // 安装失败精准提示：识别签名不一致 / 降级等常见 INSTALL_FAILED_* 码
+    expect(managerSource).toContain('classifyInstallFailure');
+    expect(managerSource).toContain('INSTALL_FAILED_UPDATE_INCOMPATIBLE');
+    expect(managerSource).toContain('签名不一致');
+    expect(managerSource).toContain('INSTALL_FAILED_VERSION_DOWNGRADE');
+    // 签名/降级冲突提示带上冲突包名
+    expect(managerSource).toContain('pkgSuffix');
     expect(preloadSource).toContain('installApk: (deviceId, apkPath, options)');
     expect(electronApiSource).toContain('options?: { allowDowngrade?: boolean }');
 
@@ -772,9 +931,28 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('renderUnifiedInstallPanel');
     expect(simpleAppSource).toContain('startUnifiedInstall');
     expect(simpleAppSource).toContain('installItemsOnDevice');
+    // 应用安装内分「操作区 / 安装详情」，详情含进度 + 错误 + 安装日志
+    expect(simpleAppSource).toContain('安装详情');
+    expect(simpleAppSource).toContain('appendInstallLog');
+    expect(simpleAppSource).toContain('installLog');
+    // 新装应用「NEW」标识：按设备存（批量装多台切设备不丢），每台装前后 diff 出新增包，并浮到列表顶部
+    expect(simpleAppSource).toContain('newlyInstalledByDevice');
+    expect(simpleAppSource).toContain("{'NEW'}");
     expect(simpleAppSource).toContain('const limit = installConcurrency > 0 ? installConcurrency : targetIds.length');
     expect(simpleAppSource).toContain('installApk(deviceId, item.path, { allowDowngrade: installAllowDowngrade })');
     expect(simpleAppSource).toContain('pendingApks');
+    // 运行中应用：主进程按 ps -A 出运行包集合，渲染层轮询、标「运行中」、运行中禁止再次启动
+    expect(channelSource).toContain("GET_RUNNING_PACKAGES: 'adb:get-running-packages'");
+    expect(managerSource).toContain('async getRunningPackages(deviceId: string)');
+    expect(preloadSource).toContain('getRunningPackages');
+    expect(simpleAppSource).toContain('runningPackages');
+    expect(simpleAppSource).toContain('loadRunningPackages');
+    expect(simpleAppSource).toContain('disabled={isBusy || isRunning}');
+    expect(simpleAppSource).toContain('已在运行，禁止重复启动');
+    // 待安装支持拖拽 APK：共用 addApkFilesByPath、drop 取 File.path，并有全局守卫防拖偏导航
+    expect(simpleAppSource).toContain('addApkFilesByPath');
+    expect(simpleAppSource).toContain('handleApkDrop');
+    expect(simpleAppSource).toContain("window.addEventListener('drop', prevent)");
     expect(simpleAppSource).toContain('installTargets');
     expect(simpleAppSource).toContain('retryDeviceInstall');
     expect(simpleAppSource).toContain('应用安装');

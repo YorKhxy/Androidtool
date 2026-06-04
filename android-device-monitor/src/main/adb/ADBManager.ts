@@ -4,7 +4,7 @@ import { EventEmitter } from 'events';
 import * as path from 'path';
 import { statSync as nodeFsStatSync, mkdtempSync as nodeFsMkdtempSync, renameSync as nodeFsRenameSync, copyFileSync as nodeFsCopyFileSync, rmSync as nodeFsRmSync } from 'fs';
 import { tmpdir as nodeOsTmpdir } from 'os';
-import type { ExecFileOptions } from 'child_process';
+import type { ExecFileOptions, ChildProcess } from 'child_process';
 import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo, WeakNetworkHelperStatus, WeakNetworkProfile } from '../../shared/types';
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
@@ -86,9 +86,12 @@ export class ADBManager extends EventEmitter {
   private logcatPidPackageRefreshAt = new Map<string, number>();
   private logcatPidPackageRefreshes = new Map<string, Promise<void>>();
   private wifiLatencyCache = new Map<string, { checkedAt: number; latencyMs?: number; status: 'ok' | 'timeout' | 'unknown' }>();
+  private screenStateCache = new Map<string, { checkedAt: number; screenState: 'on' | 'off' | 'unknown' }>();
   private batteryLevelCache = new Map<string, { checkedAt: number; batteryLevel?: number }>();
   private deviceMonitorTimer: NodeJS.Timeout | null = null;
   private isDeviceMonitorPolling = false;
+  // 正在进行的传输子进程（push/pull），退出前用于 SIGTERM 终止；进程自然结束时自行移除。
+  private activeTransferChildren = new Set<ChildProcess>();
   private adbStatus: AdbStatus = {
     available: false,
     version: null,
@@ -104,6 +107,7 @@ export class ADBManager extends EventEmitter {
   private readonly adbStatusCacheMs = 5000;
   private readonly wifiLatencyCacheMs = 3000;
   private readonly batteryLevelCacheMs = 30000;
+  private readonly screenStateCacheMs = 3000; // 屏幕状态变化快，缓存短一些；息屏/唤醒动作还会主动清缓存即时刷新
 
   async getDevices(): Promise<DeviceInfo[]> {
     try {
@@ -142,6 +146,7 @@ export class ADBManager extends EventEmitter {
 
         device = await this.refreshBatteryLevelForDevice(device);
         device = await this.refreshWifiLatencyForDevice(device);
+        device = await this.refreshScreenStateForDevice(device);
         nextCache.set(summary.id, device);
         return device;
       }));
@@ -273,6 +278,30 @@ export class ADBManager extends EventEmitter {
       };
     } catch (error) {
       logger.warn('Failed to get battery level for', device.id, error);
+      return device;
+    }
+  }
+
+  // 屏幕电源状态（息屏/唤醒），带短缓存。复用 runtimeInspector 已有的多版本 dumpsys power 解析。
+  private async getScreenState(deviceId: string): Promise<'on' | 'off' | 'unknown'> {
+    const cached = this.screenStateCache.get(deviceId);
+    if (cached && Date.now() - cached.checkedAt < this.screenStateCacheMs) {
+      return cached.screenState;
+    }
+    const screenState = await this.runtimeInspector.getScreenState(deviceId);
+    this.screenStateCache.set(deviceId, { checkedAt: Date.now(), screenState });
+    return screenState;
+  }
+
+  private async refreshScreenStateForDevice(device: DeviceInfo): Promise<DeviceInfo> {
+    if (device.status !== 'connected') {
+      return device;
+    }
+    try {
+      const screenState = await this.getScreenState(device.id);
+      return { ...device, screenState };
+    } catch (error) {
+      logger.warn('Failed to get screen state for', device.id, error);
       return device;
     }
   }
@@ -473,6 +502,10 @@ export class ADBManager extends EventEmitter {
     const adbBinary = await this.resolveAdbBinary();
     const normalizedDir = this.normalizeRemoteDir(remoteDir);
     const remotePath = normalizedDir === '/' ? `/${fileName}` : `${normalizedDir}/${fileName}`;
+    // 先传到隐藏临时名，传完再 mv 成最终名：保证设备端最终文件名要么不存在、要么完整。
+    // 进程被打断只会留下可识别的 .part，不产生「看着成功实则损坏」的脏文件。
+    const tempName = `.${fileName}.part`;
+    const tempRemotePath = normalizedDir === '/' ? `/${tempName}` : `${normalizedDir}/${tempName}`;
 
     let totalBytes = 0;
     try {
@@ -481,22 +514,36 @@ export class ADBManager extends EventEmitter {
       totalBytes = 0;
     }
 
+    // push 前清理可能残留的旧临时文件，支持中断后重传（清理失败不阻断）。
+    try {
+      await this.execAdb(
+        ['-s', deviceId, 'shell', 'rm', '-f', this.quoteRemotePath(tempRemotePath)],
+        { timeout: 5000, maxBuffer: 1024 * 64 }
+      );
+    } catch {
+      /* 残留清理失败忽略 */
+    }
+
     return new Promise<void>((resolve, reject) => {
-      const child = spawn(adbBinary.path, ['-s', deviceId, 'push', localPath, remotePath], {
+      const child = spawn(adbBinary.path, ['-s', deviceId, 'push', localPath, tempRemotePath], {
         windowsHide: true,
       });
+      // 登记到活动传输集合，退出前可统一 SIGTERM；进程结束时移除。
+      this.activeTransferChildren.add(child);
+      child.once('close', () => this.activeTransferChildren.delete(child));
 
       let stderrText = '';
       let stdoutText = '';
       let settled = false;
+      let pushDone = false; // push 进程已成功结束、进入 mv 阶段，不再轮询
 
-      // 轮询设备端已写入大小，换算百分比；本地很快就传完时这条最多触发一两次
+      // 轮询设备端临时文件已写入大小，换算百分比；本地很快就传完时这条最多触发一两次
       let pollTimer: NodeJS.Timeout | null = null;
       if (totalBytes > 0 && onProgress) {
         const poll = async () => {
           try {
             const { stdout } = await this.execAdb(
-              ['-s', deviceId, 'shell', 'stat', '-c', '%s', this.quoteRemotePath(remotePath)],
+              ['-s', deviceId, 'shell', 'stat', '-c', '%s', this.quoteRemotePath(tempRemotePath)],
               { timeout: 5000, maxBuffer: 1024 * 64 }
             );
             const written = parseInt(stdout.trim(), 10);
@@ -507,14 +554,14 @@ export class ADBManager extends EventEmitter {
           } catch {
             // 文件还没创建或 stat 失败，忽略本次轮询
           }
-          if (!settled) {
+          if (!settled && !pushDone) {
             pollTimer = setTimeout(poll, 500);
           }
         };
         pollTimer = setTimeout(poll, 500);
       }
 
-      const finish = (err?: Error) => {
+      const settle = (err?: Error) => {
         if (settled) return;
         settled = true;
         if (pollTimer) clearTimeout(pollTimer);
@@ -526,20 +573,35 @@ export class ADBManager extends EventEmitter {
         }
       };
 
+      // push 成功后把临时名原子改成最终名（同一文件系统内 mv 为原子操作，会覆盖同名旧文件）。
+      const commitUpload = () => {
+        pushDone = true;
+        if (pollTimer) clearTimeout(pollTimer);
+        this.execAdb(
+          [
+            '-s', deviceId, 'shell', 'mv', '-f',
+            this.quoteRemotePath(tempRemotePath), this.quoteRemotePath(remotePath),
+          ],
+          { timeout: 15000, maxBuffer: 1024 * 64 }
+        )
+          .then(() => settle())
+          .catch((mvErr) => settle(new Error(`上传完成但落地重命名失败：${(mvErr as Error).message}`)));
+      };
+
       child.stdout.on('data', (d) => { stdoutText += d.toString(); });
       child.stderr.on('data', (d) => { stderrText += d.toString(); });
-      child.on('error', (err) => finish(err));
+      child.on('error', (err) => settle(err));
       child.on('close', (code) => {
         const combined = `${stdoutText}\n${stderrText}`.toLowerCase();
         if (code === 0 && combined.includes('file pushed') && !combined.includes('error:')) {
-          finish();
+          commitUpload();
         } else if (combined.includes('permission denied') || combined.includes('read-only')) {
-          finish(new Error('目标目录没有写入权限'));
+          settle(new Error('目标目录没有写入权限'));
         } else if (code === 0 && !combined.includes('error:')) {
           // 某些 adb 版本成功也可能不打 "file pushed"，按退出码兜底
-          finish();
+          commitUpload();
         } else {
-          finish(new Error(stderrText.trim() || stdoutText.trim() || '上传失败'));
+          settle(new Error(stderrText.trim() || stdoutText.trim() || '上传失败'));
         }
       });
     });
@@ -554,22 +616,28 @@ export class ADBManager extends EventEmitter {
 
     try {
       if (isDriveRoot) {
+        // 盘根：adb 无法把文件直接写到盘符根目录（如 F:\file.mp4），先 pull 到系统临时目录再移动。
         const tempDir = nodeFsMkdtempSync(path.join(nodeOsTmpdir(), 'adm-pull-'));
         const tempPath = path.join(tempDir, parsed.base);
         try {
           await this.runAdbPull(deviceId, remotePath, tempPath);
-          // 跨卷移动用复制+删除兜底（rename 跨盘会失败）
-          try {
-            nodeFsRenameSync(tempPath, localPath);
-          } catch {
-            nodeFsCopyFileSync(tempPath, localPath);
-            nodeFsRmSync(tempPath, { force: true });
-          }
+          this.commitPulledFile(tempPath, localPath);
         } finally {
           nodeFsRmSync(tempDir, { recursive: true, force: true });
         }
       } else {
-        await this.runAdbPull(deviceId, remotePath, localPath);
+        // 非盘根：先拉到目标同目录的隐藏 .part，完成后再 rename 成最终名，
+        // 保证本地最终文件名要么不存在、要么完整；被打断只留下可识别的 .part。
+        const tempPath = path.join(parsed.dir, `.${parsed.base}.part`);
+        // 清理可能残留的旧临时文件，支持中断后重传（不存在则忽略）。
+        try { nodeFsRmSync(tempPath, { recursive: true, force: true }); } catch { /* 忽略 */ }
+        try {
+          await this.runAdbPull(deviceId, remotePath, tempPath);
+          this.commitPulledFile(tempPath, localPath);
+        } catch (err) {
+          try { nodeFsRmSync(tempPath, { recursive: true, force: true }); } catch { /* 忽略 */ }
+          throw err;
+        }
       }
     } catch (error) {
       logger.error('ADBManager: pullDeviceFile failed:', error);
@@ -577,14 +645,60 @@ export class ADBManager extends EventEmitter {
     }
   }
 
+  // 把拉取到临时位置的文件原子落地到最终路径：先清理目标同名残留，再尝试 rename（同卷原子），
+  // 跨卷 rename 失败时用复制+删除兜底（仅文件，盘根下载场景适用）。
+  private commitPulledFile(tempPath: string, localPath: string): void {
+    try { nodeFsRmSync(localPath, { recursive: true, force: true }); } catch { /* 目标不存在则忽略 */ }
+    try {
+      nodeFsRenameSync(tempPath, localPath);
+    } catch {
+      nodeFsCopyFileSync(tempPath, localPath);
+      nodeFsRmSync(tempPath, { force: true });
+    }
+  }
+
   private async runAdbPull(deviceId: string, remotePath: string, localPath: string): Promise<void> {
     const result = await this.execAdbWithExitCode(
       ['-s', deviceId, 'pull', remotePath, localPath],
-      { timeout: 300000, maxBuffer: 1024 * 1024 * 16 }
+      { timeout: 300000, maxBuffer: 1024 * 1024 * 16 },
+      (child) => {
+        // 登记 pull 子进程，退出前可统一 SIGTERM；结束时移除。
+        this.activeTransferChildren.add(child);
+        child.once('close', () => this.activeTransferChildren.delete(child));
+      }
     );
     const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
     if (result.exitCode !== 0 || output.includes('permission denied') || output.includes('error:')) {
       throw new Error(result.stderr.trim() || result.stdout.trim() || '拉取文件失败');
+    }
+  }
+
+  // 终止当前正在进行的所有传输子进程（push/pull 主进程）。退出前调用，给 adb 子进程发 SIGTERM。
+  // 仅登记 push/pull 主进程；push 落地的 mv、stat 轮询、rm 等毫秒级短命令不在集合内、不被回收。
+  // 仅能拦截优雅退出；进程被 SIGKILL 强杀 / 崩溃时拦不住，最终兜底是 journal 恢复。
+  cancelActiveTransfers(): void {
+    for (const child of this.activeTransferChildren) {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* 子进程可能已退出，忽略 */
+      }
+    }
+    this.activeTransferChildren.clear();
+  }
+
+  // 删除上传残留的临时文件（设备端 .part），用于「丢弃恢复」时清理设备端，失败忽略。
+  async removeRemotePartial(deviceId: string, remoteDir: string, fileName: string): Promise<void> {
+    const normalizedDir = this.normalizeRemoteDir(remoteDir);
+    const tempName = `.${fileName}.part`;
+    const tempPath = normalizedDir === '/' ? `/${tempName}` : `${normalizedDir}/${tempName}`;
+    try {
+      await this.execAdb(
+        ['-s', deviceId, 'shell', 'rm', '-f', this.quoteRemotePath(tempPath)],
+        { timeout: 5000, maxBuffer: 1024 * 64 }
+      );
+    } catch {
+      /* 残留清理失败忽略 */
     }
   }
 
@@ -607,6 +721,36 @@ export class ADBManager extends EventEmitter {
     } catch (error) {
       logger.error('ADBManager: deleteDeviceFile failed:', error);
       throw this.wrapOperationError('删除设备文件失败', error);
+    }
+  }
+
+  // 在指定目录下新建文件夹。name 不允许包含路径分隔符或越级（. / ..），避免越权写到别处。
+  async createDeviceFolder(deviceId: string, dirPath: string, name: string): Promise<string> {
+    const trimmedName = (name || '').trim();
+    if (!trimmedName || trimmedName === '.' || trimmedName === '..' || /[\/\\]/.test(trimmedName)) {
+      throw new Error('文件夹名称不合法（不能为空，且不能包含 / \\）');
+    }
+    const normalizedDir = this.normalizeRemoteDir(dirPath);
+    const targetPath = `${normalizedDir === '/' ? '' : normalizedDir}/${trimmedName}`;
+    try {
+      const result = await this.execAdbWithExitCode(
+        ['-s', deviceId, 'shell', 'mkdir', this.quoteRemotePath(targetPath)],
+        { timeout: 15000, maxBuffer: 1024 * 64 }
+      );
+      const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
+      if (output.includes('file exists') || output.includes('already exists')) {
+        throw new Error('同名文件或文件夹已存在');
+      }
+      if (output.includes('permission denied') || output.includes('read-only')) {
+        throw new Error('没有创建权限（可能需要 root）');
+      }
+      if (result.exitCode !== 0) {
+        throw new Error(result.stderr.trim() || result.stdout.trim() || '创建文件夹失败');
+      }
+      return targetPath;
+    } catch (error) {
+      logger.error('ADBManager: createDeviceFolder failed:', error);
+      throw this.wrapOperationError('创建文件夹失败', error);
     }
   }
 
@@ -669,6 +813,7 @@ export class ADBManager extends EventEmitter {
       this.deviceInfoCache.delete(deviceId);
       this.wifiLatencyCache.delete(deviceId);
       this.batteryLevelCache.delete(deviceId);
+      this.screenStateCache.delete(deviceId);
     } catch (error) {
       throw this.wrapOperationError('Disconnect failed', error);
     }
@@ -725,9 +870,16 @@ export class ADBManager extends EventEmitter {
 
       const levelPriority = { V: 0, D: 1, I: 2, W: 3, E: 4, F: 5 };
       const minPriority = levelPriority[minLevel];
-      const sourcePid = await this.resolveLogcatPid(deviceId, packageName, pid);
-      const sourcePackageName = sourcePid && packageName?.trim() ? packageName.trim() : undefined;
-      const logcatArgs = ['-s', deviceId, 'logcat', '-v', 'time'];
+      // 仅显式传入的数字 PID 才用 --pid 锁定进程；按包名过滤不再用 --pid。
+      const sourcePid = this.resolveExplicitLogcatPid(pid);
+      // 按包名过滤采用「关联匹配」口径：不把范围锁死到应用自身进程，而是全量抓取后保留所有与该包相关的行
+      //（应用自身进程的日志 + 其它进程/系统服务消息体里提到该包的行），与 Android Studio 整机日志口径一致。
+      const relatedPackage = !sourcePid ? packageName?.trim().toLowerCase() || undefined : undefined;
+      if (relatedPackage) {
+        // 预热 PID→包名缓存：应用自身日志的消息体未必含包名，需靠进程归属判定，先同步一次避免开头漏判。
+        await this.refreshLogcatPidPackageCache(deviceId).catch(() => undefined);
+      }
+      const logcatArgs = ['-s', deviceId, 'logcat', '-v', 'long'];
       const adbBinary = await this.resolveAdbBinary();
       if (sourcePid) {
         logcatArgs.push(`--pid=${sourcePid}`);
@@ -737,50 +889,88 @@ export class ADBManager extends EventEmitter {
       let callbackWindowStart = Date.now();
       let callbackCount = 0;
 
+      // 用 -v long 的条目边界解析：每条日志 = 「[ 头 ]」+ 若干消息行 + 一个空行分隔符。
+      // 据此精确切分——多行堆栈合为一条，同毫秒、同 PID/TID/级别/TAG 的独立日志也能分开，
+      // 避免 threadtime 文本下「按头合并」把同头独立日志误并导致条目变少。
+      let pendingEntry: LogEntry | null = null;
+      let pendingHasMessage = false;
+      let flushTimer: ReturnType<typeof setTimeout> | undefined;
+      const ENTRY_FLUSH_MS = 250;
+
+      // flush 时统一做级别过滤、关联过滤与限流：一条（可能多行）日志只计一次吞吐、整条命中关联词。
+      const flushPendingLog = () => {
+        const entry = pendingEntry;
+        const hasMessage = pendingHasMessage;
+        pendingEntry = null;
+        pendingHasMessage = false;
+        if (!entry || !hasMessage) return;
+        // 进程归属包名，用于关联过滤与渲染层来源展示。
+        entry.packageName = this.getCachedLogcatPackageName(deviceId, entry.processId);
+        if (levelPriority[entry.level] < minPriority) return;
+        if (relatedPackage) {
+          const haystack = `${entry.tag} ${entry.message} ${entry.packageName || ''} ${entry.processId}`.toLowerCase();
+          if (!haystack.includes(relatedPackage)) return;
+        }
+        const now = Date.now();
+        if (now - callbackWindowStart >= 1000) {
+          callbackWindowStart = now;
+          callbackCount = 0;
+        }
+        if (callbackCount >= this.maxLogCallbacksPerSecond) return;
+        callbackCount++;
+        callback(entry);
+      };
+
       const logcatProcess = spawn(adbBinary.path, logcatArgs);
-      
+
       logcatProcess.stdout.on('data', (data) => {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = undefined;
+        }
         this.refreshLogcatPidPackageCacheIfNeeded(deviceId);
         const rawData = data.toString('utf-8');
         const existingBuffer = this.logcatBuffer.get(deviceId) || '';
         const fullData = (existingBuffer + rawData).slice(-this.maxLogcatBufferChars);
         const lines = fullData.split('\n');
-        
+
         let remainingBuffer = '';
         if (lines.length > 0 && !rawData.endsWith('\n')) {
           remainingBuffer = lines.pop() || '';
         }
         this.logcatBuffer.set(deviceId, remainingBuffer);
-        
+
         const limitedLines = lines.length > this.maxLogLinesPerChunk
           ? lines.slice(-this.maxLogLinesPerChunk)
           : lines;
 
-        for (const line of limitedLines) {
-          if (!line.trim()) continue;
-          
-          const logEntry = this.parseLogcatLine(line, deviceId);
-          if (logEntry) {
-            const entryPriority = levelPriority[logEntry.level];
-            if (entryPriority >= minPriority) {
-              const now = Date.now();
-              if (now - callbackWindowStart >= 1000) {
-                callbackWindowStart = now;
-                callbackCount = 0;
-              }
-              if (callbackCount >= this.maxLogCallbacksPerSecond) {
-                continue;
-              }
-              callbackCount++;
-              if (sourcePackageName) {
-                logEntry.packageName = sourcePackageName;
-              } else {
-                logEntry.packageName = this.getCachedLogcatPackageName(deviceId, logEntry.processId);
-              }
-              callback(logEntry);
-            }
+        for (const rawLine of limitedLines) {
+          const line = rawLine.replace(/[\r\n]+$/, '');
+          // logcat buffer 分隔标记（如 "--------- beginning of main"），忽略。
+          if (line.startsWith('---------')) continue;
+
+          const header = this.parseLongLogHeader(line, deviceId);
+          if (header) {
+            // 新条目开始：上一条已完整，先 flush，再以本头开新条目。
+            flushPendingLog();
+            pendingEntry = header;
+            pendingHasMessage = false;
+            continue;
+          }
+          if (line === '') {
+            // 空行 = 条目结束分隔符。
+            flushPendingLog();
+            continue;
+          }
+          // 其余行是当前条目的消息行（含多行堆栈），按行累加。
+          if (pendingEntry) {
+            pendingEntry.message = pendingHasMessage ? `${pendingEntry.message}\n${line}` : line;
+            pendingHasMessage = true;
           }
         }
+
+        // 末条目的分隔空行可能落在下一批数据里，定时兜底 flush，避免最后一条迟迟不显示。
+        flushTimer = setTimeout(flushPendingLog, ENTRY_FLUSH_MS);
       });
       
       logcatProcess.stderr.on('data', (data) => {
@@ -793,6 +983,11 @@ export class ADBManager extends EventEmitter {
       
       let stopEntry: StopLogcatProcess | undefined;
       logcatProcess.on('close', () => {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = undefined;
+        }
+        flushPendingLog();
         if (this.logcatProcesses.get(deviceId) === stopEntry) {
           this.logcatProcesses.delete(deviceId);
         }
@@ -804,6 +999,11 @@ export class ADBManager extends EventEmitter {
         stop: async () => {
         logcatProcess.stdout.removeAllListeners('data');
         logcatProcess.stderr.removeAllListeners('data');
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = undefined;
+        }
+        flushPendingLog();
 
         if (!logcatProcess.killed) {
           if (process.platform === 'win32' && logcatProcess.pid) {
@@ -906,115 +1106,37 @@ export class ADBManager extends EventEmitter {
     this.logcatPidPackageRefreshes.delete(deviceId);
   }
 
-  private async resolveLogcatPid(deviceId: string, packageName?: string, pid?: string): Promise<string | undefined> {
+  // 仅解析用户显式输入的数字 PID（用于 --pid 锁定单进程）。按包名过滤不再在此解析进程，
+  // 改由 startLogcat 全量抓取 + 关联过滤实现，覆盖系统/其它进程提到该包的日志。
+  private resolveExplicitLogcatPid(pid?: string): string | undefined {
     const cleanedPid = pid?.trim();
-    if (cleanedPid) {
-      if (!/^\d+$/.test(cleanedPid)) {
-        throw new Error('PID must be numeric.');
-      }
-      return cleanedPid;
-    }
-
-    const cleanedPackage = packageName?.trim();
-    if (!cleanedPackage) {
+    if (!cleanedPid) {
       return undefined;
     }
-
-    try {
-      const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'pidof', cleanedPackage]);
-      return stdout.trim().split(/\s+/).find((value) => /^\d+$/.test(value));
-    } catch (error) {
-      logger.warn('ADBManager: package process not found, continuing unscoped logcat:', cleanedPackage, error);
-      return undefined;
+    if (!/^\d+$/.test(cleanedPid)) {
+      throw new Error('PID must be numeric.');
     }
+    return cleanedPid;
   }
 
-  private parseLogcatLine(line: string, deviceId: string): LogEntry | null {
-    try {
-      const timeFormatMatch = line.match(/^(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEF])\s+([^:]+):\s?(.*)$/);
-      if (timeFormatMatch) {
-        const [, month, day, hours, minutes, seconds, ms, pid, tid, level, tag, message] = timeFormatMatch;
-        const now = new Date();
-        return {
-          id: `${pid}-${tid}-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
-          deviceId,
-          timestamp: new Date(now.getFullYear(), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds), Number(ms)),
-          processId: Number(pid),
-          threadId: Number(tid),
-          level: level as LogEntry['level'],
-          tag: tag.trim(),
-          message
-        };
-      }
-
-      const fullTimePattern = /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})/;
-      const fullTimeMatch = line.match(fullTimePattern);
-      
-      let timestamp = new Date();
-      if (fullTimeMatch) {
-        const timeStr = fullTimeMatch[1];
-        const datePart = timeStr.substring(0, 5);
-        const timePart = timeStr.substring(6);
-        
-        const now = new Date();
-        const currentYear = now.getFullYear();
-        const [month, day] = datePart.split('-').map(Number);
-        const [hours, minutes, secondsMs] = timePart.split(':');
-        const [seconds, ms] = secondsMs.split('.');
-        
-        timestamp = new Date(currentYear, month - 1, day, parseInt(hours), parseInt(minutes), parseInt(seconds), parseInt(ms));
-      }
-
-      const levelPattern = /([VDIWEF])\//;
-      const levelMatch = line.match(levelPattern);
-      if (!levelMatch) {
-        return {
-          id: `unknown-${Date.now()}`,
-          deviceId,
-          timestamp,
-          processId: 0,
-          threadId: 0,
-          level: 'V',
-          tag: 'UNKNOWN',
-          message: line
-        };
-      }
-
-      const level = levelMatch[1] as LogEntry['level'];
-      
-      const tagPattern = /[VDIWEF]\/([^\(\s]+)/;
-      const tagMatch = line.match(tagPattern);
-      const tag = tagMatch ? tagMatch[1].trim() : 'UNKNOWN';
-      
-      const pidPattern = /\((\d+)\)/;
-      const pidMatch = line.match(pidPattern);
-      const processId = pidMatch ? parseInt(pidMatch[1]) : 0;
-      
-      const messageStart = line.indexOf('):');
-      const message = messageStart >= 0 ? line.substring(messageStart + 2).trim() : line;
-      
-      return {
-        id: `${processId}-${timestamp.getTime()}`,
-        deviceId,
-        timestamp,
-        processId,
-        threadId: 0,
-        level,
-        tag,
-        message
-      };
-    } catch (e) {
-      return {
-        id: `unknown-${Date.now()}`,
-        deviceId,
-        timestamp: new Date(),
-        processId: 0,
-        threadId: 0,
-        level: 'V',
-        tag: 'UNKNOWN',
-        message: line
-      };
-    }
+  // 解析 -v long 的头行：形如「[ 06-02 17:53:19.595  1368:15488 W/qdgralloc ]」。
+  // 匹配成功返回只含元数据、message 为空的 LogEntry（消息行由流式状态机后续累加）；非头行返回 null。
+  // TID 可能空格右对齐（如「1355: 4375」），故用 :\s* 容错。
+  private parseLongLogHeader(line: string, deviceId: string): LogEntry | null {
+    const match = line.match(/^\[ (\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+(\d+):\s*(\d+) ([VDIWEF])\/(.*?) \]$/);
+    if (!match) return null;
+    const [, month, day, hours, minutes, seconds, ms, pid, tid, level, tag] = match;
+    const now = new Date();
+    return {
+      id: `${pid}-${tid}-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+      deviceId,
+      timestamp: new Date(now.getFullYear(), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds), Number(ms)),
+      processId: Number(pid),
+      threadId: Number(tid),
+      level: level as LogEntry['level'],
+      tag: tag.trim(),
+      message: '',
+    };
   }
 
   async getPerformanceInfo(deviceId: string): Promise<PerformanceInfo> {
@@ -1036,6 +1158,83 @@ export class ADBManager extends EventEmitter {
     return this.runtimeInspector.getPerformanceMetrics(deviceId, {
       preferPico: this.isLikelyPicoDevice(deviceId),
     });
+  }
+
+  // 把 adb install 的失败输出翻成「精准中文原因 + 可操作建议」。命中已知 INSTALL_FAILED_* 码就给具体提示，
+  // 否则尽量截出原始码兜底。原始完整输出仍放进 AdbCommandError.details 供排查。
+  private classifyInstallFailure(output: string): { message: string; hint: string } {
+    const o = output || '';
+    const has = (re: RegExp) => re.test(o);
+
+    // 从失败输出里抽出冲突应用的包名：优先 "Package com.x.y ..." 明确写法，否则退而找像包名的 token（至少两个点）。
+    // 命中时拼进提示，方便用户直接定位是哪个包冲突。
+    const pkg =
+      o.match(/Package\s+([A-Za-z][\w]*(?:\.[A-Za-z_][\w]*)+)/)?.[1] ||
+      o.match(/\b[A-Za-z][\w]*(?:\.[A-Za-z_][\w]*){2,}\b/)?.[0];
+    const pkgSuffix = pkg ? `（包名 ${pkg}）` : '';
+
+    // 签名不一致：设备已存在同包名应用，但签名与当前 APK 不同 → 无法覆盖（最常见、用户最容易困惑的一种）。
+    if (
+      has(/INSTALL_FAILED_UPDATE_INCOMPATIBLE/i) ||
+      has(/INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES/i) ||
+      has(/INSTALL_FAILED_SHARED_USER_INCOMPATIBLE/i) ||
+      has(/signatures do not match/i)
+    ) {
+      return {
+        message: `签名不一致：设备上已安装同包名应用${pkgSuffix}，但签名与当前 APK 不同，无法覆盖安装`,
+        hint: pkg
+          ? `请先在右侧「已安装应用」卸载设备上的「${pkg}」（会清除该应用数据），再重新安装本 APK。`
+          : '请先在右侧「已安装应用」卸载设备上的旧版本（会清除该应用数据），再重新安装本 APK。',
+      };
+    }
+    if (has(/INSTALL_FAILED_VERSION_DOWNGRADE/i)) {
+      return {
+        message: `版本降级被拒绝：当前 APK 的版本号低于设备上已安装的版本${pkgSuffix}`,
+        hint: '勾选上方「允许降级覆盖」后重试（降级可能导致应用数据异常）。',
+      };
+    }
+    if (has(/INSTALL_FAILED_INSUFFICIENT_STORAGE/i)) {
+      return { message: '设备存储空间不足，无法安装', hint: '清理设备存储空间后重试。' };
+    }
+    if (has(/INSTALL_FAILED_NO_MATCHING_ABIS/i)) {
+      return {
+        message: 'CPU 架构不兼容：APK 内的 so 原生库与设备架构不匹配',
+        hint: '换用与设备架构匹配的 APK（设备为 arm64 就用 arm64 包）。',
+      };
+    }
+    if (has(/INSTALL_FAILED_OLDER_SDK/i)) {
+      return { message: '设备系统版本过低，低于该 APK 要求的最低系统版本', hint: '升级设备系统，或换用兼容更低系统的 APK。' };
+    }
+    if (has(/INSTALL_FAILED_TEST_ONLY/i)) {
+      return { message: '该 APK 被标记为仅供测试（testOnly），常规安装被拒绝', hint: '换用正式发布的 APK，或用测试模式安装。' };
+    }
+    if (has(/INSTALL_FAILED_DUPLICATE_PERMISSION/i)) {
+      return { message: '权限冲突：该 APK 声明的权限与设备上已装的其它应用重复', hint: '卸载冲突的那个应用后再重试。' };
+    }
+    if (has(/INSTALL_PARSE_FAILED_NO_CERTIFICATES/i)) {
+      return { message: 'APK 未签名或证书缺失，无法安装', hint: '使用已正确签名的 APK。' };
+    }
+    if (has(/INSTALL_PARSE_FAILED/i) || has(/INSTALL_FAILED_INVALID_APK/i)) {
+      return { message: 'APK 文件损坏或解析失败', hint: '确认安装包完整未损坏，必要时重新获取该 APK。' };
+    }
+    if (has(/INSTALL_FAILED_USER_RESTRICTED/i)) {
+      return {
+        message: '设备拒绝安装：可能未允许 USB 安装 / 未知来源安装',
+        hint: '在设备「开发者选项」开启「USB 安装」，或在设备弹窗中允许本次安装。',
+      };
+    }
+    if (has(/No such file|failed to stat|can't find|cannot stat/i)) {
+      return { message: 'APK 文件未找到或已被移动', hint: '确认文件仍在原路径，重新选择安装包后再装。' };
+    }
+    if (has(/device offline|device unauthorized|device .* not found/i)) {
+      return { message: '设备连接异常（离线或未授权）', hint: '重新连接设备，并在设备上确认 USB 调试授权。' };
+    }
+
+    const codeMatch = o.match(/INSTALL_[A-Z_]+/);
+    if (codeMatch) {
+      return { message: `安装失败：${codeMatch[0]}`, hint: '展开下方详情可见原始报错。' };
+    }
+    return { message: '安装失败', hint: '请检查设备连接、调试授权、安装权限、版本签名以及设备剩余空间。' };
   }
 
   async installApk(deviceId: string, apkPath: string, options?: { allowDowngrade?: boolean }): Promise<string> {
@@ -1065,18 +1264,21 @@ export class ADBManager extends EventEmitter {
         return fallbackOutput;
       }
 
+      const failureOutput = fallbackOutput || primaryOutput || '';
+      const { message, hint } = this.classifyInstallFailure(failureOutput);
       throw new AdbCommandError({
         code: 'ADB_COMMAND_FAILED',
-        message: `安装 APK 失败：${path.basename(cleanedApkPath)}`,
-        hint: '已尝试普通安装和非流式安装，请检查设备存储空间、安装权限、签名兼容性和网络稳定性。',
-        details: fallbackOutput || primaryOutput || 'adb install did not report success.',
+        message: `${message}（${path.basename(cleanedApkPath)}）`,
+        hint,
+        details: failureOutput || 'adb install did not report success.',
       });
     }
 
+    const { message, hint } = this.classifyInstallFailure(primaryOutput);
     throw new AdbCommandError({
       code: 'ADB_COMMAND_FAILED',
-      message: `安装 APK 失败：${path.basename(cleanedApkPath)}`,
-      hint: '请检查设备连接、调试授权、安装权限、版本签名以及设备剩余空间。',
+      message: `${message}（${path.basename(cleanedApkPath)}）`,
+      hint,
       details: primaryOutput || 'adb install did not report success.',
     });
   }
@@ -1263,12 +1465,14 @@ export class ADBManager extends EventEmitter {
     await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_SLEEP'], {
       timeout: 8000,
     });
+    this.screenStateCache.delete(deviceId); // 主动失效缓存：下次轮询即刷出最新息屏/唤醒状态
   }
 
   async wakeDevice(deviceId: string): Promise<void> {
     await this.execAdb(['-s', deviceId, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'], {
       timeout: 8000,
     });
+    this.screenStateCache.delete(deviceId);
   }
 
   async unlockDevice(deviceId: string): Promise<void> {
@@ -1303,6 +1507,7 @@ export class ADBManager extends EventEmitter {
       ['-s', deviceId, 'shell', 'input', 'swipe', String(x), String(startY), String(x), String(endY), '300'],
       { timeout: 8000 }
     );
+    this.screenStateCache.delete(deviceId); // 解锁会点亮屏幕，失效缓存让卡片尽快显示「唤醒」
   }
 
   async rebootDevice(deviceId: string): Promise<void> {
@@ -1313,6 +1518,7 @@ export class ADBManager extends EventEmitter {
     if (result.exitCode === 0 || this.isExpectedRebootDisconnect(result)) {
       this.deviceInfoCache.delete(deviceId);
       this.wifiLatencyCache.delete(deviceId);
+      this.screenStateCache.delete(deviceId);
       return;
     }
 
@@ -1341,6 +1547,25 @@ export class ADBManager extends EventEmitter {
 
   async getProcesses(deviceId: string): Promise<ProcessInfo[]> {
     return this.runtimeInspector.getProcesses(deviceId);
+  }
+
+  // 当前在运行的应用包名集合：用 ps -A 全量进程，按进程名归一出包名（取 ':' 前并校验格式）。
+  // 供已安装列表标「运行中」、禁止重复启动用。无论工具启动还是设备本机启动都能反映真实状态。
+  async getRunningPackages(deviceId: string): Promise<string[]> {
+    try {
+      const stdout = await this.getProcessListOutput(deviceId);
+      const running = new Set<string>();
+      for (const line of stdout.split('\n')) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 2) continue;
+        const pkg = this.normalizeAndroidPackageName(parts[parts.length - 1]);
+        if (pkg) running.add(pkg);
+      }
+      return Array.from(running);
+    } catch (error) {
+      logger.warn('ADBManager: getRunningPackages failed:', error);
+      return [];
+    }
   }
 
   async getActivityStack(deviceId: string, packageName?: string): Promise<ActivityStackEntry[]> {
@@ -1827,11 +2052,12 @@ export class ADBManager extends EventEmitter {
 
   private async execAdbWithExitCode(
     args: string[],
-    options?: ExecFileOptions
+    options?: ExecFileOptions,
+    onChild?: (child: ChildProcess) => void
   ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     const adbBinary = await this.resolveAdbBinary();
     return await new Promise((resolve, reject) => {
-      execFile(adbBinary.path, args, options, (error, stdout, stderr) => {
+      const child = execFile(adbBinary.path, args, options, (error, stdout, stderr) => {
         const stdoutText = Buffer.isBuffer(stdout) ? stdout.toString() : String(stdout ?? '');
         const stderrText = Buffer.isBuffer(stderr) ? stderr.toString() : String(stderr ?? '');
 
@@ -1865,6 +2091,7 @@ export class ADBManager extends EventEmitter {
         }
         reject(adbError);
       });
+      onChild?.(child);
     });
   }
 
@@ -2062,23 +2289,29 @@ export class ADBManager extends EventEmitter {
         this.lastDeviceSnapshot = nextSnapshot;
         this.emitDeviceListChanged(devices);
       } else {
-        const connectedWifiDevices = Array.from(this.deviceInfoCache.values())
-          .filter((device) => device.connectionType === 'wifi' && device.status === 'connected');
+        const connectedDevices = Array.from(this.deviceInfoCache.values())
+          .filter((device) => device.status === 'connected');
 
-        if (connectedWifiDevices.length > 0) {
-          const refreshedWifiDevices = await Promise.all(
-            connectedWifiDevices.map(async (device) => {
-              const withBattery = await this.refreshBatteryLevelForDevice(device);
-              return this.refreshWifiLatencyForDevice(withBattery);
+        if (connectedDevices.length > 0) {
+          const refreshedDevices = await Promise.all(
+            connectedDevices.map(async (device) => {
+              // 屏幕状态 USB / WiFi 都周期刷（卡片要显示息屏/唤醒）；电量与延迟仍仅 WiFi 周期刷，保持原有开销。
+              let refreshed = await this.refreshScreenStateForDevice(device);
+              if (refreshed.connectionType === 'wifi') {
+                refreshed = await this.refreshBatteryLevelForDevice(refreshed);
+                refreshed = await this.refreshWifiLatencyForDevice(refreshed);
+              }
+              return refreshed;
             })
           );
           let hasDeviceHealthChanged = false;
-          for (const device of refreshedWifiDevices) {
+          for (const device of refreshedDevices) {
             const previousDevice = this.deviceInfoCache.get(device.id);
             if (
               previousDevice?.batteryLevel !== device.batteryLevel ||
               previousDevice?.latencyMs !== device.latencyMs ||
-              previousDevice?.latencyStatus !== device.latencyStatus
+              previousDevice?.latencyStatus !== device.latencyStatus ||
+              previousDevice?.screenState !== device.screenState
             ) {
               hasDeviceHealthChanged = true;
             }
@@ -2122,6 +2355,7 @@ export class ADBManager extends EventEmitter {
     this.logcatBuffer.clear();
     this.deviceInfoCache.clear();
     this.batteryLevelCache.clear();
+    this.screenStateCache.clear();
     this.lastDeviceSnapshot.clear();
     await this.killAdbServer();
     
