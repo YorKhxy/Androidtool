@@ -4,6 +4,7 @@ import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
 import { FilesPanel } from './components/FilesPanel';
+import { Icon } from './components/ui';
 import { ElectronResult, hasElectronAPI } from './lib/electronApi';
 import {
   buildHistoryEntryFromDevice,
@@ -2450,15 +2451,7 @@ function SimpleApp() {
   );
 
   return (
-    <div style={{
-      width: '100%',
-      height: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      backgroundColor: '#1a1a2e',
-      color: 'white',
-      overflow: 'hidden'
-    }}>
+    <div className="win" style={{ width: '100%', color: 'var(--fg-secondary)' }}>
       {/* 全局深色滚动条：index.css 未被入口引入，这里就地注入，和工具深色主题统一。
           仅用 webkit 规则——Electron 是 Chromium 内核，加 scrollbar-width 反而会接管并禁用自定义样式。 */}
       <style>{`
@@ -2544,9 +2537,9 @@ function SimpleApp() {
           )}
         </div>
       )}
-      <header style={{ height: '56px', backgroundColor: '#252540', borderBottom: '1px solid #353550', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-          <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
+      <header className="appbar" style={{ justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+          <h1 className="title" style={{ margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
           {appVersion && (
             <button
               onClick={openReleaseNotes}
@@ -2594,10 +2587,10 @@ function SimpleApp() {
         </div>
       )}
       
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div className="main">
         {/* 侧栏用 flex 列 + 各区块 order 控制顺序：ADB状态(0) → WiFi连接(1) → 设备列表(2) → 设备信息(3) → 历史设备(4)。
             用 order 而非物理调整 JSX 顺序，避免大段含中文的块搬运出错；ADB 状态保持默认 order 0 居首。 */}
-        <aside style={{ width: '288px', backgroundColor: '#252540', borderRight: '1px solid #353550', padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <aside className="sidebar" style={{ display: 'flex', flexDirection: 'column' }}>
           {adbStatus && (
             <div
               style={{
@@ -2965,37 +2958,28 @@ function SimpleApp() {
           )}
         </aside>
         
-        <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%' }}>
+        <main className="stage">
           {selectedDevice ? (
-            <>
-              <nav style={{ display: 'flex', borderBottom: '1px solid #353550' }}>
+            <div className="panel">
+              <nav className="tabs">
                 {[
-                  { key: 'devices' as TabType, label: '\u8bbe\u5907' },
-                  { key: 'logs' as TabType, label: '\u65e5\u5fd7' },
-                  { key: 'performance' as TabType, label: '\u6027\u80fd' },
-                  { key: 'network' as TabType, label: '\u7f51\u7edc' },
-                  { key: 'mirror' as TabType, label: '\u6295\u5c4f' },
+                  { key: 'devices' as TabType, label: '\u8bbe\u5907', icon: 'smartphone' },
+                  { key: 'logs' as TabType, label: '\u65e5\u5fd7', icon: 'scroll-text' },
+                  { key: 'performance' as TabType, label: '\u6027\u80fd', icon: 'activity' },
+                  { key: 'network' as TabType, label: '\u7f51\u7edc', icon: 'network' },
+                  { key: 'mirror' as TabType, label: '\u6295\u5c4f', icon: 'cast' },
                 ].map(tab => (
                   <button
                     key={tab.key}
+                    className={'tab' + (activeTab === tab.key ? ' active' : '')}
                     onClick={() => setActiveTab(tab.key)}
-                    style={{
-                      padding: '12px 24px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      backgroundColor: activeTab === tab.key ? '#353550' : 'transparent',
-                      color: activeTab === tab.key ? '#fff' : '#888',
-                      border: 'none',
-                      cursor: 'pointer',
-                      borderBottom: activeTab === tab.key ? '2px solid #4a90d9' : 'none'
-                    }}
                   >
-                    {tab.label}
+                    <Icon name={tab.icon} />{tab.label}
                   </button>
                 ))}
               </nav>
 
-              <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+              <div style={{ flex: 1, overflow: 'auto', padding: '16px', minHeight: 0 }}>
                 {activeTab === 'devices' && (
                   <div style={{ display: 'flex', flexDirection: 'row', gap: '16px', height: '100%', alignItems: 'stretch' }}>
                     {/* 应用安装：放右侧（order 2），内部分操作区 + 安装详情两段 */}
@@ -3150,11 +3134,11 @@ function SimpleApp() {
                   />
                 )}
               </div>
-            </>
+            </div>
           ) : (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
+            <div className="panel" style={{ alignItems: 'center', justifyContent: 'center', color: 'var(--fg-tertiary)' }}>
             <div style={{ textAlign: 'center' }}>
-              <h2 style={{ fontSize: '24px', fontWeight: '600', color: 'white', margin: '0 0 8px 0' }}>{'\u8bf7\u9009\u62e9\u8bbe\u5907'}</h2>
+              <h2 style={{ fontSize: '24px', fontWeight: '600', color: 'var(--fg-primary)', margin: '0 0 8px 0' }}>{'\u8bf7\u9009\u62e9\u8bbe\u5907'}</h2>
               <p style={{ fontSize: '14px' }}>{'\u4ece\u5de6\u4fa7\u5217\u8868\u9009\u62e9\u5df2\u8fde\u63a5\u7684 Android \u8bbe\u5907'}</p>
               </div>
             </div>
