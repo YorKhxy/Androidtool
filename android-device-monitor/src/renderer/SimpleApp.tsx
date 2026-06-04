@@ -1190,13 +1190,9 @@ function SimpleApp() {
     setLogVersion(version => version + 1);
   };
 
-  // 开始/关闭采集单一开关：点开始 → startCaptureSession（主进程同启采样循环 + 持续分段录制）；
+  // 执行采集开关：点开始 → startCaptureSession（主进程同启采样循环 + 持续分段录制）；
   // 点关闭 → stopCaptureSession（停采样停录制 + finalize），把 finalize 的会话留作报告渲染。
-  const toggleCaptureSession = async () => {
-    if (!selectedDevice || !hasElectronAPI()) return;
-    const deviceId = selectedDevice.id;
-    if (captureBusyDeviceIds.has(deviceId)) return;
-    const isActive = Boolean(activeCaptureByDeviceId[deviceId]);
+  const runCaptureToggle = async (deviceId: string, isActive: boolean) => {
     setCaptureBusyDeviceIds((prev) => new Set(prev).add(deviceId));
     try {
       if (isActive) {
@@ -1243,6 +1239,26 @@ function SimpleApp() {
         next.delete(deviceId);
         return next;
       });
+    }
+  };
+
+  // 单一开关：开始采集直接开；关闭采集走统一确认弹窗二次确认，避免误触中断正在进行的录制。
+  const toggleCaptureSession = () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    const deviceId = selectedDevice.id;
+    if (captureBusyDeviceIds.has(deviceId)) return;
+    const isActive = Boolean(activeCaptureByDeviceId[deviceId]);
+    if (isActive) {
+      requestConfirm({
+        message: '确定关闭采集吗？\n关闭后会结束本次录制并生成采集报告。',
+        confirmText: '关闭采集',
+        danger: true,
+        onConfirm: () => {
+          void runCaptureToggle(deviceId, true);
+        },
+      });
+    } else {
+      void runCaptureToggle(deviceId, false);
     }
   };
 

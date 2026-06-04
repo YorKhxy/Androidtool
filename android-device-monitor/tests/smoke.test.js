@@ -610,6 +610,9 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('onCaptureSizeLimit');
     expect(simpleAppSource).toContain('activeCaptureByDeviceId');
     expect(simpleAppSource).toContain('loadedReport'); // 停止后/回看加载的报告会话（14.7 统一取代 per-device 报告态）
+    // 关闭采集走统一确认弹窗二次确认（开始采集不拦）
+    expect(simpleAppSource).toContain('runCaptureToggle');
+    expect(simpleAppSource).toContain('确定关闭采集吗');
   });
 
   test('capture filter marks AND-combined hits, persists markers, and jumps+pauses on marker click', () => {
