@@ -460,7 +460,7 @@ describe('project smoke checks', () => {
     expect(typeSource).toContain("export type PicoAppSupportStatus = 'supported' | 'unsupported' | 'unknown'");
     expect(typeSource).toContain('picoAppSupport?: PicoAppSupportStatus');
     expect(typeSource).toContain('fps: number');
-    expect(rendererSource).toContain('前台渲染帧率');
+    expect(rendererSource).toContain('renderMetricStrip'); // 指标压成紧凑一行小条
     expect(rendererSource).not.toContain('通用 Android Provider');
     expect(rendererSource).not.toContain('Pico Metrics 官方原始数据');
     expect(rendererSource).not.toContain('当前使用应用内置 ADB');
@@ -473,8 +473,8 @@ describe('project smoke checks', () => {
     expect(rendererSource).toContain("identity.includes('sparrow')");
     expect(rendererSource).toContain("performance?.provider === 'pico' || (!performance && isLikelyPicoDevice(device))");
     expect(rendererSource).toContain('当前 Pico 指标关联前台应用');
-    expect(rendererSource).toContain('renderPicoFallbackMetrics');
-    expect(rendererSource).toContain('通用 CPU 采样回退');
+    expect(rendererSource).toContain('showPicoFallback'); // Pico 回退态分支
+    expect(rendererSource).toContain('muted: true'); // 回退时未就绪指标置灰
     expect(rendererSource).toContain('FrmGpu');
     expect(rendererSource).toContain('ATWGPU');
   });

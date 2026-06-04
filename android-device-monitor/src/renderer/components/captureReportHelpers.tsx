@@ -4,7 +4,7 @@ import { formatClock, formatMemoryMb, formatMetricReading, getGpuValue, sampleEl
 
 // 采集进行中的视频区占位：红点 + 「录制中」+ 已用时长，工具内不回传画面。
 export const renderRecordingPlaceholder = (elapsedMs: number) => (
-  <div style={{ height: '260px', borderRadius: '10px', backgroundColor: '#020617', border: '1px solid #1f2937', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: '#94a3b8' }}>
+  <div style={{ height: '100%', minHeight: '260px', borderRadius: '10px', backgroundColor: '#020617', border: '1px solid #1f2937', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: '#94a3b8' }}>
     <span style={{ width: '12px', height: '12px', borderRadius: '999px', backgroundColor: '#ef4444', boxShadow: '0 0 0 6px rgba(239,68,68,0.18)' }} />
     <div style={{ fontSize: '14px', color: '#e5e7eb' }}>录制中</div>
     <div style={{ fontSize: '12px' }}>已录制 {formatClock(elapsedMs)}（采集中不在工具内回传画面）</div>

@@ -12,6 +12,9 @@ import {
   type FilterCondition,
 } from './perfFormat';
 
+// 曲线 / 视频是性能模块最重要的内容，给一个较大的固定高度让它占主要区域。
+const REPORT_HEIGHT = 440;
+
 type CaptureReportProps = {
   session: PerformanceCaptureSession | null;
   samples: PerformanceSample[];
@@ -181,18 +184,18 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
 
   const renderVideoArea = () => {
     if (live) {
-      return renderRecordingPlaceholder(elapsedMs ?? 0);
+      return <div style={{ height: `${REPORT_HEIGHT}px` }}>{renderRecordingPlaceholder(elapsedMs ?? 0)}</div>;
     }
     if (segments.length === 0 || !segmentUrl) {
       return (
-        <div style={{ height: '260px', borderRadius: '10px', backgroundColor: '#020617', border: '1px solid #1f2937', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '13px' }}>
+        <div style={{ height: `${REPORT_HEIGHT}px`, borderRadius: '10px', backgroundColor: '#020617', border: '1px solid #1f2937', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '13px' }}>
           本次采集没有录屏分段。
         </div>
       );
     }
     return (
       <div>
-        <div style={{ position: 'relative', height: '320px', borderRadius: '10px', backgroundColor: '#020617', border: '1px solid #1f2937', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: shouldCrop ? 'flex-start' : 'center' }}>
+        <div style={{ position: 'relative', height: `${REPORT_HEIGHT}px`, borderRadius: '10px', backgroundColor: '#020617', border: '1px solid #1f2937', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: shouldCrop ? 'flex-start' : 'center' }}>
           {shouldCrop && hasVideoSize && videoSize ? (
             <div style={getSingleEyeWrapperStyle(videoSize)}>
               <video
@@ -264,7 +267,8 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: '16px', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(0, 1fr)', gap: '16px', alignItems: 'start' }}>
+        <div style={{ height: `${REPORT_HEIGHT}px` }}>
         <CaptureChart
           session={session}
           samples={samples}
@@ -277,6 +281,7 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
           markers={appliedMarkers}
           onMarkerClick={!live ? seekAndPause : undefined}
         />
+        </div>
         {renderVideoArea()}
       </div>
       {showFilter && (

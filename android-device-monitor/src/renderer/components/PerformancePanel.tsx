@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { DeviceInfo, PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceMetrics, PerformanceSample, PicoMetricsState } from '../../shared/types';
 import { CaptureReport } from './CaptureReport';
 import { CaptureHistoryList } from './CaptureHistoryList';
-import { formatClock, formatMemoryMb } from './perfFormat';
+import { formatClock, formatMemoryMb, METRIC_COLORS } from './perfFormat';
 
 type PerformancePanelProps = {
   device: DeviceInfo | null;
@@ -37,66 +37,54 @@ type PerformancePanelProps = {
   onExportSession: () => void;
 };
 
-const renderMetricCard = (
-  title: string,
-  subtitle: string,
-  value: string,
-  suffix: string,
-  color: string,
-  width: string
-) => (
-  <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px' }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-      <span style={{ fontSize: '20px' }}>{title}</span>
-      <span style={{ fontSize: '14px', color: '#888' }}>{subtitle}</span>
-    </div>
-    <div style={{ fontSize: '32px', fontWeight: '700', marginBottom: '8px' }}>
-      {value} <span style={{ fontSize: '16px', fontWeight: '400', color: '#888' }}>{suffix}</span>
-    </div>
-    <div style={{ height: '6px', backgroundColor: '#353550', borderRadius: '3px', overflow: 'hidden' }}>
-      <div style={{ height: '100%', backgroundColor: color, width }} />
-    </div>
-  </div>
-);
+type MetricChip = { label: string; value: string; unit?: string; color: string; muted?: boolean };
 
-const renderMutedMetricCard = (title: string, subtitle: string) =>
-  renderMetricCard(title, subtitle, '--', '', '#4b5563', '0%');
+// 把指标压成紧凑一行小条（色点 + 名 + 数值 + 单位），把竖向空间让给曲线/视频。
+const buildMetricChips = (performance: PerformanceMetrics | null, isPicoView: boolean, showPicoFallback: boolean): MetricChip[] => {
+  const fps = performance ? String(performance.fps) : '--';
+  const cpu = performance ? performance.cpuUsage.toFixed(1) : '--';
+  const mem = performance ? formatMemoryMb(performance.memoryUsage) : '--';
+  const base: MetricChip[] = [
+    { label: 'FPS', value: fps, color: METRIC_COLORS.fps },
+    { label: 'CPU', value: cpu, unit: '%', color: METRIC_COLORS.cpu },
+    { label: 'MEM', value: mem, unit: 'MB', color: METRIC_COLORS.mem },
+  ];
+  if (!isPicoView) return base;
 
-const renderAndroidMetrics = (performance: PerformanceMetrics | null) => (
-  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-    {renderMetricCard('FPS', '前台渲染帧率', performance ? String(performance.fps) : '--', 'FPS', '#a855f7', `${Math.min(((performance?.fps || 0) / 120) * 100, 100)}%`)}
-    {renderMetricCard('CPU', 'CPU 使用率', performance ? performance.cpuUsage.toFixed(1) : '--', '%', '#3b82f6', `${Math.min(performance?.cpuUsage || 0, 100)}%`)}
-    {renderMetricCard('MEM', '内存占用', performance ? formatMemoryMb(performance.memoryUsage) : '--', 'MB', '#22c55e', `${Math.min(((performance?.memoryUsage || 0) / 8_000_000) * 100, 100)}%`)}
-  </div>
-);
-
-const renderPicoMetrics = (performance: PerformanceMetrics | null) => {
   const pico = performance?.picoMetrics;
-  const picoFpsValue = pico?.fps?.value ?? performance?.fps;
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px' }}>
-      {renderMetricCard('FPS', 'Pico 实时帧率', picoFpsValue !== undefined ? String(picoFpsValue) : '--', pico?.fps?.maxValue !== undefined ? `/ ${pico.fps.maxValue}` : '', '#a855f7', `${Math.min(((picoFpsValue || 0) / 120) * 100, 100)}%`)}
-      {renderMetricCard('CPU', 'CPU 占用率', performance ? performance.cpuUsage.toFixed(1) : '--', '%', '#3b82f6', `${Math.min(performance?.cpuUsage || 0, 100)}%`)}
-      {renderMetricCard('MEM', '内存占用', performance ? (performance.memoryUsage / 1024).toFixed(1) : '--', 'MB', '#22c55e', `${Math.min(((performance?.memoryUsage || 0) / 8_000_000) * 100, 100)}%`)}
-      {renderMetricCard('GPU', 'GPU 利用率', pico?.gpuUtil ? String(pico.gpuUtil.value) : '--', pico?.gpuUtil?.unit || '%', '#ec4899', `${Math.min(pico?.gpuUtil?.value || 0, 100)}%`)}
-      {renderMetricCard('MTP', 'Motion-to-Photon', pico?.mtp ? String(pico.mtp.value) : '--', pico?.mtp?.unit || '', '#60a5fa', `${Math.min(((pico?.mtp?.value || 0) / 60) * 100, 100)}%`)}
-      {renderMetricCard('FrmCpu', 'CPU 帧耗时', pico?.frameCpu ? String(pico.frameCpu.value) : '--', pico?.frameCpu?.unit || '', '#22c55e', `${Math.min(((pico?.frameCpu?.value || 0) / 40) * 100, 100)}%`)}
-      {renderMetricCard('FrmGpu', 'App GPU 帧耗时', pico?.frameGpu ? String(pico.frameGpu.value) : '--', pico?.frameGpu?.unit || '', '#f97316', `${Math.min(((pico?.frameGpu?.value || 0) / 40) * 100, 100)}%`)}
-      {renderMetricCard('ATWGPU', 'Compositor GPU', pico?.atwGpu ? String(pico.atwGpu.value) : '--', pico?.atwGpu?.unit || '', '#facc15', `${Math.min(((pico?.atwGpu?.value || 0) / 30) * 100, 100)}%`)}
-    </div>
-  );
+  if (showPicoFallback) {
+    return [
+      ...base,
+      { label: 'GPU', value: '--', color: METRIC_COLORS.gpu, muted: true },
+      { label: 'MTP', value: '--', color: '#60a5fa', muted: true },
+      { label: 'FrmCpu', value: '--', color: '#34d399', muted: true },
+      { label: 'FrmGpu', value: '--', color: '#f59e0b', muted: true },
+      { label: 'ATWGPU', value: '--', color: '#facc15', muted: true },
+    ];
+  }
+  const picoFps = pico?.fps?.value ?? performance?.fps;
+  return [
+    { label: 'FPS', value: picoFps !== undefined ? String(picoFps) : '--', unit: pico?.fps?.maxValue !== undefined ? `/${pico.fps.maxValue}` : '', color: METRIC_COLORS.fps },
+    { label: 'CPU', value: cpu, unit: '%', color: METRIC_COLORS.cpu },
+    { label: 'MEM', value: mem, unit: 'MB', color: METRIC_COLORS.mem },
+    { label: 'GPU', value: pico?.gpuUtil ? String(pico.gpuUtil.value) : '--', unit: pico?.gpuUtil?.unit || '%', color: METRIC_COLORS.gpu },
+    { label: 'MTP', value: pico?.mtp ? String(pico.mtp.value) : '--', unit: pico?.mtp?.unit || '', color: '#60a5fa' },
+    { label: 'FrmCpu', value: pico?.frameCpu ? String(pico.frameCpu.value) : '--', unit: pico?.frameCpu?.unit || '', color: '#34d399' },
+    { label: 'FrmGpu', value: pico?.frameGpu ? String(pico.frameGpu.value) : '--', unit: pico?.frameGpu?.unit || '', color: '#f59e0b' },
+    { label: 'ATWGPU', value: pico?.atwGpu ? String(pico.atwGpu.value) : '--', unit: pico?.atwGpu?.unit || '', color: '#facc15' },
+  ];
 };
 
-const renderPicoFallbackMetrics = (performance: PerformanceMetrics | null) => (
-  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px' }}>
-    {renderMetricCard('FPS', '通用前台帧率回退', performance ? String(performance.fps) : '--', 'FPS', '#a855f7', `${Math.min(((performance?.fps || 0) / 120) * 100, 100)}%`)}
-    {renderMetricCard('CPU', '通用 CPU 采样回退', performance ? performance.cpuUsage.toFixed(1) : '--', '%', '#3b82f6', `${Math.min(performance?.cpuUsage || 0, 100)}%`)}
-    {renderMetricCard('MEM', '通用内存采样回退', performance ? formatMemoryMb(performance.memoryUsage) : '--', 'MB', '#22c55e', `${Math.min(performance?.memoryUsage || 0, 100)}%`)}
-    {renderMutedMetricCard('GPU', '等待 Pico 官方指标')}
-    {renderMutedMetricCard('MTP', '等待 Pico 官方指标')}
-    {renderMutedMetricCard('FrmCpu', '等待 Pico 官方指标')}
-    {renderMutedMetricCard('FrmGpu', '等待 Pico 官方指标')}
-    {renderMutedMetricCard('ATWGPU', '等待 Pico 官方指标')}
+const renderMetricStrip = (performance: PerformanceMetrics | null, isPicoView: boolean, showPicoFallback: boolean) => (
+  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+    {buildMetricChips(performance, isPicoView, showPicoFallback).map((chip) => (
+      <div key={chip.label} style={{ display: 'flex', alignItems: 'center', gap: '7px', backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '7px 11px', opacity: chip.muted ? 0.5 : 1 }}>
+        <span style={{ width: '8px', height: '8px', borderRadius: '2px', backgroundColor: chip.color, flexShrink: 0 }} />
+        <span style={{ color: '#94a3b8', fontSize: '12px' }}>{chip.label}</span>
+        <span style={{ color: '#fff', fontSize: '15px', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{chip.value}</span>
+        {chip.unit ? <span style={{ color: '#6b7280', fontSize: '11px' }}>{chip.unit}</span> : null}
+      </div>
+    ))}
   </div>
 );
 
@@ -218,7 +206,7 @@ export function PerformancePanel({
         </section>
       </div>
 
-      {isPicoView ? (showPicoFallback ? renderPicoFallbackMetrics(performance) : renderPicoMetrics(performance)) : renderAndroidMetrics(performance)}
+      {renderMetricStrip(performance, isPicoView, showPicoFallback)}
 
       {(performance?.packageName || performance?.activityName) && (
         <div style={{ backgroundColor: '#202038', borderRadius: '8px', padding: '12px 14px', color: '#cbd5e1' }}>
