@@ -56,6 +56,10 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
     setAppliedMarkers(markersPropRef.current ?? []);
   }, [sessionId, live]);
 
+  // AND 命中时间点。必须在任何 early return 之前调用，保证每次渲染的 hook 数量一致
+  // （否则 session 由 null↔非 null 切换时 React 报「Rendered more hooks than previous」）。
+  const hitTimes = useMemo(() => andHitTimes(appliedMarkers), [appliedMarkers]);
+
   if (!session) {
     return <div style={{ color: '#6b7280', fontSize: '13px' }}>开启采集后，这里会显示本次采集的指标曲线与录屏。</div>;
   }
@@ -141,8 +145,6 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
     setIsPlaying(false);
     seekTo(ms);
   };
-
-  const hitTimes = useMemo(() => andHitTimes(appliedMarkers), [appliedMarkers]);
 
   const applyFilter = () => {
     const next = computeMarkers(filterConditions, samples, session.startedAt);

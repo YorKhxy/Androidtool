@@ -650,6 +650,13 @@ describe('project smoke checks', () => {
     expect(reportSource).toContain('seekAndPause');
     expect(reportSource).toContain('<CaptureFilterPanel');
     expect(reportSource).toContain('.pause()'); // 命中跳转时暂停视频
+    // 防回归：hitTimes 的 useMemo 必须在 `if (!session)` early return 之前，
+    // 否则 session 由 null↔非 null 切换时 hook 数量变化 → "Rendered more hooks than previous"。
+    const memoIdx = reportSource.indexOf('useMemo(() => andHitTimes');
+    const earlyReturnIdx = reportSource.indexOf('if (!session)');
+    expect(memoIdx).toBeGreaterThan(-1);
+    expect(earlyReturnIdx).toBeGreaterThan(-1);
+    expect(memoIdx).toBeLessThan(earlyReturnIdx);
 
     // 接线：面板透传 + SimpleApp 持久化
     expect(panelSource).toContain('onSaveCaptureMarkers');
