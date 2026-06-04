@@ -614,6 +614,40 @@ describe('project smoke checks', () => {
     expect(recordingSectionIndex).toBeGreaterThanOrEqual(0);
   });
 
+  test('continuous capture recorder segments at 180s, finalizes via SIGINT and pulls each segment', () => {
+    const recorderPath = path.join(root, 'src/main/adb/captureRecorder.ts');
+    expect(fs.existsSync(recorderPath)).toBe(true);
+    const recorderSource = fs.readFileSync(recorderPath, 'utf-8');
+
+    // 持续分段：单段 180s 上限、按序号命名、逐段 pull 落盘并删除设备端临时文件
+    expect(recorderSource).toContain('MAX_SEGMENT_SECONDS = 180');
+    expect(recorderSource).toContain("'--time-limit', String(MAX_SEGMENT_SECONDS)");
+    expect(recorderSource).toContain('seg-${index}.mp4');
+    expect(recorderSource).toContain("'-s', input.deviceId, 'pull', remotePath, localPath");
+    expect(recorderSource).toContain("'shell', 'rm', '-f', remotePath");
+    // 停止：SIGINT(pkill -2) 让设备端 finalize 当前段，而非丢弃
+    expect(recorderSource).toContain("'pkill', '-2', 'screenrecord'");
+    expect(recorderSource).toContain('signalScreenrecordStop');
+    // 上一段 pull 与下一段录制重叠，缩短接缝
+    expect(recorderSource).toContain('pullJobs');
+    expect(recorderSource).toContain('onSegment');
+    expect(recorderSource).toContain('startMs');
+    expect(recorderSource).toContain('endMs');
+    // 累计体积上报（软上限）
+    expect(recorderSource).toContain('onSizeBytes');
+    // 空段（被打断未写出有效内容）不上报
+    expect(recorderSource).toContain('if (sizeBytes <= 0)');
+    expect(recorderSource).toContain('class PerformanceCaptureRecorder');
+    expect(recorderSource).toContain('isRecording(deviceId: string): boolean');
+    // 首段探测：设备端 screenrecord 瞬间失败时 start 抛错（不再静默吞掉 stderr）
+    expect(recorderSource).toContain('assertSegmentAlive');
+    expect(recorderSource).not.toContain("stdio: 'ignore'");
+    // stop 期间二次检查，避免 stop 后产生幽灵段
+    expect(recorderSource).toContain('if (state.stopRequested)');
+    // 不在录制阶段做单眼裁切（播放时裁切）
+    expect(recorderSource).not.toContain('--crop');
+  });
+
   test('network tab does not auto-trigger capture or show loading as an error toast', () => {
     const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
 
