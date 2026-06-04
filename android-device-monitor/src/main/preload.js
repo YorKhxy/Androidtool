@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startPerformanceRecording: (deviceId, options) => ipcRenderer.invoke('adb:start-performance-recording', deviceId, options),
   readSnapshotImage: (screenshotPath) => ipcRenderer.invoke('performance:read-snapshot-image', screenshotPath),
   getProcesses: (deviceId) => ipcRenderer.invoke('adb:get-processes', deviceId),
+  getRunningPackages: (deviceId) => ipcRenderer.invoke('adb:get-running-packages', deviceId),
   connectUSB: () => ipcRenderer.invoke('adb:connect-usb'),
   getActivityStack: (deviceId, packageName) => ipcRenderer.invoke('adb:get-activity-stack', deviceId, packageName),
   getNetworkRequests: (deviceId, packageName) => ipcRenderer.invoke('adb:get-network-requests', deviceId, packageName),

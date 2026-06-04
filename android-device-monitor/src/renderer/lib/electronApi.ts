@@ -50,6 +50,7 @@ export interface ElectronAPI {
   startPerformanceRecording: (deviceId: string, options: PerformanceRecordingOptions) => Promise<ElectronResult<PerformanceRecording>>;
   readSnapshotImage: (screenshotPath: string) => Promise<ElectronResult<string>>;
   getProcesses: (deviceId: string) => Promise<ElectronResult<ProcessInfo[]>>;
+  getRunningPackages: (deviceId: string) => Promise<ElectronResult<string[]>>;
   connectUSB: () => Promise<ElectronResult<DeviceInfo[]>>;
   getActivityStack: (deviceId: string, packageName?: string) => Promise<ElectronResult<ActivityStackEntry[]>>;
   getNetworkRequests: (deviceId: string, packageName?: string) => Promise<ElectronResult<NetworkRequest[]>>;
