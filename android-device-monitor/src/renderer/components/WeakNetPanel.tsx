@@ -12,6 +12,7 @@ type WeakNetPanelProps = {
   status: WeakNetworkHelperStatus;
   traffic: WeakNetTraffic | null;
   trafficHistory: { rx: number; tx: number }[];
+  onExportTraffic: () => void;
   installedPackages: string[];
   loadingPackages: boolean;
   busy: boolean;
@@ -78,6 +79,7 @@ export function WeakNetPanel({
   status,
   traffic,
   trafficHistory,
+  onExportTraffic,
   installedPackages,
   loadingPackages,
   busy,
@@ -226,9 +228,12 @@ export function WeakNetPanel({
                 <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>下行 · 累计 {formatBytes(traffic.rxBytes)}</div>
               </div>
             </div>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: '14px', fontSize: '11.5px', color: 'var(--fg-tertiary)' }}>
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '14px', fontSize: '11.5px', color: 'var(--fg-tertiary)' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}><span style={{ width: 12, height: 2, background: 'var(--info)' }} />上行</span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}><span style={{ width: 12, height: 2, background: 'var(--success)' }} />下行</span>
+              <button className="btn ghost sm" onClick={onExportTraffic} disabled={trafficHistory.length === 0} title="导出流量曲线为 CSV">
+                <Icon name="download" />导出 CSV
+              </button>
             </div>
           </div>
           {trafficHistory.length >= 2 && (() => {

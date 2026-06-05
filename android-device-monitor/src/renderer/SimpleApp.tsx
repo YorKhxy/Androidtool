@@ -202,8 +202,8 @@ function SimpleApp() {
   const [weakNetError, setWeakNetError] = useState<string | null>(null);
   // 实时流量（上下行速率 + 累计字节，由 tun 计数差值算出）；弱网未运行时为 null。
   const [weakNetTraffic, setWeakNetTraffic] = useState<{ rxBytes: number; txBytes: number; rxRate: number; txRate: number } | null>(null);
-  // 流量速率历史（最近若干采样），供面板画上下行曲线图。
-  const [weakNetTrafficHistory, setWeakNetTrafficHistory] = useState<{ rx: number; tx: number }[]>([]);
+  // 流量速率历史（最近若干采样，含时间戳），供面板画曲线图 + CSV 导出。
+  const [weakNetTrafficHistory, setWeakNetTrafficHistory] = useState<{ rx: number; tx: number; at: number }[]>([]);
   const weakNetTrafficPrevRef = useRef<{ rxBytes: number; txBytes: number; at: number } | null>(null);
   // 启动后 tun 未建起来，推断为「未在头显授予 VPN 权限」的 sticky 标志；运行成功即清除。
   const [weakNetNeedsAuth, setWeakNetNeedsAuth] = useState(false);
@@ -1714,7 +1714,7 @@ function SimpleApp() {
         setWeakNetTraffic({ rxBytes: result.data.rxBytes, txBytes: result.data.txBytes, rxRate, txRate });
         // 首个采样无速率（无 prev），跳过不入图，避免一条假 0；之后每次入历史，最多保留 40 点。
         if (hadPrev) {
-          setWeakNetTrafficHistory((history) => [...history, { rx: rxRate, tx: txRate }].slice(-40));
+          setWeakNetTrafficHistory((history) => [...history, { rx: rxRate, tx: txRate, at: now }].slice(-40));
         }
       } else {
         weakNetTrafficPrevRef.current = null;
@@ -1784,6 +1784,11 @@ function SimpleApp() {
 
   const handleAuthorizeWeakNet = () =>
     runWeakNetAction(() => window.electronAPI!.launchApp(selectedDevice!.id, 'com.androidtool.piconetworkhelper'), '拉起助手授权页失败');
+
+  const handleExportWeakNetTraffic = () => {
+    if (!hasElectronAPI() || weakNetTrafficHistory.length === 0) return;
+    void window.electronAPI!.exportWeakNetTraffic(weakNetTrafficHistory);
+  };
 
   const handleStartMirror = async (params: { maxSize?: number; bitRate?: string; forwardAudio?: boolean }) => {
     if (!selectedDevice || !hasElectronAPI()) return;
@@ -3334,6 +3339,7 @@ function SimpleApp() {
                     status={weakNetNeedsAuth && weakNetStatus === 'idle' ? 'need-vpn-permission' : weakNetStatus}
                     traffic={weakNetTraffic}
                     trafficHistory={weakNetTrafficHistory}
+                    onExportTraffic={handleExportWeakNetTraffic}
                     installedPackages={weakNetPackages}
                     loadingPackages={weakNetLoadingPackages}
                     busy={weakNetBusy}

@@ -420,6 +420,31 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.EXPORT_WEAKNET_TRAFFIC, async (_event, rows: { at: number; rx: number; tx: number }[]) => {
+    try {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: '导出弱网流量曲线',
+        defaultPath: `weaknet-traffic-${Date.now()}.csv`,
+        filters: [{ name: 'CSV', extensions: ['csv'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: '取消导出' };
+      }
+      const pad = (n: number, len = 2) => String(n).padStart(len, '0');
+      const header = '时间,上行速率(B/s),下行速率(B/s)';
+      const lines = rows.map((r) => {
+        const d = new Date(r.at);
+        const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        return `${ts},${Math.round(r.tx)},${Math.round(r.rx)}`;
+      });
+      // BOM 让 Excel 正确识别 UTF-8 中文表头
+      await fs.writeFile(result.filePath, '﻿' + [header, ...lines].join('\r\n'), 'utf-8');
+      return { success: true, data: result.filePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '导出弱网流量失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.LIST_DEVICE_FILES, async (_event, deviceId: string, dirPath: string) => {
     try {
       const list = await adbManager.listDeviceFiles(deviceId, dirPath);

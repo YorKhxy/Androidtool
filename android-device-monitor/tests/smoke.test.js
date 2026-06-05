@@ -972,12 +972,12 @@ describe('project smoke checks', () => {
     const channelsSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
     const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
     const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
-    const weaknetChannels = ['weaknet:install-helper', 'weaknet:start', 'weaknet:stop', 'weaknet:status', 'weaknet:traffic'];
+    const weaknetChannels = ['weaknet:install-helper', 'weaknet:start', 'weaknet:stop', 'weaknet:status', 'weaknet:traffic', 'weaknet:export-traffic'];
     for (const channel of weaknetChannels) {
       expect(channelsSource).toContain(channel);
       expect(preloadSource).toContain(channel);
     }
-    for (const method of ['installWeakNetHelper', 'startWeakNet', 'stopWeakNet', 'queryWeakNetStatus', 'queryWeakNetTraffic']) {
+    for (const method of ['installWeakNetHelper', 'startWeakNet', 'stopWeakNet', 'queryWeakNetStatus', 'queryWeakNetTraffic', 'exportWeakNetTraffic']) {
       expect(preloadSource).toContain(method);
       expect(electronApiSource).toContain(method);
     }

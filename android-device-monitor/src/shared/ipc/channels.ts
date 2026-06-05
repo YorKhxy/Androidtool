@@ -52,6 +52,7 @@ export const IPC_CHANNELS = {
   STOP_WEAKNET: 'weaknet:stop',
   QUERY_WEAKNET_STATUS: 'weaknet:status',
   QUERY_WEAKNET_TRAFFIC: 'weaknet:traffic',
+  EXPORT_WEAKNET_TRAFFIC: 'weaknet:export-traffic',
   SLEEP_DEVICE: 'adb:sleep-device',
   WAKE_DEVICE: 'adb:wake-device',
   UNLOCK_DEVICE: 'adb:unlock-device',
