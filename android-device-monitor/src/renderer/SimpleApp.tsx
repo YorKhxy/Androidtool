@@ -1930,18 +1930,24 @@ function SimpleApp() {
     const hasInstallDetail = activeDeviceIds.length > 0 || installLog.length > 0;
 
     return (
-      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <section style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* 标题行：标题在左，并发数/降级收到右侧，省掉单独一行配置 */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', flexShrink: 0 }}>
-          <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{'应用安装'}</h2>
+          <h2 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--fg-primary)' }}>{'应用安装'}</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#9ca3af' }}>并发数
-              <select value={installConcurrency} disabled={isUnifiedInstalling} onChange={(e) => setInstallConcurrency(Number(e.target.value))} style={{ padding: '5px 8px', fontSize: '13px', color: '#e5e7eb', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--fg-secondary)' }}>并发数
+              <select className="nat" value={installConcurrency} disabled={isUnifiedInstalling} onChange={(e) => setInstallConcurrency(Number(e.target.value))} style={{ cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
                 <option value={2}>2</option><option value={4}>4</option><option value={8}>8</option><option value={0}>不限</option>
               </select>
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
-              <input type="checkbox" checked={installAllowDowngrade} disabled={isUnifiedInstalling} onChange={(e) => setInstallAllowDowngrade(e.target.checked)} />允许降级覆盖
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--fg-secondary)', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
+              <span
+                onClick={(e) => { e.preventDefault(); if (!isUnifiedInstalling) setInstallAllowDowngrade(!installAllowDowngrade); }}
+                style={{ width: '16px', height: '16px', flex: 'none', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: installAllowDowngrade ? 'var(--accent)' : 'transparent', border: installAllowDowngrade ? '1.5px solid var(--accent)' : '1.5px solid var(--border-strong)' }}
+              >
+                {installAllowDowngrade && <Icon name="check" size={12} color="#fff" />}
+              </span>
+              <input type="checkbox" checked={installAllowDowngrade} disabled={isUnifiedInstalling} onChange={(e) => setInstallAllowDowngrade(e.target.checked)} style={{ display: 'none' }} />允许降级覆盖
             </label>
           </div>
         </div>
@@ -1960,10 +1966,10 @@ function SimpleApp() {
             minHeight: '90px',
             display: 'flex',
             flexDirection: 'column',
-            border: `1.5px dashed ${isApkDragOver ? '#4a90d9' : '#3a3a55'}`,
-            backgroundColor: isApkDragOver ? '#2a3550' : '#1f1f3320',
-            borderRadius: '10px',
-            padding: pendingApks.length > 0 ? '12px 14px' : '16px',
+            border: `1.5px dashed ${isApkDragOver ? 'var(--accent)' : 'var(--border-strong)'}`,
+            backgroundColor: isApkDragOver ? 'var(--accent-soft)' : 'var(--bg-elevated)',
+            borderRadius: 'var(--r-md)',
+            padding: pendingApks.length > 0 ? '12px 14px' : '24px 18px',
             cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer',
             transition: 'background-color 120ms ease, border-color 120ms ease',
           }}
@@ -1971,68 +1977,79 @@ function SimpleApp() {
           {pendingApks.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 0, overflowY: 'auto' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{`已选 ${pendingApks.length} 个安装包`}</span>
-                <span style={{ fontSize: '12px', color: '#60a5fa' }}>{'＋ 点击或拖拽继续添加'}</span>
+                <span style={{ fontSize: '12px', color: 'var(--fg-secondary)' }}>{`已选 ${pendingApks.length} 个安装包`}</span>
+                <span style={{ fontSize: '12px', color: 'var(--accent)' }}>{'＋ 点击或拖拽继续添加'}</span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {pendingApks.map((a) => (
-                  <span key={a.path} title={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '999px', fontSize: '12px', color: '#e5e7eb' }}>
+                  <span key={a.path} title={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-pill)', fontSize: '12px', color: 'var(--fg-primary)' }}>
                     {a.fileName}
-                    <button onClick={(e) => { e.stopPropagation(); removePendingApk(a.path); }} disabled={isUnifiedInstalling} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', padding: 0, fontSize: '13px' }}>✕</button>
+                    <button onClick={(e) => { e.stopPropagation(); removePendingApk(a.path); }} disabled={isUnifiedInstalling} style={{ background: 'none', border: 'none', color: 'var(--fg-tertiary)', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', padding: 0, fontSize: '13px', display: 'inline-flex', alignItems: 'center' }}><Icon name="x" size={13} /></button>
                   </span>
                 ))}
               </div>
             </div>
           ) : (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: isApkDragOver ? '#93c5fd' : '#9ca3af', pointerEvents: 'none' }}>
-              <span style={{ fontSize: '36px', lineHeight: 1, opacity: 0.85 }}>{'📦'}</span>
-              <span style={{ fontSize: '14px', fontWeight: 500 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', pointerEvents: 'none' }}>
+              <span style={{ width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-soft)', border: '1px solid var(--accent-soft-bd)', borderRadius: '12px' }}>
+                <Icon name="package-plus" size={24} color="var(--accent)" />
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: 500, color: isApkDragOver ? 'var(--accent)' : 'var(--fg-secondary)' }}>
                 {isApkDragOver ? '松开以添加 APK' : '把 .apk 拖到这里，或点击选择'}
               </span>
-              <span style={{ fontSize: '12px', color: '#6b7280' }}>{'支持多选'}</span>
+              <span style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>{'支持多选'}</span>
             </div>
           )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '13px', color: '#9ca3af' }}>目标设备（{selectedOnlineCount}/{onlineDevices.length}）</span>
-            <button onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set(onlineDevices.map((d) => d.id))); }} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#60a5fa', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>全选</button>
-            <button onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set()); }} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#9ca3af', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>清空</button>
+            <span className="seclabel" style={{ margin: 0 }}>目标设备</span>
+            <span style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>{selectedOnlineCount}/{onlineDevices.length}</span>
+            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span className="link" onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set(onlineDevices.map((d) => d.id))); }} style={{ fontSize: '12px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', opacity: isUnifiedInstalling ? 0.5 : 1 }}>全选</span>
+              <span className="link" onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set()); }} style={{ fontSize: '12px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', opacity: isUnifiedInstalling ? 0.5 : 1, color: 'var(--fg-tertiary)' }}>全部取消</span>
+            </span>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {devices.length === 0 ? (
-              <div style={{ padding: '8px', color: '#666', fontSize: '13px' }}>暂无已连接设备</div>
+              <div style={{ padding: '8px', color: 'var(--fg-tertiary)', fontSize: '13px' }}>暂无已连接设备</div>
             ) : devices.map((d) => {
               const online = d.status === 'connected';
+              const checked = installTargets.has(d.id);
               return (
-                <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', cursor: online && !isUnifiedInstalling ? 'pointer' : 'not-allowed', opacity: online ? 1 : 0.5 }}>
-                  <input type="checkbox" checked={installTargets.has(d.id)} disabled={!online || isUnifiedInstalling} onChange={() => toggleInstallTarget(d.id)} />
-                  <span style={{ fontSize: '13px', color: '#e5e7eb' }}>{getDeviceLabel(d)}</span>
-                  <span style={{ fontSize: '12px', color: d.connectionType === 'wifi' ? '#4ade80' : '#60a5fa' }}>{d.connectionType === 'wifi' ? 'WiFi' : 'USB'}</span>
-                  {!online && <span style={{ fontSize: '12px', color: '#9ca3af' }}>离线</span>}
+                <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', backgroundColor: checked ? 'var(--accent-soft)' : 'var(--bg-elevated)', border: checked ? '1px solid var(--accent-soft-bd)' : '1px solid var(--border-default)', borderRadius: 'var(--r-sm)', cursor: online && !isUnifiedInstalling ? 'pointer' : 'not-allowed', opacity: online ? 1 : 0.5 }}>
+                  <span style={{ width: '16px', height: '16px', flex: 'none', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: checked ? 'var(--accent)' : 'transparent', border: checked ? '1.5px solid var(--accent)' : '1.5px solid var(--border-strong)' }}>
+                    {checked && <Icon name="check" size={12} color="#fff" />}
+                  </span>
+                  <input type="checkbox" checked={checked} disabled={!online || isUnifiedInstalling} onChange={() => toggleInstallTarget(d.id)} style={{ display: 'none' }} />
+                  <span style={{ fontSize: '13px', color: 'var(--fg-primary)' }}>{getDeviceLabel(d)}</span>
+                  <Badge tone={d.connectionType === 'wifi' ? 'success' : 'info'} dot>{d.connectionType === 'wifi' ? 'WiFi' : 'USB'}</Badge>
+                  {!online && <span style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>离线</span>}
+                  <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>{d.id}</span>
                 </label>
               );
             })}
           </div>
         </div>
 
-        <button onClick={startUnifiedInstall} disabled={!canStart} style={{ alignSelf: 'flex-start', padding: '10px 24px', fontSize: '14px', fontWeight: 600, color: '#fff', backgroundColor: canStart ? '#4a90d9' : '#3a3a55', border: 'none', borderRadius: '8px', cursor: canStart ? 'pointer' : 'not-allowed' }}>
-          {isUnifiedInstalling ? '安装中…' : `安装到所选设备${selectedOnlineCount > 0 ? `（${selectedOnlineCount}）` : ''}`}
+        <button className="btn primary" onClick={startUnifiedInstall} disabled={!canStart} style={{ alignSelf: 'stretch', justifyContent: 'center', height: '42px' }}>
+          <Icon name="download" />
+          {isUnifiedInstalling ? '安装中…' : `安装到 ${selectedOnlineCount} 台设备`}
         </button>
         </div>
 
         {/* 安装详情（占比 7）：进度 + 错误 + 安装日志 */}
         <div style={{ flex: 7, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-            <span style={{ fontSize: '14px', fontWeight: 600, color: '#cbd5e1' }}>{'安装详情'}</span>
+            <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--fg-primary)' }}>{'安装详情'}</span>
             {installLog.length > 0 && (
-              <button onClick={() => setInstallLog([])} style={{ fontSize: '12px', color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}>{'清空日志'}</button>
+              <span className="link" onClick={() => setInstallLog([])} style={{ fontSize: '12px', color: 'var(--fg-tertiary)', cursor: 'pointer' }}>{'清空日志'}</span>
             )}
           </div>
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: '#1b1b2e', border: '1px solid #353550', borderRadius: '8px', padding: '10px' }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '10px' }}>
             {!hasInstallDetail && (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '13px' }}>{'安装进度、结果与日志会显示在这里'}</div>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-tertiary)', fontSize: '13px' }}>{'安装进度、结果与日志会显示在这里'}</div>
             )}
         {activeDeviceIds.map((deviceId) => {
           const device = devices.find((d) => d.id === deviceId);
@@ -2041,36 +2058,36 @@ function SimpleApp() {
           const hasFailed = queue.some((it) => it.status === 'failed');
           const hasSuccess = queue.some((it) => it.status === 'success');
           return (
-            <div key={deviceId} style={{ border: '1px solid #353550', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div key={deviceId} style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--bg-elevated)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{device ? getDeviceLabel(device) : deviceId}</span>
-                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{finished}/{queue.length} 完成</span>
-                {hasFailed && <button onClick={() => retryDeviceInstall(deviceId)} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#93c5fd', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>重试失败</button>}
-                {hasSuccess && <button onClick={() => clearCompletedApkInstalls(deviceId)} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#60a5fa', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', marginLeft: 'auto' }}>清空成功项</button>}
+                <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--fg-primary)' }}>{device ? getDeviceLabel(device) : deviceId}</span>
+                <span style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>{finished}/{queue.length} 完成</span>
+                {hasFailed && <button className="btn secondary sm" onClick={() => retryDeviceInstall(deviceId)} disabled={isUnifiedInstalling}>重试失败</button>}
+                {hasSuccess && <button className="btn ghost sm" onClick={() => clearCompletedApkInstalls(deviceId)} disabled={isUnifiedInstalling} style={{ marginLeft: 'auto' }}>清空成功项</button>}
               </div>
               {queue.map((item) => {
                 const statusMeta = getApkInstallStatusMeta(item.status);
                 const canRemove = item.status !== 'installing';
                 return (
-                  <div key={item.id} style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '10px' }}>
+                  <div key={item.id} style={{ backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-sm)', padding: '10px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-                      <span style={{ color: '#fff', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.fileName}>{item.fileName}</span>
+                      <span style={{ color: 'var(--fg-primary)', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.fileName}>{item.fileName}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                        <span style={{ color: statusMeta.color, backgroundColor: statusMeta.background, borderRadius: '999px', padding: '2px 8px', fontSize: '12px' }}>{statusMeta.label}</span>
-                        <button onClick={() => removeApkInstallItem(deviceId, item.id)} disabled={!canRemove} style={{ padding: '2px 8px', backgroundColor: 'transparent', border: '1px solid #454560', borderRadius: '6px', color: canRemove ? '#d1d5db' : '#6b7280', cursor: canRemove ? 'pointer' : 'not-allowed', fontSize: '12px' }}>删除</button>
+                        <span style={{ color: statusMeta.color, backgroundColor: statusMeta.background, borderRadius: 'var(--r-pill)', padding: '2px 8px', fontSize: '12px' }}>{statusMeta.label}</span>
+                        <button className="btn outline o-red sm" onClick={() => removeApkInstallItem(deviceId, item.id)} disabled={!canRemove}>删除</button>
                       </div>
                     </div>
                     <div style={{ marginTop: '8px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#9ca3af', fontSize: '11px', marginBottom: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--fg-tertiary)', fontSize: '11px', marginBottom: '4px' }}>
                         <span>{item.status === 'installing' ? '正在推送并安装' : statusMeta.label}</span>
                         <span>{`${Math.round(item.progress)}%`}</span>
                       </div>
-                      <div style={{ height: '5px', backgroundColor: '#353550', borderRadius: '999px', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${item.progress}%`, backgroundColor: item.status === 'failed' ? '#ef4444' : item.status === 'success' ? '#22c55e' : '#60a5fa', transition: 'width 260ms ease' }} />
+                      <div style={{ height: '5px', backgroundColor: 'var(--border-subtle)', borderRadius: 'var(--r-pill)', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${item.progress}%`, backgroundColor: item.status === 'failed' ? 'var(--danger)' : item.status === 'success' ? 'var(--success)' : 'var(--accent)', transition: 'width 260ms ease' }} />
                       </div>
                     </div>
                     {item.error && (
-                      <div style={{ marginTop: '6px', color: '#fca5a5', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.error}</div>
+                      <div style={{ marginTop: '6px', color: 'var(--danger)', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.error}</div>
                     )}
                   </div>
                 );
@@ -2080,10 +2097,10 @@ function SimpleApp() {
         })}
             {installLog.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{'安装日志'}</span>
-                <div style={{ fontFamily: 'Consolas, monospace', fontSize: '12px', lineHeight: 1.7, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--fg-secondary)' }}>{'安装日志'}</span>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.7, display: 'flex', flexDirection: 'column', gap: '2px' }}>
                   {installLog.map((l, i) => (
-                    <div key={i} style={{ color: l.level === 'success' ? '#86efac' : l.level === 'error' ? '#fca5a5' : '#9ca3af', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.text}</div>
+                    <div key={i} style={{ color: l.level === 'success' ? 'var(--success)' : l.level === 'error' ? 'var(--danger)' : 'var(--fg-tertiary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.text}</div>
                   ))}
                 </div>
               </div>
