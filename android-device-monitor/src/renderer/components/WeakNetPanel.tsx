@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { WeakNetworkHelperStatus, WeakNetworkProfile } from '../../shared/types';
 import { WEAK_NETWORK_PRESETS } from '../../shared/types';
+import { Icon, Badge, type BadgeTone } from './ui';
 
 type WeakNetParams = Omit<WeakNetworkProfile, 'packageName'>;
 
@@ -27,13 +28,13 @@ const DEFAULT_PARAMS: WeakNetParams = {
   downloadKbps: 0,
 };
 
-const STATUS_META: Record<WeakNetworkHelperStatus, { label: string; color: string }> = {
-  'not-installed': { label: '未安装', color: '#9ca3af' },
-  idle: { label: '已就绪', color: '#22c55e' },
-  'need-vpn-permission': { label: '待授权', color: '#eab308' },
-  running: { label: '运行中', color: '#4a90d9' },
-  stopped: { label: '已停止', color: '#9ca3af' },
-  error: { label: '异常', color: '#ef4444' },
+const STATUS_META: Record<WeakNetworkHelperStatus, { label: string; tone: BadgeTone }> = {
+  'not-installed': { label: '未安装', tone: 'neutral' },
+  idle: { label: '已就绪', tone: 'success' },
+  'need-vpn-permission': { label: '待授权', tone: 'warning' },
+  running: { label: '运行中', tone: 'info' },
+  stopped: { label: '已停止', tone: 'neutral' },
+  error: { label: '异常', tone: 'danger' },
 };
 
 const PARAM_FIELDS: { key: keyof WeakNetParams; label: string; min: number; max: number; step: number }[] = [
@@ -49,18 +50,16 @@ const clamp = (value: number, min: number, max: number): number => {
   return Math.max(min, Math.min(max, value));
 };
 
-const panelBg = '#252540';
-const border = '#353550';
-
-const buttonStyle = (variant: 'primary' | 'danger' | 'ghost', disabled: boolean): React.CSSProperties => ({
-  padding: '8px 16px',
-  backgroundColor: disabled ? '#33334d' : variant === 'primary' ? '#4a90d9' : variant === 'danger' ? '#b9433a' : '#353550',
-  border: 'none',
-  borderRadius: '6px',
-  color: disabled ? '#6b7280' : 'white',
-  cursor: disabled ? 'not-allowed' : 'pointer',
-  fontSize: '14px',
-});
+const inputStyle: React.CSSProperties = {
+  padding: '8px 10px',
+  background: 'var(--bg-input)',
+  border: '1px solid var(--border-default)',
+  borderRadius: 'var(--r-sm)',
+  color: 'var(--fg-primary)',
+  fontSize: '13px',
+  outline: 'none',
+  fontFamily: 'var(--font-mono)',
+};
 
 export function WeakNetPanel({
   deviceConnected,
@@ -98,84 +97,82 @@ export function WeakNetPanel({
 
   const packageOptions = useMemo(() => installedPackages.slice().sort((a, b) => a.localeCompare(b)), [installedPackages]);
 
+  const labelStyle: React.CSSProperties = { color: 'var(--fg-tertiary)', minWidth: '64px', fontSize: '13px' };
+
   if (!deviceConnected) {
     return (
-      <div style={{ color: '#94a3b8', padding: '24px', textAlign: 'center' }}>
+      <div style={{ color: 'var(--fg-tertiary)', padding: '24px', textAlign: 'center' }}>
         请先连接并选中一台设备，再使用弱网控制。
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '4px' }}>
       {/* 状态栏 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-        <span style={{ color: '#94a3b8' }}>助手状态</span>
-        <span style={{
-          padding: '4px 10px',
-          borderRadius: '999px',
-          backgroundColor: '#1d1d33',
-          border: `1px solid ${statusMeta.color}`,
-          color: statusMeta.color,
-          fontSize: '13px',
-        }}>
-          {statusMeta.label}
-        </span>
-        <button onClick={onRefreshStatus} disabled={busy} style={buttonStyle('ghost', busy)}>刷新状态</button>
+        <span style={labelStyle}>助手状态</span>
+        <Badge tone={statusMeta.tone} dot>{statusMeta.label}</Badge>
+        <button className="btn secondary sm" onClick={onRefreshStatus} disabled={busy}>
+          <Icon name="refresh-cw" />刷新状态
+        </button>
         {!installed && (
-          <button onClick={onInstallHelper} disabled={busy} style={buttonStyle('primary', busy)}>
-            {busy ? '安装中…' : '安装助手'}
+          <button className="btn primary sm" onClick={onInstallHelper} disabled={busy}>
+            <Icon name="download" />{busy ? '安装中…' : '安装助手'}
           </button>
         )}
-        <button onClick={onAuthorize} disabled={busy || !installed} style={buttonStyle('ghost', busy || !installed)}>
-          在设备上授权 VPN
+        <button className="btn secondary sm" onClick={onAuthorize} disabled={busy || !installed}>
+          <Icon name="shield-check" />在设备上授权 VPN
         </button>
       </div>
 
       {installed && (
-        <div style={{ color: '#6b7280', fontSize: '12px' }}>
+        <div style={{ color: 'var(--fg-tertiary)', fontSize: '12px' }}>
           首次使用需先点「在设备上授权 VPN」，并在头显内确认 VPN 连接请求；授权后再启动弱网。
         </div>
       )}
 
       {errorMessage && (
-        <div style={{ color: '#ef4444', backgroundColor: '#2a1d1d', border: '1px solid #b9433a', borderRadius: '6px', padding: '8px 12px', fontSize: '13px' }}>
+        <div style={{ color: 'var(--danger)', background: 'var(--danger-soft)', border: '1px solid var(--danger)', borderRadius: 'var(--r-sm)', padding: '8px 12px', fontSize: '13px' }}>
           {errorMessage}
         </div>
       )}
 
       {/* 目标应用 */}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-        <span style={{ color: '#94a3b8', minWidth: '64px' }}>目标应用</span>
+        <span style={labelStyle}>目标应用</span>
         <select
+          className="nat"
           value={selectedPackage}
           onChange={(event) => setSelectedPackage(event.target.value)}
           disabled={busy}
-          style={{ flex: 1, padding: '8px 12px', backgroundColor: panelBg, border: `1px solid ${border}`, borderRadius: '6px', color: 'white', fontSize: '14px', outline: 'none' }}
+          style={{ flex: 1, minWidth: 0 }}
         >
           <option value="">{loadingPackages ? '加载中…' : packageOptions.length ? '请选择目标应用包名' : '未获取到已安装应用'}</option>
           {packageOptions.map((pkg) => (
             <option key={pkg} value={pkg}>{pkg}</option>
           ))}
         </select>
-        <button onClick={onRefreshPackages} disabled={busy} style={buttonStyle('ghost', busy)}>刷新列表</button>
+        <button className="btn secondary sm" onClick={onRefreshPackages} disabled={busy}>
+          <Icon name="refresh-cw" />刷新列表
+        </button>
       </div>
 
       {/* 预设档位 */}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ color: '#94a3b8', minWidth: '64px' }}>预设档位</span>
+        <span style={labelStyle}>预设档位</span>
         {WEAK_NETWORK_PRESETS.map((preset) => (
-          <button key={preset.id} onClick={() => applyPreset(preset.values)} disabled={busy} style={buttonStyle('ghost', busy)}>
+          <button key={preset.id} className="btn outline o-blue sm" onClick={() => applyPreset(preset.values)} disabled={busy}>
             {preset.label}
           </button>
         ))}
-        <button onClick={() => applyPreset(DEFAULT_PARAMS)} disabled={busy} style={buttonStyle('ghost', busy)}>清零</button>
+        <button className="btn ghost sm" onClick={() => applyPreset(DEFAULT_PARAMS)} disabled={busy}>清零</button>
       </div>
 
       {/* 参数 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', backgroundColor: panelBg, borderRadius: '8px', padding: '16px' }}>
+      <div className="subpanel" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', padding: '16px' }}>
         {PARAM_FIELDS.map((field) => (
-          <label key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: '4px', color: '#94a3b8', fontSize: '13px' }}>
+          <label key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: '4px', color: 'var(--fg-tertiary)', fontSize: '12px' }}>
             {field.label}
             <input
               type="number"
@@ -185,24 +182,24 @@ export function WeakNetPanel({
               value={params[field.key]}
               disabled={busy}
               onChange={(event) => setParam(field, event.target.value)}
-              style={{ padding: '8px 10px', backgroundColor: '#1d1d33', border: `1px solid ${border}`, borderRadius: '6px', color: 'white', fontSize: '14px', outline: 'none' }}
+              style={inputStyle}
             />
           </label>
         ))}
       </div>
 
       {/* 起停 */}
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
         {isRunning ? (
-          <button onClick={onStop} disabled={busy} style={buttonStyle('danger', busy)}>
-            {busy ? '处理中…' : '停止弱网'}
+          <button className="btn o-red outline" onClick={onStop} disabled={busy} style={{ height: 40 }}>
+            <Icon name="square" />{busy ? '处理中…' : '停止弱网'}
           </button>
         ) : (
-          <button onClick={handleStart} disabled={!canStart} style={buttonStyle('primary', !canStart)}>
-            {busy ? '处理中…' : '启动弱网'}
+          <button className="btn primary" onClick={handleStart} disabled={!canStart} style={{ height: 40 }}>
+            <Icon name="play" />{busy ? '处理中…' : '启动弱网'}
           </button>
         )}
-        <span style={{ color: '#6b7280', fontSize: '12px' }}>
+        <span style={{ color: 'var(--fg-tertiary)', fontSize: '12px' }}>
           {isRunning ? '弱网生效中，修改参数后需先停止再重新启动。' : '弱网仅作用于所选目标应用，不影响整机网络与 ADB。'}
         </span>
       </div>
