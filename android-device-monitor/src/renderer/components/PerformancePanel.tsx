@@ -250,7 +250,7 @@ export function PerformancePanel({
               {lastExportedCapturePath && onRevealExportedCapture && (
                 <button
                   onClick={onRevealExportedCapture}
-                  title={`在资源管理器中定位最近导出的采集：${lastExportedCapturePath}`}
+                  data-tip={`在资源管理器中定位最近导出的采集：${lastExportedCapturePath}`}
                   className="btn outline o-green sm"
                 >
                   <Icon name="folder-open" />打开位置
@@ -259,14 +259,14 @@ export function PerformancePanel({
               <button
                 onClick={() => refreshCooldown.run(onRefreshCaptureSessions)}
                 disabled={refreshCooldown.cooling}
-                title="刷新采集回看列表"
+                data-tip="刷新采集回看列表"
                 className="btn secondary sm"
               >
                 <span className={refreshCooldown.cooling ? 'adm-spin' : undefined} style={{ display: 'inline-flex' }}><Icon name="refresh-cw" /></span>刷新
               </button>
               <button
                 onClick={onImportCaptureSessions}
-                title="导入采集会话（.zip）；也可把 zip 或会话文件夹拖到此区域"
+                data-tip="导入采集会话（.zip）；也可把 zip 或会话文件夹拖到此区域"
                 className="btn secondary sm"
               >
                 <Icon name="upload" />导入

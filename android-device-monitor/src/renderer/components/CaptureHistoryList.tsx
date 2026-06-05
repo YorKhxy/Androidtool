@@ -77,7 +77,7 @@ export function CaptureHistoryList({ sessions, selectedSessionId, onSelect, onRe
               ) : (
                 <div
                   onDoubleClick={(e) => { e.stopPropagation(); beginEdit(session); }}
-                  title="双击改名"
+                  data-tip="双击改名"
                   style={{ color: 'var(--fg-primary)', fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                 >
                   {session.title || defaultTitle(session)}
@@ -105,12 +105,12 @@ export function CaptureHistoryList({ sessions, selectedSessionId, onSelect, onRe
               <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => onExport(session.id)}
-                  title="导出为 zip（可拷到另一台 PC 导入查看）"
+                  data-tip="导出为 zip（可拷到另一台 PC 导入查看）"
                   className="btn ghost sm"
                 ><Icon name="download" />导出</button>
                 <button
                   onClick={() => setConfirmingDeleteId(session.id)}
-                  title="删除该采集记录"
+                  data-tip="删除该采集记录"
                   className="btn ghost sm"
                 ><Icon name="trash-2" />删除</button>
               </div>

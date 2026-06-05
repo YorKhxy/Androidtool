@@ -27,7 +27,8 @@ const selectStyle: CSSProperties = {
   border: '1px solid var(--border-default)',
   borderRadius: 'var(--r-sm)',
   color: 'var(--fg-primary)',
-  padding: '5px 8px',
+  height: '34px',
+  padding: '0 8px',
   fontSize: '12px',
 };
 
@@ -38,9 +39,9 @@ const stepButtonStyle: CSSProperties = {
   color: 'var(--fg-tertiary)',
   cursor: 'pointer',
   width: '20px',
-  height: '13px',
+  height: '17px',
   fontSize: '8px',
-  lineHeight: '13px',
+  lineHeight: '17px',
   padding: 0,
   display: 'flex',
   alignItems: 'center',
@@ -80,7 +81,7 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
             return (
             <div key={condition.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
               {/* 色块：与该指标曲线及其命中标记同色，标识「这条过滤标在哪条曲线上」。 */}
-              <span style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: METRIC_COLORS[condition.metricKey], flexShrink: 0 }} title="该参数曲线颜色" />
+              <span style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: METRIC_COLORS[condition.metricKey], flexShrink: 0 }} data-tip="该参数曲线颜色" />
               <select
                 value={condition.metricKey}
                 onChange={(e) => updateCondition(condition.id, { metricKey: e.target.value as CaptureMetricKey })}
@@ -103,7 +104,7 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
               </select>
               {/* 阈值输入 + 自绘 ▲▼ 步进（hxy0601 功能）：整体一个边框容器、输入透明无边、步进列只加分隔线，
                   颜色用设计系统 token（ui-fresh 口径）。隐藏原生上下箭头由 .adm-number 负责。 */}
-              <div style={{ display: 'flex', alignItems: 'stretch', height: '28px', borderRadius: 'var(--r-sm)', overflow: 'hidden', border: `1px solid ${thresholdEmpty ? 'var(--danger)' : 'var(--border-default)'}`, backgroundColor: 'var(--bg-input)' }}>
+              <div style={{ display: 'flex', alignItems: 'stretch', height: '34px', borderRadius: 'var(--r-sm)', overflow: 'hidden', border: `1px solid ${thresholdEmpty ? 'var(--danger)' : 'var(--border-default)'}`, backgroundColor: 'var(--bg-input)' }}>
                 <input
                   type="number"
                   inputMode="decimal"

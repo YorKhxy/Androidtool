@@ -266,7 +266,7 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
               type="button"
               onClick={handleCaptureFrame}
               disabled={capturingFrame}
-              title="把当前画面存为截图（自动归档到会话）"
+              data-tip="把当前画面存为截图（自动归档到会话）"
               className="btn secondary sm"
               style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
             ><Icon name="image" />{capturingFrame ? '截图中…' : '截图'}</button>

@@ -421,7 +421,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         <button
           onClick={() => loadDir(currentPath)}
           disabled={loading}
-          title="重新加载当前目录"
+          data-tip="重新加载当前目录"
           className="btn sm secondary"
         >
           <Icon name="refresh-cw" size={14} />
@@ -519,7 +519,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
             <button
               onClick={() => handleResumeBatch(batch)}
               disabled={busy || transferBusy}
-              title={transferBusy ? '有传输进行中，稍候再继续' : ''}
+              data-tip={transferBusy ? '有传输进行中，稍候再继续' : ''}
               className="btn sm primary"
               style={{ flexShrink: 0 }}
             >继续</button>
@@ -531,7 +531,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       {upload && (
         <div
           onClick={() => { if (uploadDir) loadDir(uploadDir); }}
-          title={uploadDir ? `点击前往：${uploadDir}` : undefined}
+          data-tip={uploadDir ? `点击前往：${uploadDir}` : undefined}
           className="subpanel"
           style={{ marginBottom: '12px', padding: '10px 12px', cursor: uploadDir ? 'pointer' : 'default' }}
         >
@@ -543,7 +543,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
             <span style={{ fontFamily: 'var(--font-mono)' }}>{upload.percent}%</span>
           </div>
           {uploadDir && (
-            <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }} title={uploadDir}>
+            <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }} data-tip={uploadDir}>
               上传到：{uploadDir}　<span style={{ color: 'var(--accent)' }}>（点击前往）</span>
             </div>
           )}
@@ -619,7 +619,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
                 <button
                   onClick={deleteSelected}
                   disabled={transferBusy || batchDeleting}
-                  title={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
+                  data-tip={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
                   className="btn sm primary"
                   style={{ whiteSpace: 'nowrap', backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}
                 >{batchDeleting ? '删除中…' : `确认删除 ${selectedPaths.size} 项`}</button>
@@ -633,7 +633,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
               <button
                 onClick={() => setConfirmBatchDelete(true)}
                 disabled={transferBusy || batchDeleting}
-                title={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
+                data-tip={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
                 className="btn sm outline o-red"
                 style={{ whiteSpace: 'nowrap' }}
               >
@@ -648,7 +648,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       {pull && (
         <div
           onClick={() => { if (pullDir) loadDir(pullDir); }}
-          title={pullDir ? `点击前往：${pullDir}` : undefined}
+          data-tip={pullDir ? `点击前往：${pullDir}` : undefined}
           className="subpanel"
           style={{ marginBottom: '12px', padding: '10px 12px', cursor: pullDir ? 'pointer' : 'default' }}
         >
@@ -659,7 +659,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
             <span style={{ fontFamily: 'var(--font-mono)' }}>{Math.round(((pull.index + (pull.status === 'done' ? 1 : 0)) / pull.total) * 100)}%</span>
           </div>
           {pullDir && (
-            <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }} title={pullDir}>
+            <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }} data-tip={pullDir}>
               来自：{pullDir}　<span style={{ color: 'var(--success)' }}>（点击前往）</span>
             </div>
           )}
@@ -674,7 +674,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'grid', gridTemplateColumns: '32px 1fr 80px 115px 200px', backgroundColor: 'var(--bg-elevated)', color: 'var(--fg-tertiary)', fontSize: '12px', fontWeight: 700, padding: '8px 12px', alignItems: 'center', borderBottom: '1px solid var(--border-subtle)' }}>
           <input
             type="checkbox"
-            title="全选/取消当前列表中的文件"
+            data-tip="全选/取消当前列表中的文件"
             checked={visibleEntries.filter((e) => !e.isDir).length > 0 && visibleEntries.filter((e) => !e.isDir).every((e) => selectedPaths.has(e.path))}
             onChange={(e) => {
               const fileEntries = visibleEntries.filter((en) => !en.isDir);
@@ -738,7 +738,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                 }}
-                title={entry.name}
+                data-tip={entry.name}
               >
                 <Icon
                   name={entry.isDir ? 'folder' : entry.isSymlink ? 'link' : 'file'}
@@ -753,7 +753,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
                 <button
                   onClick={() => downloadOne(entry)}
                   disabled={transferBusy}
-                  title={uploadingThisEntry ? '该文件正在上传，暂不可下载' : transferBusy ? '传输进行中，暂不可下载' : undefined}
+                  data-tip={uploadingThisEntry ? '该文件正在上传，暂不可下载' : transferBusy ? '传输进行中，暂不可下载' : undefined}
                   className="btn sm outline o-green"
                 >
                   {downloadingThisEntry ? '下载中…' : uploadingThisEntry ? '上传中…' : '下载'}
@@ -775,7 +775,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
                   <button
                     onClick={() => setConfirmDeletePath(entry.path)}
                     disabled={deletingPath === entry.path || transferBusy}
-                    title={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
+                    data-tip={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
                     className="btn sm outline o-red"
                   >{deletingPath === entry.path ? '删除中…' : '删除'}</button>
                 )}

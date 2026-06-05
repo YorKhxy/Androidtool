@@ -5,6 +5,7 @@ import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
 import { FilesPanel } from './components/FilesPanel';
 import { Icon, AppAvatar, Badge } from './components/ui';
+import { GlobalTooltip } from './components/GlobalTooltip';
 import { ElectronResult, hasElectronAPI } from './lib/electronApi';
 import {
   buildHistoryEntryFromDevice,
@@ -140,7 +141,7 @@ const renderBatteryBadge = (device: DeviceInfo) => {
   const batteryFill = batteryLevel === undefined ? 0 : batteryLevel;
 
   return (
-    <div title={batteryLevel === undefined ? '电量未知' : `电量 ${batteryLevel}%`} style={{ display: 'flex', alignItems: 'center', gap: '5px', color: batteryColor, fontSize: '12px', lineHeight: 1 }}>
+    <div data-tip={batteryLevel === undefined ? '电量未知' : `电量 ${batteryLevel}%`} style={{ display: 'flex', alignItems: 'center', gap: '5px', color: batteryColor, fontSize: '12px', lineHeight: 1 }}>
       <div style={{ width: '22px', height: '11px', border: `1px solid ${batteryColor}`, borderRadius: '3px', padding: '1px', position: 'relative', boxSizing: 'border-box' }}>
         <div style={{ width: `${batteryFill}%`, height: '100%', backgroundColor: batteryColor, borderRadius: '1px' }} />
         <div style={{ position: 'absolute', right: '-4px', top: '3px', width: '2px', height: '5px', backgroundColor: batteryColor, borderRadius: '0 2px 2px 0' }} />
@@ -160,7 +161,7 @@ const renderScreenStateBadge = (device: DeviceInfo) => {
         ? { label: '息屏', color: '#9ca3af', dot: '#6b7280', glow: false }
         : { label: '未知', color: '#9ca3af', dot: '#6b7280', glow: false };
   return (
-    <span title={`屏幕状态：${meta.label}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: meta.color, lineHeight: 1 }}>
+    <span data-tip={`屏幕状态：${meta.label}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: meta.color, lineHeight: 1 }}>
       <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: meta.dot, boxShadow: meta.glow ? '0 0 5px #22c55e' : 'none', flexShrink: 0 }} />
       {meta.label}
     </span>
@@ -2136,7 +2137,7 @@ function SimpleApp() {
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {pendingApks.map((a) => (
-                  <span key={a.path} title={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-pill)', fontSize: '12px', color: 'var(--fg-primary)' }}>
+                  <span key={a.path} data-tip={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-pill)', fontSize: '12px', color: 'var(--fg-primary)' }}>
                     {a.fileName}
                     <button onClick={(e) => { e.stopPropagation(); removePendingApk(a.path); }} disabled={isUnifiedInstalling} style={{ background: 'none', border: 'none', color: 'var(--fg-tertiary)', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', padding: 0, fontSize: '13px', display: 'inline-flex', alignItems: 'center' }}><Icon name="x" size={13} /></button>
                   </span>
@@ -2165,30 +2166,30 @@ function SimpleApp() {
               <span className="link" onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set()); }} style={{ fontSize: '12px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', opacity: isUnifiedInstalling ? 0.5 : 1, color: 'var(--fg-tertiary)' }}>全部取消</span>
             </span>
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          {/* 目标设备：一行 3 个的紧凑网格（去掉占地方的设备 id，名字超长省略号），用 title 兜底看全名/IP。 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
             {devices.length === 0 ? (
-              <div style={{ padding: '8px', color: 'var(--fg-tertiary)', fontSize: '13px' }}>暂无已连接设备</div>
+              <div style={{ gridColumn: '1 / -1', padding: '8px', color: 'var(--fg-tertiary)', fontSize: '13px' }}>暂无已连接设备</div>
             ) : devices.map((d) => {
               const online = d.status === 'connected';
               const checked = installTargets.has(d.id);
               return (
-                <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', backgroundColor: checked ? 'var(--accent-soft)' : 'var(--bg-elevated)', border: checked ? '1px solid var(--accent-soft-bd)' : '1px solid var(--border-default)', borderRadius: 'var(--r-sm)', cursor: online && !isUnifiedInstalling ? 'pointer' : 'not-allowed', opacity: online ? 1 : 0.5 }}>
-                  <span style={{ width: '16px', height: '16px', flex: 'none', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: checked ? 'var(--accent)' : 'transparent', border: checked ? '1.5px solid var(--accent)' : '1.5px solid var(--border-strong)' }}>
-                    {checked && <Icon name="check" size={12} color="#fff" />}
+                <label key={d.id} data-tip={`${getDeviceLabel(d)} · ${d.id}`} style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, padding: '7px 9px', backgroundColor: checked ? 'var(--accent-soft)' : 'var(--bg-elevated)', border: checked ? '1px solid var(--accent-soft-bd)' : '1px solid var(--border-default)', borderRadius: 'var(--r-sm)', cursor: online && !isUnifiedInstalling ? 'pointer' : 'not-allowed', opacity: online ? 1 : 0.5 }}>
+                  <span style={{ width: '15px', height: '15px', flex: 'none', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: checked ? 'var(--accent)' : 'transparent', border: checked ? '1.5px solid var(--accent)' : '1.5px solid var(--border-strong)' }}>
+                    {checked && <Icon name="check" size={11} color="#fff" />}
                   </span>
                   <input type="checkbox" checked={checked} disabled={!online || isUnifiedInstalling} onChange={() => toggleInstallTarget(d.id)} style={{ display: 'none' }} />
-                  <span style={{ fontSize: '13px', color: 'var(--fg-primary)' }}>{getDeviceLabel(d)}</span>
+                  <span style={{ fontSize: '12.5px', color: 'var(--fg-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>{getDeviceLabel(d)}</span>
                   <Badge tone={d.connectionType === 'wifi' ? 'success' : 'info'} dot>{d.connectionType === 'wifi' ? 'WiFi' : 'USB'}</Badge>
-                  {!online && <span style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>离线</span>}
-                  <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>{d.id}</span>
+                  {!online && <span style={{ flex: 'none', fontSize: '11px', color: 'var(--fg-tertiary)' }}>离线</span>}
                 </label>
               );
             })}
           </div>
         </div>
 
-        <button className="btn primary" onClick={startUnifiedInstall} disabled={!canStart} style={{ alignSelf: 'stretch', justifyContent: 'center', height: '42px' }}>
-          <Icon name="download" />
+        <button className="btn primary" onClick={startUnifiedInstall} disabled={!canStart} style={{ width: '100%', justifyContent: 'center', gap: '8px', height: '46px', fontSize: '14px', fontWeight: 600 }}>
+          <Icon name="download" size={18} />
           {isUnifiedInstalling ? '安装中…' : `安装到 ${selectedOnlineCount} 台设备`}
         </button>
         </div>
@@ -2225,7 +2226,7 @@ function SimpleApp() {
                 return (
                   <div key={item.id} style={{ backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-sm)', padding: '10px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-                      <span style={{ color: 'var(--fg-primary)', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.fileName}>{item.fileName}</span>
+                      <span style={{ color: 'var(--fg-primary)', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} data-tip={item.fileName}>{item.fileName}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                         <span style={{ color: statusMeta.color, backgroundColor: statusMeta.background, borderRadius: 'var(--r-pill)', padding: '2px 8px', fontSize: '12px' }}>{statusMeta.label}</span>
                         <button className="btn outline o-red sm" onClick={() => removeApkInstallItem(deviceId, item.id)} disabled={!canRemove}>删除</button>
@@ -2484,9 +2485,9 @@ function SimpleApp() {
           }}
           className="btn sm secondary"
         >{'\u6e05\u7a7a'}</button>
-        <button onClick={exportVisibleLogs} title={'导出当前可见 / 筛选后的日志（受等级、搜索与显示上限影响）'} className="btn sm secondary">{'\u5bfc\u51fa'}</button>
-        <button onClick={exportFullLogs} title={'从监控第一行到当前的完整原始日志（全等级，不受 2 万条上限与筛选影响）'} className="btn sm secondary">{'\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
-        <button onClick={exportFullLogsByPackage} title={'\u5728\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\u4e0a\uff0c\u7528\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u7684\u5305\u540d\u5173\u8054\u8fc7\u6ee4\uff0c\u5207\u51fa\u4e00\u4efd\u5b8c\u6574\u5b50\u96c6\uff08\u591a\u884c\u5806\u6808\u6574\u6761\u4fdd\u7559\uff0c\u4e0d\u91cd\u65b0\u91c7\u96c6\uff09'} className="btn sm secondary">{'\u6309\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
+        <button onClick={exportVisibleLogs} data-tip={'导出当前可见 / 筛选后的日志（受等级、搜索与显示上限影响）'} className="btn sm secondary">{'\u5bfc\u51fa'}</button>
+        <button onClick={exportFullLogs} data-tip={'从监控第一行到当前的完整原始日志（全等级，不受 2 万条上限与筛选影响）'} className="btn sm secondary">{'\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
+        <button onClick={exportFullLogsByPackage} data-tip={'\u5728\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\u4e0a\uff0c\u7528\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u7684\u5305\u540d\u5173\u8054\u8fc7\u6ee4\uff0c\u5207\u51fa\u4e00\u4efd\u5b8c\u6574\u5b50\u96c6\uff08\u591a\u884c\u5806\u6808\u6574\u6761\u4fdd\u7559\uff0c\u4e0d\u91cd\u65b0\u91c7\u96c6\uff09'} className="btn sm secondary">{'\u6309\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
         {lastExportedLogPath && (
           <button
             onClick={async () => {
@@ -2494,7 +2495,7 @@ function SimpleApp() {
               const r = await window.electronAPI!.showItemInFolder(lastExportedLogPath);
               if (!r.success && r.error) setError(r.error);
             }}
-            title={`\u6253\u5f00\u6700\u8fd1\u5bfc\u51fa\u7684\u65e5\u5fd7\u6240\u5728\u6587\u4ef6\u5939\uff1a${lastExportedLogPath}`}
+            data-tip={`\u6253\u5f00\u6700\u8fd1\u5bfc\u51fa\u7684\u65e5\u5fd7\u6240\u5728\u6587\u4ef6\u5939\uff1a${lastExportedLogPath}`}
             className="btn sm secondary"
           >{'\ud83d\udcc2 \u6253\u5f00\u4f4d\u7f6e'}</button>
         )}
@@ -2512,8 +2513,8 @@ function SimpleApp() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '140px 150px 150px minmax(220px, 1fr) 90px 90px', gap: '8px', padding: '10px', background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)' }}>
-        <select className="nat" value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevelFilter)}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'center', padding: '12px', background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)' }}>
+        <select className="nat" style={{ width: '130px', flexShrink: 0 }} value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevelFilter)}>
           <option value="all">All levels</option>
           <option value="V">Verbose+</option>
           <option value="D">Debug+</option>
@@ -2528,7 +2529,7 @@ function SimpleApp() {
           const kw = logPackageFilter.trim().toLowerCase();
           const matched = (kw ? installedPackages.filter((p) => p.toLowerCase().includes(kw)) : installedPackages).slice(0, 80);
           return (
-            <div style={{ position: 'relative' }}>
+            <div style={{ position: 'relative', width: '230px', flexShrink: 0 }}>
               <div className="field" style={{ width: '100%' }}>
                 <input
                   value={logPackageFilter}
@@ -2541,7 +2542,7 @@ function SimpleApp() {
                 />
               </div>
               {showLogPackageDropdown && (
-                <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, maxHeight: '260px', overflowY: 'auto', background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-md)', boxShadow: 'var(--sh-pop)', minWidth: '260px' }}>
+                <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, maxHeight: '260px', overflowY: 'auto', background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-md)', boxShadow: 'var(--sh-pop)' }}>
                   {installedPackagesLoading && installedPackages.length === 0 ? (
                     <div style={{ padding: '8px 10px', color: 'var(--fg-tertiary)', fontSize: '12px' }}>\u52a0\u8f7d\u5df2\u88c5\u5e94\u7528\u4e2d\u2026</div>
                   ) : matched.length === 0 ? (
@@ -2555,7 +2556,7 @@ function SimpleApp() {
                         onMouseDown={(e) => { e.preventDefault(); setLogPackageFilter(pkg); setShowLogPackageDropdown(false); }}
                         onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-hover)'; }}
                         onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                        title={pkg}
+                        data-tip={pkg}
                         style={{ padding: '7px 10px', cursor: 'pointer', color: 'var(--fg-primary)', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                       >{pkg}</div>
                     ))
@@ -2565,8 +2566,8 @@ function SimpleApp() {
             </div>
           );
         })()}
-        <div className="field"><input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} /></div>
-        <div style={{ position: 'relative' }}>
+        <div className="field" style={{ width: '160px', flexShrink: 0 }}><input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} /></div>
+        <div style={{ position: 'relative', flex: '1 1 260px', minWidth: '220px' }}>
           <div className="field" style={{ width: '100%' }}>
           <input
             type="text"
@@ -2598,7 +2599,7 @@ function SimpleApp() {
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{keyword}</span>
                   <span
                     onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeOneSearchHistory(keyword); }}
-                    title={'\u4ece\u5386\u53f2\u79fb\u9664'}
+                    data-tip={'\u4ece\u5386\u53f2\u79fb\u9664'}
                     style={{ flexShrink: 0, color: 'var(--fg-tertiary)', cursor: 'pointer', padding: '0 4px', fontSize: '14px', lineHeight: 1 }}
                   >{'\u00d7'}</span>
                 </div>
@@ -2606,8 +2607,8 @@ function SimpleApp() {
             </div>
           )}
         </div>
-        <div className="field"><input value={logPidFilter} onChange={(e) => setLogPidFilter(e.target.value.replace(/\D/g, ''))} placeholder={'\u8fdb\u7a0b PID'} /></div>
-        <button onClick={() => setUseRegexSearch(!useRegexSearch)} className={useRegexSearch ? 'btn sm outline o-blue' : 'btn sm secondary'}>{'\u6b63\u5219'}</button>
+        <div className="field" style={{ width: '140px', flexShrink: 0 }}><input value={logPidFilter} onChange={(e) => setLogPidFilter(e.target.value.replace(/\D/g, ''))} placeholder={'\u8fdb\u7a0b PID'} /></div>
+        <button onClick={() => setUseRegexSearch(!useRegexSearch)} className={useRegexSearch ? 'btn sm outline o-blue' : 'btn sm secondary'} style={{ flexShrink: 0 }}>{'\u6b63\u5219'}</button>
       </div>
 
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', color: 'var(--fg-tertiary)', fontSize: '12px' }}>
@@ -2700,6 +2701,8 @@ function SimpleApp() {
 
   return (
     <div className="win" style={{ width: '100%', color: 'var(--fg-secondary)' }}>
+      {/* 全局悬停提示层：data-tip 气泡挂到 body，绕开 overflow 裁剪，完整显示。 */}
+      <GlobalTooltip />
       {/* 全局深色滚动条：index.css 未被入口引入，这里就地注入，和工具深色主题统一。
           仅用 webkit 规则——Electron 是 Chromium 内核，加 scrollbar-width 反而会接管并禁用自定义样式。 */}
       <style>{`
@@ -2758,8 +2761,8 @@ function SimpleApp() {
                 </div>
               )}
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                <button onClick={() => setUpdateDismissed(true)} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>{'稍后'}</button>
-                <button onClick={handleDownloadUpdate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: '#16a34a', color: '#fff', cursor: 'pointer' }}>{'立即更新'}</button>
+                <button onClick={() => setUpdateDismissed(true)} className="btn secondary sm">{'稍后'}</button>
+                <button onClick={handleDownloadUpdate} className="btn sm" style={{ background: 'var(--success)', color: '#fff', borderColor: 'var(--success)' }}>{'立即更新'}</button>
               </div>
             </div>
           )}
@@ -2781,55 +2784,58 @@ function SimpleApp() {
                 </div>
               )}
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                <button onClick={() => setUpdateDismissed(true)} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>{'稍后'}</button>
-                <button onClick={handleInstallUpdate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '6px', border: 'none', backgroundColor: '#16a34a', color: '#fff', cursor: 'pointer' }}>{'立即安装并重启'}</button>
+                <button onClick={() => setUpdateDismissed(true)} className="btn secondary sm">{'稍后'}</button>
+                <button onClick={handleInstallUpdate} className="btn sm" style={{ background: 'var(--success)', color: '#fff', borderColor: 'var(--success)' }}>{'立即安装并重启'}</button>
               </div>
             </div>
           )}
           {updateStatus.state === 'error' && (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
               <span style={{ flex: 1, fontSize: '12px', color: '#fca5a5', wordBreak: 'break-all' }}>{`检查更新失败：${updateStatus.error ?? ''}`}</span>
-              <button onClick={() => setUpdateDismissed(true)} style={{ flexShrink: 0, padding: '2px 8px', fontSize: '12px', borderRadius: '4px', border: '1px solid #4b5563', backgroundColor: 'transparent', color: '#d1d5db', cursor: 'pointer' }}>{'知道了'}</button>
+              <button onClick={() => setUpdateDismissed(true)} className="btn secondary sm" style={{ flexShrink: 0 }}>{'知道了'}</button>
             </div>
           )}
         </div>
       )}
-      <header className="appbar" style={{ justifyContent: 'space-between' }}>
+      <header className="appbar" style={{ justifyContent: 'space-between', paddingLeft: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* \u5207\u6362\u6309\u94ae\u653e\u8fdb 56px \u5bb9\u5668\u5c45\u4e2d\uff1a\u4e0e\u6298\u53e0\u540e\u7684\u8bbe\u5907\u5757\u7ad6\u6761\u5bf9\u9f50\uff0c\u4e14\u6309\u94ae\u5c3a\u5bf8(40\u00d740)\u4e0e\u8bbe\u5907\u5757\u4e00\u81f4 */}
+        <div style={{ width: '56px', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
         <button
           onClick={() => setSidebarCollapsed((v) => !v)}
-          title={sidebarCollapsed ? '\u5c55\u5f00\u8bbe\u5907\u680f' : '\u6536\u8d77\u8bbe\u5907\u680f'}
+          data-tip={sidebarCollapsed ? '\u5c55\u5f00\u8bbe\u5907\u680f' : '\u6536\u8d77\u8bbe\u5907\u680f'}
           aria-label={sidebarCollapsed ? '\u5c55\u5f00\u8bbe\u5907\u680f' : '\u6536\u8d77\u8bbe\u5907\u680f'}
-          className="btn iconbtn sm"
-          style={{ flexShrink: 0 }}
+          className="btn iconbtn"
+          style={{ width: '40px', height: '40px', flexShrink: 0, fontSize: '18px', lineHeight: 1 }}
         >{sidebarCollapsed ? '\u00bb' : '\u00ab'}</button>
+        </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
           <h1 className="title" style={{ margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
           {appVersion && (
             <button
               onClick={openReleaseNotes}
-              title={'\u67e5\u770b\u672c\u7248\u672c\u66f4\u65b0\u65e5\u5fd7'}
+              data-tip={'\u67e5\u770b\u672c\u7248\u672c\u66f4\u65b0\u65e5\u5fd7'}
               style={{ fontSize: '12px', color: '#93c5fd', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline dotted' }}
             >v{appVersion}</button>
           )}
           <button
             onClick={handleCheckUpdate}
             disabled={checkResult === '\u68c0\u67e5\u4e2d\u2026'}
-            title={'\u5411\u66f4\u65b0\u670d\u52a1\u5668\u68c0\u67e5\u662f\u5426\u6709\u65b0\u7248\u672c'}
+            data-tip={'\u5411\u66f4\u65b0\u670d\u52a1\u5668\u68c0\u67e5\u662f\u5426\u6709\u65b0\u7248\u672c'}
             style={{ fontSize: '12px', color: '#cbd5e1', background: 'none', border: '1px solid #454560', borderRadius: '6px', cursor: checkResult === '\u68c0\u67e5\u4e2d\u2026' ? 'not-allowed' : 'pointer', padding: '2px 8px', opacity: checkResult === '\u68c0\u67e5\u4e2d\u2026' ? 0.6 : 1 }}
           >{'\u68c0\u67e5\u66f4\u65b0'}</button>
           {/* \u542f\u52a8\u65f6\u9759\u9ed8\u68c0\u67e5\u5230\u65b0\u7248 \u2192 \u5728\u6309\u94ae\u65c1\u5e38\u9a7b\u9192\u76ee\u63d0\u793a\uff08\u4e0d\u81ea\u52a8\u66f4\u65b0\uff0c\u7531\u7528\u6237\u70b9\u66f4\u65b0\uff09 */}
           {updateStatus?.state === 'available' && (
             <button
               onClick={() => setUpdateDismissed(false)}
-              title={'\u70b9\u67e5\u770b\u5e76\u66f4\u65b0'}
+              data-tip={'\u70b9\u67e5\u770b\u5e76\u66f4\u65b0'}
               style={{ fontSize: '12px', fontWeight: 700, color: '#fff', backgroundColor: '#dc2626', border: 'none', borderRadius: '6px', cursor: 'pointer', padding: '2px 8px' }}
             >{`\u6709\u65b0\u7248\u672c${updateStatus.version ? ` v${updateStatus.version}` : ''}`}</button>
           )}
           {updateStatus?.state === 'downloaded' && (
             <button
               onClick={() => setUpdateDismissed(false)}
-              title={'\u70b9\u7acb\u5373\u5b89\u88c5\u5e76\u91cd\u542f'}
+              data-tip={'\u70b9\u7acb\u5373\u5b89\u88c5\u5e76\u91cd\u542f'}
               style={{ fontSize: '12px', fontWeight: 700, color: '#fff', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', cursor: 'pointer', padding: '2px 8px' }}
             >{'\u65b0\u7248\u5df2\u5c31\u7eea'}</button>
           )}
@@ -2868,7 +2874,7 @@ function SimpleApp() {
                 <button
                   key={device.id}
                   onClick={() => setSelectedDevice(device)}
-                  title={`${getDeviceLabel(device)} · ${isWifi ? 'WiFi' : 'USB'} · ${statusMeta.label}${device.serialNo ? ` · SN ${device.serialNo}` : ''}`}
+                  data-tip={`${getDeviceLabel(device)} · ${isWifi ? 'WiFi' : 'USB'} · ${statusMeta.label}${device.serialNo ? ` · SN ${device.serialNo}` : ''}`}
                   style={{
                     position: 'relative',
                     width: '40px',
@@ -3011,17 +3017,17 @@ function SimpleApp() {
                       {([
                         { key: 'sleep', icon: 'moon', label: '息屏', busy: '息屏中…', onClick: () => handleSleepDevice(device) },
                         { key: 'wake', icon: 'sun', label: '唤醒', busy: '唤醒中…', onClick: () => handleWakeDevice(device) },
-                        { key: 'unlock', icon: 'lock-open', label: '解锁', busy: '解锁中…', onClick: () => handleUnlockDevice(device), title: '唤醒并上滑解锁；有 PIN/密码/手势的设备请在设备上手动输入' },
+                        { key: 'unlock', icon: 'unlock', label: '解锁', busy: '解锁中…', onClick: () => handleUnlockDevice(device), title: '唤醒并上滑解锁；有 PIN/密码/手势的设备请在设备上手动输入' },
                         { key: 'reboot', icon: 'rotate-cw', label: '重启', busy: '重启中…', onClick: () => { setConfirmDisconnectId(null); setConfirmRebootId(device.id); } },
                       ] as const).map((act, idx) => (
                         <button
                           key={act.key}
                           onClick={(e) => { e.stopPropagation(); setSelectedDevice(device); act.onClick(); }}
                           disabled={Boolean(busyDeviceAction)}
-                          title={'title' in act ? act.title : undefined}
+                          data-tip={'title' in act ? act.title : undefined}
                           style={{
                             flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                            padding: '6px 4px', background: 'transparent', border: 'none',
+                            height: '34px', padding: '0 4px', background: 'transparent', border: 'none',
                             borderLeft: idx === 0 ? 'none' : '1px solid var(--border-default)',
                             color: 'var(--fg-secondary)', fontSize: '12px',
                             cursor: busyDeviceAction ? 'not-allowed' : 'pointer', opacity: busyDeviceAction ? 0.6 : 1,
@@ -3039,7 +3045,7 @@ function SimpleApp() {
                   <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
                     <button
                       onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setFileBrowserDevice(device); }}
-                      title="浏览设备文件、下载到电脑、上传文件到设备"
+                      data-tip="浏览设备文件、下载到电脑、上传文件到设备"
                       className="btn secondary sm" style={{ flex: 1, justifyContent: 'center' }}
                     ><Icon name="folder" color="var(--gold)" />文件管理</button>
                     {confirmDisconnectId === device.id ? (
@@ -3056,7 +3062,7 @@ function SimpleApp() {
                     ) : (
                       <button
                         onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); setConfirmDisconnectId(device.id); }}
-                        title="断开设备连接"
+                        data-tip="断开设备连接"
                         className="btn sm iconbtn"
                         style={{ color: 'var(--danger)' }}
                         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--danger-soft)'; }}
@@ -3154,7 +3160,7 @@ function SimpleApp() {
                   return (
                     <div key={item.serialNo} style={{ padding: '12px 14px', background: 'var(--bg-panel)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-default)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ color: 'var(--fg-primary)', fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayName}>{displayName}</span>
+                        <span style={{ color: 'var(--fg-primary)', fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} data-tip={displayName}>{displayName}</span>
                         <span style={{ flexShrink: 0, fontSize: '11px', color: 'var(--fg-tertiary)', border: '1px solid var(--border-default)', padding: '2px 8px', borderRadius: 'var(--r-pill)' }}>{'\u672a\u8fde\u63a5'}</span>
                       </div>
                       <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--fg-tertiary)', lineHeight: 1.7 }}>
@@ -3188,7 +3194,7 @@ function SimpleApp() {
                           <button
                             onClick={() => handleQuickConnectHistory(item)}
                             disabled={connecting}
-                            title={'\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5'}
+                            data-tip={'\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5'}
                             className="btn primary sm"
                           >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : '\u5feb\u901f\u8fde\u63a5'}</button>
                         )}
@@ -3212,7 +3218,7 @@ function SimpleApp() {
                         ) : (
                           <button
                             onClick={() => setConfirmRemoveSerial(item.serialNo)}
-                            title={'\u4ece\u5386\u53f2\u5217\u8868\u79fb\u9664\u8be5\u8bbe\u5907\uff08\u4e0d\u5f71\u54cd\u5f53\u524d\u5df2\u5efa\u7acb\u7684\u8fde\u63a5\uff09'}
+                            data-tip={'\u4ece\u5386\u53f2\u5217\u8868\u79fb\u9664\u8be5\u8bbe\u5907\uff08\u4e0d\u5f71\u54cd\u5f53\u524d\u5df2\u5efa\u7acb\u7684\u8fde\u63a5\uff09'}
                             className="btn outline o-red sm"
                           >{'\u79fb\u9664'}</button>
                         )}
@@ -3371,7 +3377,7 @@ function SimpleApp() {
                                 <AppAvatar name={pkg} size={32} />
                                 <span style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '12.5px', color: 'var(--fg-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pkg}</span>
                                 {deviceNew.has(pkg) && (
-                                  <span title={'本次新安装'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', height: 20, padding: '0 7px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--info)', background: 'var(--info-soft)', border: '1px solid var(--accent-soft-bd)', borderRadius: 'var(--r-pill)' }}>{'NEW'}</span>
+                                  <span data-tip={'本次新安装'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', height: 20, padding: '0 7px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--info)', background: 'var(--info-soft)', border: '1px solid var(--accent-soft-bd)', borderRadius: 'var(--r-pill)' }}>{'NEW'}</span>
                                 )}
                                 {isRunning && <Badge tone="success" dot>运行中</Badge>}
                                 <div style={{ flexShrink: 0, display: 'flex', gap: '6px' }}>
@@ -3379,7 +3385,7 @@ function SimpleApp() {
                                     className="btn sm outline o-green"
                                     onClick={() => handleLaunchApp(pkg)}
                                     disabled={isBusy || isRunning}
-                                    title={isRunning ? '应用已在运行，无需重复启动' : undefined}
+                                    data-tip={isRunning ? '应用已在运行，无需重复启动' : undefined}
                                   >
                                     {isBusy && busyAction === 'launch' ? '启动中…' : '启动'}
                                   </button>

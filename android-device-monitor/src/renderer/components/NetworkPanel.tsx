@@ -138,7 +138,7 @@ export function NetworkPanel({
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
                       }}
-                      title={request.url}
+                      data-tip={request.url}
                     >
                       {request.url}
                     </td>
