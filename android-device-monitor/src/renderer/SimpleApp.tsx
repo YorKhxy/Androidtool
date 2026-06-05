@@ -4,6 +4,7 @@ import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
 import { FilesPanel } from './components/FilesPanel';
+import { Icon, AppAvatar, Badge } from './components/ui';
 import { ElectronResult, hasElectronAPI } from './lib/electronApi';
 import {
   buildHistoryEntryFromDevice,
@@ -2058,18 +2059,24 @@ function SimpleApp() {
     const hasInstallDetail = activeDeviceIds.length > 0 || installLog.length > 0;
 
     return (
-      <section style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <section style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* 标题行：标题在左，并发数/降级收到右侧，省掉单独一行配置 */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', flexShrink: 0 }}>
-          <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{'应用安装'}</h2>
+          <h2 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--fg-primary)' }}>{'应用安装'}</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#9ca3af' }}>并发数
-              <select value={installConcurrency} disabled={isUnifiedInstalling} onChange={(e) => setInstallConcurrency(Number(e.target.value))} style={{ padding: '5px 8px', fontSize: '13px', color: '#e5e7eb', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--fg-secondary)' }}>并发数
+              <select className="nat" value={installConcurrency} disabled={isUnifiedInstalling} onChange={(e) => setInstallConcurrency(Number(e.target.value))} style={{ cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
                 <option value={2}>2</option><option value={4}>4</option><option value={8}>8</option><option value={0}>不限</option>
               </select>
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
-              <input type="checkbox" checked={installAllowDowngrade} disabled={isUnifiedInstalling} onChange={(e) => setInstallAllowDowngrade(e.target.checked)} />允许降级覆盖
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--fg-secondary)', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>
+              <span
+                onClick={(e) => { e.preventDefault(); if (!isUnifiedInstalling) setInstallAllowDowngrade(!installAllowDowngrade); }}
+                style={{ width: '16px', height: '16px', flex: 'none', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: installAllowDowngrade ? 'var(--accent)' : 'transparent', border: installAllowDowngrade ? '1.5px solid var(--accent)' : '1.5px solid var(--border-strong)' }}
+              >
+                {installAllowDowngrade && <Icon name="check" size={12} color="#fff" />}
+              </span>
+              <input type="checkbox" checked={installAllowDowngrade} disabled={isUnifiedInstalling} onChange={(e) => setInstallAllowDowngrade(e.target.checked)} style={{ display: 'none' }} />允许降级覆盖
             </label>
           </div>
         </div>
@@ -2088,10 +2095,10 @@ function SimpleApp() {
             minHeight: '90px',
             display: 'flex',
             flexDirection: 'column',
-            border: `1.5px dashed ${isApkDragOver ? '#4a90d9' : '#3a3a55'}`,
-            backgroundColor: isApkDragOver ? '#2a3550' : '#1f1f3320',
-            borderRadius: '10px',
-            padding: pendingApks.length > 0 ? '12px 14px' : '16px',
+            border: `1.5px dashed ${isApkDragOver ? 'var(--accent)' : 'var(--border-strong)'}`,
+            backgroundColor: isApkDragOver ? 'var(--accent-soft)' : 'var(--bg-elevated)',
+            borderRadius: 'var(--r-md)',
+            padding: pendingApks.length > 0 ? '12px 14px' : '24px 18px',
             cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer',
             transition: 'background-color 120ms ease, border-color 120ms ease',
           }}
@@ -2099,68 +2106,79 @@ function SimpleApp() {
           {pendingApks.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 0, overflowY: 'auto' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{`已选 ${pendingApks.length} 个安装包`}</span>
-                <span style={{ fontSize: '12px', color: '#60a5fa' }}>{'＋ 点击或拖拽继续添加'}</span>
+                <span style={{ fontSize: '12px', color: 'var(--fg-secondary)' }}>{`已选 ${pendingApks.length} 个安装包`}</span>
+                <span style={{ fontSize: '12px', color: 'var(--accent)' }}>{'＋ 点击或拖拽继续添加'}</span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {pendingApks.map((a) => (
-                  <span key={a.path} title={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '999px', fontSize: '12px', color: '#e5e7eb' }}>
+                  <span key={a.path} title={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-pill)', fontSize: '12px', color: 'var(--fg-primary)' }}>
                     {a.fileName}
-                    <button onClick={(e) => { e.stopPropagation(); removePendingApk(a.path); }} disabled={isUnifiedInstalling} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', padding: 0, fontSize: '13px' }}>✕</button>
+                    <button onClick={(e) => { e.stopPropagation(); removePendingApk(a.path); }} disabled={isUnifiedInstalling} style={{ background: 'none', border: 'none', color: 'var(--fg-tertiary)', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', padding: 0, fontSize: '13px', display: 'inline-flex', alignItems: 'center' }}><Icon name="x" size={13} /></button>
                   </span>
                 ))}
               </div>
             </div>
           ) : (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: isApkDragOver ? '#93c5fd' : '#9ca3af', pointerEvents: 'none' }}>
-              <span style={{ fontSize: '36px', lineHeight: 1, opacity: 0.85 }}>{'📦'}</span>
-              <span style={{ fontSize: '14px', fontWeight: 500 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', pointerEvents: 'none' }}>
+              <span style={{ width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-soft)', border: '1px solid var(--accent-soft-bd)', borderRadius: '12px' }}>
+                <Icon name="package-plus" size={24} color="var(--accent)" />
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: 500, color: isApkDragOver ? 'var(--accent)' : 'var(--fg-secondary)' }}>
                 {isApkDragOver ? '松开以添加 APK' : '把 .apk 拖到这里，或点击选择'}
               </span>
-              <span style={{ fontSize: '12px', color: '#6b7280' }}>{'支持多选'}</span>
+              <span style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>{'支持多选'}</span>
             </div>
           )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '13px', color: '#9ca3af' }}>目标设备（{selectedOnlineCount}/{onlineDevices.length}）</span>
-            <button onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set(onlineDevices.map((d) => d.id))); }} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#60a5fa', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>全选</button>
-            <button onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set()); }} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#9ca3af', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>清空</button>
+            <span className="seclabel" style={{ margin: 0 }}>目标设备</span>
+            <span style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>{selectedOnlineCount}/{onlineDevices.length}</span>
+            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span className="link" onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set(onlineDevices.map((d) => d.id))); }} style={{ fontSize: '12px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', opacity: isUnifiedInstalling ? 0.5 : 1 }}>全选</span>
+              <span className="link" onClick={() => { if (!isUnifiedInstalling) setInstallTargets(new Set()); }} style={{ fontSize: '12px', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', opacity: isUnifiedInstalling ? 0.5 : 1, color: 'var(--fg-tertiary)' }}>全部取消</span>
+            </span>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {devices.length === 0 ? (
-              <div style={{ padding: '8px', color: '#666', fontSize: '13px' }}>暂无已连接设备</div>
+              <div style={{ padding: '8px', color: 'var(--fg-tertiary)', fontSize: '13px' }}>暂无已连接设备</div>
             ) : devices.map((d) => {
               const online = d.status === 'connected';
+              const checked = installTargets.has(d.id);
               return (
-                <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', cursor: online && !isUnifiedInstalling ? 'pointer' : 'not-allowed', opacity: online ? 1 : 0.5 }}>
-                  <input type="checkbox" checked={installTargets.has(d.id)} disabled={!online || isUnifiedInstalling} onChange={() => toggleInstallTarget(d.id)} />
-                  <span style={{ fontSize: '13px', color: '#e5e7eb' }}>{getDeviceLabel(d)}</span>
-                  <span style={{ fontSize: '12px', color: d.connectionType === 'wifi' ? '#4ade80' : '#60a5fa' }}>{d.connectionType === 'wifi' ? 'WiFi' : 'USB'}</span>
-                  {!online && <span style={{ fontSize: '12px', color: '#9ca3af' }}>离线</span>}
+                <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', backgroundColor: checked ? 'var(--accent-soft)' : 'var(--bg-elevated)', border: checked ? '1px solid var(--accent-soft-bd)' : '1px solid var(--border-default)', borderRadius: 'var(--r-sm)', cursor: online && !isUnifiedInstalling ? 'pointer' : 'not-allowed', opacity: online ? 1 : 0.5 }}>
+                  <span style={{ width: '16px', height: '16px', flex: 'none', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: checked ? 'var(--accent)' : 'transparent', border: checked ? '1.5px solid var(--accent)' : '1.5px solid var(--border-strong)' }}>
+                    {checked && <Icon name="check" size={12} color="#fff" />}
+                  </span>
+                  <input type="checkbox" checked={checked} disabled={!online || isUnifiedInstalling} onChange={() => toggleInstallTarget(d.id)} style={{ display: 'none' }} />
+                  <span style={{ fontSize: '13px', color: 'var(--fg-primary)' }}>{getDeviceLabel(d)}</span>
+                  <Badge tone={d.connectionType === 'wifi' ? 'success' : 'info'} dot>{d.connectionType === 'wifi' ? 'WiFi' : 'USB'}</Badge>
+                  {!online && <span style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>离线</span>}
+                  <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)' }}>{d.id}</span>
                 </label>
               );
             })}
           </div>
         </div>
 
-        <button onClick={startUnifiedInstall} disabled={!canStart} style={{ alignSelf: 'flex-start', padding: '10px 24px', fontSize: '14px', fontWeight: 600, color: '#fff', backgroundColor: canStart ? '#4a90d9' : '#3a3a55', border: 'none', borderRadius: '8px', cursor: canStart ? 'pointer' : 'not-allowed' }}>
-          {isUnifiedInstalling ? '安装中…' : `安装到所选设备${selectedOnlineCount > 0 ? `（${selectedOnlineCount}）` : ''}`}
+        <button className="btn primary" onClick={startUnifiedInstall} disabled={!canStart} style={{ alignSelf: 'stretch', justifyContent: 'center', height: '42px' }}>
+          <Icon name="download" />
+          {isUnifiedInstalling ? '安装中…' : `安装到 ${selectedOnlineCount} 台设备`}
         </button>
         </div>
 
         {/* 安装详情（占比 7）：进度 + 错误 + 安装日志 */}
         <div style={{ flex: 7, minHeight: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-            <span style={{ fontSize: '14px', fontWeight: 600, color: '#cbd5e1' }}>{'安装详情'}</span>
+            <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--fg-primary)' }}>{'安装详情'}</span>
             {installLog.length > 0 && (
-              <button onClick={() => setInstallLog([])} style={{ fontSize: '12px', color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}>{'清空日志'}</button>
+              <span className="link" onClick={() => setInstallLog([])} style={{ fontSize: '12px', color: 'var(--fg-tertiary)', cursor: 'pointer' }}>{'清空日志'}</span>
             )}
           </div>
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: '#1b1b2e', border: '1px solid #353550', borderRadius: '8px', padding: '10px' }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '10px' }}>
             {!hasInstallDetail && (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '13px' }}>{'安装进度、结果与日志会显示在这里'}</div>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-tertiary)', fontSize: '13px' }}>{'安装进度、结果与日志会显示在这里'}</div>
             )}
         {activeDeviceIds.map((deviceId) => {
           const device = devices.find((d) => d.id === deviceId);
@@ -2169,36 +2187,36 @@ function SimpleApp() {
           const hasFailed = queue.some((it) => it.status === 'failed');
           const hasSuccess = queue.some((it) => it.status === 'success');
           return (
-            <div key={deviceId} style={{ border: '1px solid #353550', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div key={deviceId} style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--bg-elevated)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{device ? getDeviceLabel(device) : deviceId}</span>
-                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{finished}/{queue.length} 完成</span>
-                {hasFailed && <button onClick={() => retryDeviceInstall(deviceId)} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#93c5fd', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer' }}>重试失败</button>}
-                {hasSuccess && <button onClick={() => clearCompletedApkInstalls(deviceId)} disabled={isUnifiedInstalling} style={{ fontSize: '12px', color: '#60a5fa', background: 'none', border: 'none', cursor: isUnifiedInstalling ? 'not-allowed' : 'pointer', marginLeft: 'auto' }}>清空成功项</button>}
+                <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--fg-primary)' }}>{device ? getDeviceLabel(device) : deviceId}</span>
+                <span style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>{finished}/{queue.length} 完成</span>
+                {hasFailed && <button className="btn secondary sm" onClick={() => retryDeviceInstall(deviceId)} disabled={isUnifiedInstalling}>重试失败</button>}
+                {hasSuccess && <button className="btn ghost sm" onClick={() => clearCompletedApkInstalls(deviceId)} disabled={isUnifiedInstalling} style={{ marginLeft: 'auto' }}>清空成功项</button>}
               </div>
               {queue.map((item) => {
                 const statusMeta = getApkInstallStatusMeta(item.status);
                 const canRemove = item.status !== 'installing';
                 return (
-                  <div key={item.id} style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '10px' }}>
+                  <div key={item.id} style={{ backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-sm)', padding: '10px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-                      <span style={{ color: '#fff', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.fileName}>{item.fileName}</span>
+                      <span style={{ color: 'var(--fg-primary)', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.fileName}>{item.fileName}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                        <span style={{ color: statusMeta.color, backgroundColor: statusMeta.background, borderRadius: '999px', padding: '2px 8px', fontSize: '12px' }}>{statusMeta.label}</span>
-                        <button onClick={() => removeApkInstallItem(deviceId, item.id)} disabled={!canRemove} style={{ padding: '2px 8px', backgroundColor: 'transparent', border: '1px solid #454560', borderRadius: '6px', color: canRemove ? '#d1d5db' : '#6b7280', cursor: canRemove ? 'pointer' : 'not-allowed', fontSize: '12px' }}>删除</button>
+                        <span style={{ color: statusMeta.color, backgroundColor: statusMeta.background, borderRadius: 'var(--r-pill)', padding: '2px 8px', fontSize: '12px' }}>{statusMeta.label}</span>
+                        <button className="btn outline o-red sm" onClick={() => removeApkInstallItem(deviceId, item.id)} disabled={!canRemove}>删除</button>
                       </div>
                     </div>
                     <div style={{ marginTop: '8px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#9ca3af', fontSize: '11px', marginBottom: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--fg-tertiary)', fontSize: '11px', marginBottom: '4px' }}>
                         <span>{item.status === 'installing' ? '正在推送并安装' : statusMeta.label}</span>
                         <span>{`${Math.round(item.progress)}%`}</span>
                       </div>
-                      <div style={{ height: '5px', backgroundColor: '#353550', borderRadius: '999px', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${item.progress}%`, backgroundColor: item.status === 'failed' ? '#ef4444' : item.status === 'success' ? '#22c55e' : '#60a5fa', transition: 'width 260ms ease' }} />
+                      <div style={{ height: '5px', backgroundColor: 'var(--border-subtle)', borderRadius: 'var(--r-pill)', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${item.progress}%`, backgroundColor: item.status === 'failed' ? 'var(--danger)' : item.status === 'success' ? 'var(--success)' : 'var(--accent)', transition: 'width 260ms ease' }} />
                       </div>
                     </div>
                     {item.error && (
-                      <div style={{ marginTop: '6px', color: '#fca5a5', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.error}</div>
+                      <div style={{ marginTop: '6px', color: 'var(--danger)', fontSize: '12px', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{item.error}</div>
                     )}
                   </div>
                 );
@@ -2208,10 +2226,10 @@ function SimpleApp() {
         })}
             {installLog.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{'安装日志'}</span>
-                <div style={{ fontFamily: 'Consolas, monospace', fontSize: '12px', lineHeight: 1.7, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--fg-secondary)' }}>{'安装日志'}</span>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.7, display: 'flex', flexDirection: 'column', gap: '2px' }}>
                   {installLog.map((l, i) => (
-                    <div key={i} style={{ color: l.level === 'success' ? '#86efac' : l.level === 'error' ? '#fca5a5' : '#9ca3af', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.text}</div>
+                    <div key={i} style={{ color: l.level === 'success' ? 'var(--success)' : l.level === 'error' ? 'var(--danger)' : 'var(--fg-tertiary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.text}</div>
                   ))}
                 </div>
               </div>
@@ -2403,19 +2421,33 @@ function SimpleApp() {
     return colors[level];
   };
 
-  const renderLogcatPanel = () => (
+  const renderLogcatPanel = () => {
+    // 日志级别 → Design System 级别色 token（与计数 chip、日志行级别字母统一取色）。
+    const LOG_LEVEL_TOKEN: Record<LogEntry['level'], string> = {
+      V: 'var(--log-verbose)',
+      D: 'var(--log-debug)',
+      I: 'var(--log-info)',
+      W: 'var(--log-warn)',
+      E: 'var(--log-error)',
+      F: 'var(--log-fatal)',
+    };
+    return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '10px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '10px', backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '10px', background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)' }}>
         <button
           onClick={toggleLogcat}
-          style={{ padding: '8px 12px', backgroundColor: isSelectedLogcatRunning ? '#7f1d1d' : '#166534', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px' }}
+          className="btn sm"
+          style={isSelectedLogcatRunning
+            ? { background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }
+            : { background: 'var(--success)', color: '#fff', borderColor: 'var(--success)' }}
         >
           {isSelectedLogcatRunning ? '\u505c\u6b62' : '\u5f00\u59cb'}
         </button>
         <button
           onClick={toggleSelectedDevicePause}
           disabled={!isSelectedLogcatRunning}
-          style={{ padding: '8px 12px', backgroundColor: isSelectedLogPaused ? '#ca8a04' : '#353550', border: 'none', borderRadius: '6px', color: 'white', cursor: isSelectedLogcatRunning ? 'pointer' : 'not-allowed', fontSize: '13px', opacity: isSelectedLogcatRunning ? 1 : 0.5 }}
+          className="btn sm secondary"
+          style={isSelectedLogPaused ? { background: 'var(--warning)', color: '#fff', borderColor: 'var(--warning)' } : undefined}
         >
           {isSelectedLogPaused ? '\u7ee7\u7eed' : '\u6682\u505c'}
         </button>
@@ -2425,11 +2457,11 @@ function SimpleApp() {
               clearDeviceLogs(selectedDeviceId);
             }
           }}
-          style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: '#d1d5db', fontSize: '13px', cursor: 'pointer' }}
+          className="btn sm secondary"
         >{'\u6e05\u7a7a'}</button>
-        <button onClick={exportVisibleLogs} title={'导出当前可见 / 筛选后的日志（受等级、搜索与显示上限影响）'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa'}</button>
-        <button onClick={exportFullLogs} title={'从监控第一行到当前的完整原始日志（全等级，不受 2 万条上限与筛选影响）'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
-        <button onClick={exportFullLogsByPackage} title={'\u5728\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\u4e0a\uff0c\u7528\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u7684\u5305\u540d\u5173\u8054\u8fc7\u6ee4\uff0c\u5207\u51fa\u4e00\u4efd\u5b8c\u6574\u5b50\u96c6\uff08\u591a\u884c\u5806\u6808\u6574\u6761\u4fdd\u7559\uff0c\u4e0d\u91cd\u65b0\u91c7\u96c6\uff09'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u6309\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
+        <button onClick={exportVisibleLogs} title={'导出当前可见 / 筛选后的日志（受等级、搜索与显示上限影响）'} className="btn sm secondary">{'\u5bfc\u51fa'}</button>
+        <button onClick={exportFullLogs} title={'从监控第一行到当前的完整原始日志（全等级，不受 2 万条上限与筛选影响）'} className="btn sm secondary">{'\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
+        <button onClick={exportFullLogsByPackage} title={'\u5728\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\u4e0a\uff0c\u7528\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u7684\u5305\u540d\u5173\u8054\u8fc7\u6ee4\uff0c\u5207\u51fa\u4e00\u4efd\u5b8c\u6574\u5b50\u96c6\uff08\u591a\u884c\u5806\u6808\u6574\u6761\u4fdd\u7559\uff0c\u4e0d\u91cd\u65b0\u91c7\u96c6\uff09'} className="btn sm secondary">{'\u6309\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
         {lastExportedLogPath && (
           <button
             onClick={async () => {
@@ -2438,21 +2470,25 @@ function SimpleApp() {
               if (!r.success && r.error) setError(r.error);
             }}
             title={`\u6253\u5f00\u6700\u8fd1\u5bfc\u51fa\u7684\u65e5\u5fd7\u6240\u5728\u6587\u4ef6\u5939\uff1a${lastExportedLogPath}`}
-            style={{ padding: '8px 12px', backgroundColor: '#166534', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}
+            className="btn sm secondary"
           >{'\ud83d\udcc2 \u6253\u5f00\u4f4d\u7f6e'}</button>
         )}
-        <button onClick={showCrashAndAnrLogs} style={{ padding: '8px 12px', backgroundColor: '#7f1d1d', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5d29\u6e83/ANR'}</button>
-        <button onClick={scrollToBottom} style={{ padding: '8px 12px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5230\u5e95\u90e8'}</button>
-        <button onClick={() => setAutoScrollEnabled(!autoScrollEnabled)} style={{ padding: '8px 12px', backgroundColor: autoScrollEnabled ? '#166534' : '#4b5563', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>
+        <button onClick={showCrashAndAnrLogs} className="btn sm" style={{ background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }}>{'\u5d29\u6e83/ANR'}</button>
+        <button onClick={scrollToBottom} className="btn sm" style={{ background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }}>{'\u5230\u5e95\u90e8'}</button>
+        <button
+          onClick={() => setAutoScrollEnabled(!autoScrollEnabled)}
+          className="btn sm secondary"
+          style={autoScrollEnabled ? { background: 'var(--success)', color: '#fff', borderColor: 'var(--success)' } : undefined}
+        >
           {autoScrollEnabled ? '\u81ea\u52a8\u6eda\u52a8' : '\u624b\u52a8\u6eda\u52a8'}
         </button>
-        <div style={{ marginLeft: 'auto', color: '#9ca3af', fontSize: '12px' }}>
+        <div style={{ marginLeft: 'auto', color: 'var(--fg-tertiary)', fontSize: '12px' }}>
           {isSelectedLogcatRunning ? (isSelectedLogPaused ? '\u5df2\u6682\u505c' : '\u91c7\u96c6\u4e2d') : '\u5df2\u505c\u6b62'} · {'\u8fd0\u884c\u8bbe\u5907'} {runningLogDeviceIds.size} · {displayedLogCount}/{allLogCount} {'\u6761\u65e5\u5fd7'}
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '140px 150px 150px minmax(220px, 1fr) 90px 90px', gap: '8px', padding: '10px', backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px' }}>
-        <select value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevelFilter)} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '140px 150px 150px minmax(220px, 1fr) 90px 90px', gap: '8px', padding: '10px', background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)' }}>
+        <select className="nat" value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevelFilter)}>
           <option value="all">All levels</option>
           <option value="V">Verbose+</option>
           <option value="D">Debug+</option>
@@ -2461,9 +2497,10 @@ function SimpleApp() {
           <option value="E">Error+</option>
           <option value="F">Fatal</option>
         </select>
-        <input value={logPackageFilter} onChange={(e) => setLogPackageFilter(e.target.value)} placeholder={'\u5e94\u7528/\u5305\u540d'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
-        <input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
+        <div className="field"><input value={logPackageFilter} onChange={(e) => setLogPackageFilter(e.target.value)} placeholder={'\u5e94\u7528/\u5305\u540d'} /></div>
+        <div className="field"><input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} /></div>
         <div style={{ position: 'relative' }}>
+          <div className="field" style={{ width: '100%' }}>
           <input
             type="text"
             placeholder={useRegexSearch ? '\u6b63\u5219\u641c\u7d22' : '\u641c\u7d22\u65e5\u5fd7'}
@@ -2477,55 +2514,70 @@ function SimpleApp() {
             }}
             // \u8bb0\u5f55\u5173\u952e\u5b57\u5e76\u5ef6\u8fdf\u6536\u8d77\uff0c\u7559\u51fa\u65f6\u95f4\u8ba9\u4e0b\u62c9\u9879\u7684 mousedown \u5148\u89e6\u53d1\u9009\u62e9\u3002
             onBlur={() => { recordSearchHistory(searchTerm); window.setTimeout(() => setShowSearchHistory(false), 150); }}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
+            style={{ width: '100%' }}
           />
+          </div>
           {showSearchHistory && visibleSearchHistory.length > 0 && (
-            <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, maxHeight: '260px', overflowY: 'auto', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.45)' }}>
+            <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, maxHeight: '260px', overflowY: 'auto', background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-md)', boxShadow: 'var(--sh-pop)' }}>
               {visibleSearchHistory.map((keyword) => (
                 <div
                   key={keyword}
                   // \u7528 onMouseDown + preventDefault\uff1a\u5728 input \u5931\u7126\u524d\u5b8c\u6210\u9009\u62e9\uff0c\u907f\u514d\u4e0b\u62c9\u5148\u88ab\u5173\u6389\u3002
                   onMouseDown={(e) => { e.preventDefault(); setSearchTerm(keyword); recordSearchHistory(keyword); setShowSearchHistory(false); }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#33335a'; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-hover)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '7px 10px', cursor: 'pointer', color: '#e5e7eb', fontSize: '13px' }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '7px 10px', cursor: 'pointer', color: 'var(--fg-primary)', fontSize: '13px' }}
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{keyword}</span>
                   <span
                     onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeOneSearchHistory(keyword); }}
                     title={'\u4ece\u5386\u53f2\u79fb\u9664'}
-                    style={{ flexShrink: 0, color: '#9ca3af', cursor: 'pointer', padding: '0 4px', fontSize: '14px', lineHeight: 1 }}
+                    style={{ flexShrink: 0, color: 'var(--fg-tertiary)', cursor: 'pointer', padding: '0 4px', fontSize: '14px', lineHeight: 1 }}
                   >{'\u00d7'}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
-        <input value={logPidFilter} onChange={(e) => setLogPidFilter(e.target.value.replace(/\D/g, ''))} placeholder={'\u8fdb\u7a0b PID'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
-        <button onClick={() => setUseRegexSearch(!useRegexSearch)} style={{ padding: '8px 10px', backgroundColor: useRegexSearch ? '#4a90d9' : '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u6b63\u5219'}</button>
+        <div className="field"><input value={logPidFilter} onChange={(e) => setLogPidFilter(e.target.value.replace(/\D/g, ''))} placeholder={'\u8fdb\u7a0b PID'} /></div>
+        <button onClick={() => setUseRegexSearch(!useRegexSearch)} className={useRegexSearch ? 'btn sm outline o-blue' : 'btn sm secondary'}>{'\u6b63\u5219'}</button>
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', color: '#9ca3af', fontSize: '12px' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', color: 'var(--fg-tertiary)', fontSize: '12px' }}>
         {(['V', 'D', 'I', 'W', 'E', 'F'] as LogEntry['level'][]).map(level => (
-          <span key={level} style={{ color: getLevelColor(level), backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '6px', padding: '4px 8px' }}>
-            {level} {logLevelCounts[level]}
+          <span
+            key={level}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              height: '24px',
+              padding: '0 11px',
+              borderRadius: 'var(--r-sm)',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            <span style={{ color: LOG_LEVEL_TOKEN[level], fontWeight: 700 }}>{level}</span>
+            <span style={{ color: 'var(--fg-tertiary)' }}>{logLevelCounts[level]}</span>
           </span>
         ))}
-        <span style={{ marginLeft: 'auto' }}>{'\u4fdd\u7559'} {maxLogEntries} · {'\u6279\u91cf'} {batchUpdateSize}</span>
+        <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)' }}>{'\u4fdd\u7559'} {maxLogEntries} · {'\u6279\u91cf'} {batchUpdateSize}</span>
       </div>
 
-      <div ref={logsContainerRef} onScroll={handleScroll} style={{ flex: 1, backgroundColor: '#111827', border: '1px solid #353550', borderRadius: '8px', overflow: 'auto', fontFamily: 'Consolas, monospace', fontSize: '12px', minHeight: '260px' }}>
+      <div ref={logsContainerRef} onScroll={handleScroll} style={{ flex: 1, background: 'var(--bg-mirror)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', overflow: 'auto', fontFamily: 'var(--font-mono)', fontSize: '12px', minHeight: '260px' }}>
         {allLogCount === 0 && !isSelectedLogcatRunning ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280' }}>
-            <div style={{ fontSize: '42px', marginBottom: '12px' }}>{'\u65e5\u5fd7'}</div>
-            <button onClick={toggleLogcat} style={{ padding: '10px 18px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', fontSize: '14px', cursor: 'pointer' }}>{'\u5f00\u59cb\u65e5\u5fd7'}</button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--fg-tertiary)' }}>
+            <div style={{ fontSize: '42px', marginBottom: '16px', fontWeight: 700, color: 'var(--border-default)' }}>{'\u65e5\u5fd7'}</div>
+            <button onClick={toggleLogcat} className="btn primary">{'\u5f00\u59cb\u65e5\u5fd7'}</button>
           </div>
         ) : displayedLogCount === 0 ? (
-          <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280' }}>{'\u6ca1\u6709\u5339\u914d\u7684\u65e5\u5fd7'}</div>
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-tertiary)' }}>{'\u6ca1\u6709\u5339\u914d\u7684\u65e5\u5fd7'}</div>
         ) : (
           // width:max-content + minWidth:100% 让内容随最长日志行增宽，超出容器时出现横向滚动条；行与表头同宽对齐。
           <div style={{ minHeight: totalLogHeight, width: 'max-content', minWidth: '100%' }}>
-            <div style={{ position: 'sticky', top: 0, zIndex: 1, width: '100%', display: 'grid', gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, max-content)', backgroundColor: '#1f2937', color: '#9ca3af', fontWeight: 700 }}>
+            <div style={{ position: 'sticky', top: 0, zIndex: 1, width: '100%', display: 'grid', gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, max-content)', background: 'var(--bg-elevated)', color: 'var(--fg-tertiary)', fontWeight: 700, borderBottom: '1px solid var(--border-subtle)' }}>
               <div style={{ padding: '8px' }}>{'\u65f6\u95f4'}</div>
               <div style={{ padding: '8px' }}>Level</div>
               <div style={{ padding: '8px' }}>PID</div>
@@ -2547,19 +2599,19 @@ function SimpleApp() {
                   padding: '4px 0',
                   boxSizing: 'border-box',
                   alignItems: 'start',
-                  borderBottom: '1px solid #1f2937',
-                  backgroundColor: selectedLogEntry?.id === log.id ? '#1e3a5f' : 'transparent',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  backgroundColor: selectedLogEntry?.id === log.id ? 'var(--bg-active)' : 'transparent',
                   cursor: 'pointer',
                 }}
               >
-                <div style={{ padding: '0 8px', color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden' }}>{new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</div>
-                <div style={{ padding: '0 8px', color: getLevelColor(log.level), fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }}>{getLevelLabel(log.level)}</div>
-                <div style={{ padding: '0 8px', color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden' }}>{log.processId || '--'}</div>
-                <div style={{ padding: '0 8px', color: '#60a5fa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.packageName || '--'}</div>
-                <div style={{ padding: '0 8px', color: '#93c5fd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.tag}</div>
+                <div style={{ padding: '0 8px', color: 'var(--fg-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden' }}>{new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</div>
+                <div style={{ padding: '0 8px', color: LOG_LEVEL_TOKEN[log.level], fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }}>{getLevelLabel(log.level)}</div>
+                <div style={{ padding: '0 8px', color: 'var(--fg-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden' }}>{log.processId || '--'}</div>
+                <div style={{ padding: '0 8px', color: 'var(--fg-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.packageName || '--'}</div>
+                <div style={{ padding: '0 8px', color: LOG_LEVEL_TOKEN[log.level], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.tag}</div>
                 {/* 整条铺开多行：white-space:pre 保留换行、每个逻辑行不自动换行（高度=行数×LOG_LINE_HEIGHT 可预测）。
                     不裁切，过长单行靠日志窗口横向滚动条拖动查看；完整内容也可点开看底部详情面板。 */}
-                <div style={{ padding: '0 8px', color: '#e5e7eb', whiteSpace: 'pre' }}>{log.message}</div>
+                <div style={{ padding: '0 8px', color: 'var(--fg-secondary)', whiteSpace: 'pre' }}>{log.message}</div>
               </div>
             ))}
             <div style={{ height: virtualBottomPadding }} />
@@ -2568,26 +2620,19 @@ function SimpleApp() {
       </div>
 
       {selectedLogEntry && (
-        <div style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '10px', color: '#d1d5db', fontFamily: 'Consolas, monospace', fontSize: '12px', maxHeight: '140px', overflow: 'auto' }}>
-          <div style={{ marginBottom: '6px', color: getLevelColor(selectedLogEntry.level), fontWeight: 700 }}>
+        <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '10px', color: 'var(--fg-secondary)', fontFamily: 'var(--font-mono)', fontSize: '12px', maxHeight: '140px', overflow: 'auto' }}>
+          <div style={{ marginBottom: '6px', color: LOG_LEVEL_TOKEN[selectedLogEntry.level], fontWeight: 700 }}>
             {getLevelLabel(selectedLogEntry.level)} / {selectedLogEntry.tag} / PID {selectedLogEntry.processId || '--'}
           </div>
           <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{selectedLogEntry.message}</div>
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   return (
-    <div style={{
-      width: '100%',
-      height: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      backgroundColor: '#1a1a2e',
-      color: 'white',
-      overflow: 'hidden'
-    }}>
+    <div className="win" style={{ width: '100%', color: 'var(--fg-secondary)' }}>
       {/* 全局深色滚动条：index.css 未被入口引入，这里就地注入，和工具深色主题统一。
           仅用 webkit 规则——Electron 是 Chromium 内核，加 scrollbar-width 反而会接管并禁用自定义样式。 */}
       <style>{`
@@ -2673,16 +2718,17 @@ function SimpleApp() {
           )}
         </div>
       )}
-      <header style={{ height: '56px', backgroundColor: '#252540', borderBottom: '1px solid #353550', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between' }}>
+      <header className="appbar" style={{ justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <button
           onClick={() => setSidebarCollapsed((v) => !v)}
           title={sidebarCollapsed ? '\u5c55\u5f00\u8bbe\u5907\u680f' : '\u6536\u8d77\u8bbe\u5907\u680f'}
           aria-label={sidebarCollapsed ? '\u5c55\u5f00\u8bbe\u5907\u680f' : '\u6536\u8d77\u8bbe\u5907\u680f'}
-          style={{ width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', lineHeight: 1, color: '#cbd5e1', background: 'none', border: '1px solid #454560', borderRadius: '6px', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+          className="btn iconbtn sm"
+          style={{ flexShrink: 0 }}
         >{sidebarCollapsed ? '\u00bb' : '\u00ab'}</button>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-          <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+          <h1 className="title" style={{ margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
           {appVersion && (
             <button
               onClick={openReleaseNotes}
@@ -2731,11 +2777,11 @@ function SimpleApp() {
         </div>
       )}
       
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div className="main" style={{ overflow: 'hidden' }}>
         {/* 折叠后的最小设备轨道：保留快捷切换设备能力，其余横向空间让给主模块。
             每台设备一个小方块（USB=U / WiFi=W + 在线状态点 + 选中高亮），点击即切换，hover 看全名。 */}
         {sidebarCollapsed && (
-          <div style={{ width: '56px', flexShrink: 0, backgroundColor: '#252540', borderRight: '1px solid #353550', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '56px 0 10px', overflowY: 'auto', overflowX: 'hidden' }}>
+          <div style={{ width: '56px', flexShrink: 0, background: 'var(--bg-sidebar)', borderRight: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '56px 0 10px', overflowY: 'auto', overflowX: 'hidden' }}>
             {devices.map((device) => {
               const selected = selectedDevice?.id === device.id;
               const statusMeta = getDeviceStatusMeta(device.status);
@@ -2752,10 +2798,10 @@ function SimpleApp() {
                     width: '40px',
                     height: '40px',
                     flexShrink: 0,
-                    borderRadius: '8px',
-                    border: selected ? '1px solid #60a5fa' : '1px solid #353550',
-                    backgroundColor: selected ? '#4a90d9' : '#353550',
-                    color: '#fff',
+                    borderRadius: 'var(--r-sm)',
+                    border: selected ? '1px solid var(--border-selected)' : '1px solid var(--border-default)',
+                    backgroundColor: selected ? 'var(--accent)' : 'var(--bg-elevated)',
+                    color: 'var(--fg-primary)',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -2767,49 +2813,55 @@ function SimpleApp() {
                   }}
                 >
                   {snTail}
-                  <span style={{ position: 'absolute', top: '2px', right: '2px', width: '8px', height: '8px', borderRadius: '999px', backgroundColor: statusMeta.color, border: '1.5px solid #252540' }} />
+                  <span style={{ position: 'absolute', top: '2px', right: '2px', width: '8px', height: '8px', borderRadius: '999px', backgroundColor: statusMeta.color, border: '1.5px solid var(--bg-sidebar)' }} />
                 </button>
               );
             })}
           </div>
         )}
         {/* 侧栏用 flex 列 + 各区块 order 控制顺序：ADB状态(0) → WiFi连接(1) → 设备列表(2) → 设备信息(3) → 历史设备(4)。
-            用 order 而非物理调整 JSX 顺序，避免大段含中文的块搬运出错；ADB 状态保持默认 order 0 居首。 */}
-        <aside style={{ width: sidebarCollapsed ? 0 : '288px', minWidth: 0, flexShrink: 0, backgroundColor: '#252540', borderRight: sidebarCollapsed ? 'none' : '1px solid #353550', padding: sidebarCollapsed ? 0 : '16px', overflowY: sidebarCollapsed ? 'hidden' : 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', transition: 'width 0.22s ease, padding 0.22s ease' }}>
+            用 order 而非物理调整 JSX 顺序，避免大段含中文的块搬运出错；ADB 状态保持默认 order 0 居首。
+            侧栏可折叠：展开 360px(对齐 Design System)，折叠 0；配色用 token。 */}
+        <aside style={{ width: sidebarCollapsed ? 0 : '360px', minWidth: 0, flexShrink: 0, background: 'var(--bg-sidebar)', borderRight: sidebarCollapsed ? 'none' : '1px solid var(--border-subtle)', padding: sidebarCollapsed ? 0 : '16px', overflowY: sidebarCollapsed ? 'hidden' : 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', transition: 'width 0.22s ease, padding 0.22s ease' }}>
           {adbStatus && (
             <div
               style={{
                 marginBottom: '16px',
-                padding: '12px',
-                borderRadius: '8px',
-                backgroundColor: adbStatus.available ? '#1f3b2d' : '#3f1d24',
-                border: `1px solid ${adbStatus.available ? '#2f855a' : '#7f1d1d'}`,
+                padding: '11px 13px',
+                borderRadius: 'var(--r-md)',
+                background: adbStatus.available ? 'var(--success-soft)' : 'var(--danger-soft)',
+                border: `1px solid ${adbStatus.available ? '#54C08455' : '#E0746C55'}`,
               }}
             >
-              <div style={{ fontSize: '13px', fontWeight: 600, color: adbStatus.available ? '#86efac' : '#fda4af', marginBottom: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '13px', fontWeight: 600, color: adbStatus.available ? 'var(--success)' : 'var(--danger)', marginBottom: '4px' }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: adbStatus.available ? 'var(--success)' : 'var(--danger)', flexShrink: 0 }} />
                 {adbStatus.available
                   ? `${adbStatus.source === 'bundled' ? '内置' : '系统'} ADB 已就绪${adbStatus.version ? ` · ${adbStatus.version}` : ''}`
                   : 'ADB 不可用'}
               </div>
-              <div style={{ fontSize: '12px', color: '#d1d5db', lineHeight: 1.5 }}>{adbStatus.message}</div>
+              <div style={{ fontSize: '12px', color: 'var(--fg-secondary)', lineHeight: 1.5 }}>{adbStatus.message}</div>
               {adbStatus.hint && !adbStatus.available && (
-                <div style={{ marginTop: '6px', fontSize: '12px', color: '#fecdd3', lineHeight: 1.5 }}>{adbStatus.hint}</div>
+                <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--danger)', lineHeight: 1.5 }}>{adbStatus.hint}</div>
               )}
               {adbStatus.path && (
-                <div style={{ marginTop: '6px', fontSize: '11px', color: '#94a3b8', wordBreak: 'break-all' }}>{adbStatus.path}</div>
+                <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--fg-tertiary)', wordBreak: 'break-all' }}>{adbStatus.path}</div>
               )}
             </div>
           )}
 
           <div style={{ order: 2 }}>
-          <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u8bbe\u5907\u5217\u8868'}</h2>
+          <div className="seclabel">{'\u8bbe\u5907\u5217\u8868'}</div>
           <div style={{ display: 'flex', gap: '8px', margin: '0 0 12px 0' }}>
-            <button onClick={loadDevices} style={{ flex: 1, padding: '6px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px' }}>刷新设备</button>
-            <button onClick={connectUSBDevice} style={{ flex: 1, padding: '6px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px' }}>连接 USB</button>
+            <button onClick={loadDevices} className="btn secondary" style={{ flex: 1, justifyContent: 'center' }}>
+              <Icon name="refresh-cw" />刷新设备
+            </button>
+            <button onClick={connectUSBDevice} className="btn secondary" style={{ flex: 1, justifyContent: 'center' }}>
+              <Icon name="usb" />连接 USB
+            </button>
           </div>
           
           {devices.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px 0', color: '#666' }}>
+            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--fg-tertiary)' }}>
               <p style={{ fontSize: '14px' }}>
                 {adbStatus && !adbStatus.available ? 'ADB 不可用，暂时无法读取设备' : '\u672a\u8fde\u63a5\u8bbe\u5907'}
               </p>
@@ -2822,105 +2874,119 @@ function SimpleApp() {
                 return (
                 <div
                   key={device.id}
-                  style={{ 
-                    padding: '12px', 
-                    borderRadius: '8px', 
+                  style={{
+                    padding: '15px',
+                    borderRadius: 'var(--r-md)',
                     cursor: 'pointer',
-                    backgroundColor: selectedDevice?.id === device.id ? '#4a90d9' : '#353550',
-                    border: selectedDevice?.id === device.id ? '1px solid #60a5fa' : 'none'
+                    background: 'var(--bg-panel)',
+                    border: `1px solid ${selectedDevice?.id === device.id ? 'var(--border-selected)' : 'var(--border-default)'}`,
+                    boxShadow: selectedDevice?.id === device.id ? '0 0 0 1px var(--border-selected)' : 'none'
                   }}
                   onClick={() => setSelectedDevice(device)}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                    <span>{device.connectionType === 'wifi' ? 'WiFi' : 'USB'}</span>
-                    <span style={{ fontWeight: '500', fontSize: '14px' }}>{getDeviceLabel(device)}</span>
+                    <span style={{ fontWeight: 600, fontSize: '15px', color: 'var(--fg-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getDeviceLabel(device)}</span>
+                    {device.connectionType === 'wifi'
+                      ? <Badge tone="info" icon="wifi">WiFi</Badge>
+                      : <Badge tone="neutral" icon="usb">USB</Badge>}
                     </div>
-                    <span style={{ padding: '2px 8px', borderRadius: '999px', fontSize: '11px', backgroundColor: statusMeta.background, color: statusMeta.color, flexShrink: 0 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: statusMeta.color, flexShrink: 0 }}>
+                      <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: statusMeta.color, flexShrink: 0 }} />
                       {statusMeta.label}
                     </span>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '2px' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--fg-tertiary)', marginBottom: '2px' }}>
                     {'SN'}: {device.serialNo || '--'}
                   </div>
                   {device.connectionType === 'wifi' && (
-                    <div style={{ fontSize: '12px', color: '#aaa' }}>{device.id}</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--fg-tertiary)' }}>{device.id}</div>
                   )}
-                  <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <div style={{ marginTop: '10px', paddingBottom: '10px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
                       {renderBatteryBadge(device)}
                       {renderScreenStateBadge(device)}
                     </div>
                     {wifiLatencyLabel && (
-                      <span style={{ fontSize: '12px', color: device.latencyStatus === 'timeout' ? '#fbbf24' : '#93c5fd' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: device.latencyStatus === 'timeout' ? 'var(--warning)' : 'var(--info)' }}>
+                        <Icon name="activity" size={12} color={device.latencyStatus === 'timeout' ? 'var(--warning)' : 'var(--info)'} />
                         {wifiLatencyLabel}
                       </span>
                     )}
                   </div>
                   {runningLogDeviceIds.has(device.id) && (
-                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#86efac' }}>
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--success)' }}>
                       {pausedLogDeviceIds.has(device.id) ? '\u65e5\u5fd7\u5df2\u6682\u505c' : '\u65e5\u5fd7\u91c7\u96c6\u4e2d'}
                     </div>
                   )}
-                  <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);handleSleepDevice(device); }}
-                      disabled={Boolean(busyDeviceAction)}
-                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#d1d5db', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
-                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'sleep' ? '息屏中…' : '息屏'}</button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);handleWakeDevice(device); }}
-                      disabled={Boolean(busyDeviceAction)}
-                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#86efac', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
-                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'wake' ? '唤醒中…' : '唤醒'}</button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);handleUnlockDevice(device); }}
-                      disabled={Boolean(busyDeviceAction)}
-                      title="唤醒并上滑解锁；有 PIN/密码/手势的设备请在设备上手动输入"
-                      style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#93c5fd', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
-                    >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'unlock' ? '解锁中…' : '解锁'}</button>
-                    {confirmRebootId === device.id ? (
-                      <>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); handleRebootDevice(device); }}
-                          style={{ padding: '4px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
-                        >确认重启</button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); }}
-                          style={{ padding: '4px 8px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
-                        >取消</button>
-                      </>
-                    ) : (
+                  {confirmRebootId === device.id ? (
+                    <div style={{ marginTop: '10px', display: 'flex', gap: '6px' }}>
                       <button
-                        onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmDisconnectId(null); setConfirmRebootId(device.id); }}
-                        disabled={Boolean(busyDeviceAction)}
-                        style={{ padding: '4px 8px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: busyDeviceAction ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: busyDeviceAction ? 0.6 : 1 }}
-                      >{busyDeviceAction?.id === device.id && busyDeviceAction.action === 'reboot' ? '重启中…' : '重启'}</button>
-                    )}
+                        onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); handleRebootDevice(device); }}
+                        className="btn sm" style={{ flex: 1, justifyContent: 'center', background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }}
+                      >确认重启</button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); }}
+                        className="btn secondary sm" style={{ flex: 1, justifyContent: 'center' }}
+                      >取消</button>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: '10px', display: 'flex', border: '1px solid var(--border-default)', borderRadius: 'var(--r-sm)', overflow: 'hidden', background: 'var(--bg-elevated)' }}>
+                      {([
+                        { key: 'sleep', icon: 'moon', label: '息屏', busy: '息屏中…', onClick: () => handleSleepDevice(device) },
+                        { key: 'wake', icon: 'sun', label: '唤醒', busy: '唤醒中…', onClick: () => handleWakeDevice(device) },
+                        { key: 'unlock', icon: 'lock-open', label: '解锁', busy: '解锁中…', onClick: () => handleUnlockDevice(device), title: '唤醒并上滑解锁；有 PIN/密码/手势的设备请在设备上手动输入' },
+                        { key: 'reboot', icon: 'rotate-cw', label: '重启', busy: '重启中…', onClick: () => { setConfirmDisconnectId(null); setConfirmRebootId(device.id); } },
+                      ] as const).map((act, idx) => (
+                        <button
+                          key={act.key}
+                          onClick={(e) => { e.stopPropagation(); setSelectedDevice(device); act.onClick(); }}
+                          disabled={Boolean(busyDeviceAction)}
+                          title={'title' in act ? act.title : undefined}
+                          style={{
+                            flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                            padding: '6px 4px', background: 'transparent', border: 'none',
+                            borderLeft: idx === 0 ? 'none' : '1px solid var(--border-default)',
+                            color: 'var(--fg-secondary)', fontSize: '12px',
+                            cursor: busyDeviceAction ? 'not-allowed' : 'pointer', opacity: busyDeviceAction ? 0.6 : 1,
+                            transition: 'background var(--dur-fast)'
+                          }}
+                          onMouseEnter={(e) => { if (!busyDeviceAction) e.currentTarget.style.background = 'var(--bg-active)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          <Icon name={act.icon} size={14} />
+                          {busyDeviceAction?.id === device.id && busyDeviceAction.action === act.key ? act.busy : act.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setFileBrowserDevice(device); }}
+                      title="浏览设备文件、下载到电脑、上传文件到设备"
+                      className="btn secondary sm" style={{ flex: 1, justifyContent: 'center' }}
+                    ><Icon name="folder" color="var(--gold)" />文件管理</button>
                     {confirmDisconnectId === device.id ? (
                       <>
                         <button
                           onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmDisconnectId(null); disconnectDevice(device); }}
-                          style={{ padding: '4px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+                          className="btn sm" style={{ justifyContent: 'center', background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }}
                         >确认断开</button>
                         <button
                           onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmDisconnectId(null); }}
-                          style={{ padding: '4px 8px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                          className="btn secondary sm" style={{ justifyContent: 'center' }}
                         >取消</button>
                       </>
                     ) : (
                       <button
                         onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setConfirmRebootId(null); setConfirmDisconnectId(device.id); }}
-                        style={{ padding: '4px 8px', backgroundColor: '#555', border: 'none', borderRadius: '4px', color: '#ff6b6b', cursor: 'pointer', fontSize: '12px' }}
-                      >断开设备</button>
+                        title="断开设备连接"
+                        className="btn sm iconbtn"
+                        style={{ color: 'var(--danger)' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--danger-soft)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+                      ><Icon name="unplug" color="var(--danger)" /></button>
                     )}
-                  </div>
-                  <div style={{ marginTop: '6px' }}>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelectedDevice(device);setFileBrowserDevice(device); }}
-                      title="浏览设备文件、下载到电脑、上传文件到设备"
-                      style={{ width: '100%', padding: '6px 8px', backgroundColor: '#2a3550', border: '1px solid #3b4a6b', borderRadius: '4px', color: '#fcd34d', cursor: 'pointer', fontSize: '12px' }}
-                    >📁 文件管理</button>
                   </div>
                 </div>
               )})}
@@ -2928,86 +2994,74 @@ function SimpleApp() {
           )}
           </div>
 
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 1 }}>
-            <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'WiFi \u8fde\u63a5'}</h2>
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)', order: 1 }}>
+            <div className="seclabel">{'WiFi \u8fde\u63a5'}</div>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                type="text"
-                placeholder={'\u8bbe\u5907 IP \u5730\u5740:\u7aef\u53e3'}
-                value={wifiIp}
-                onChange={(e) => setWifiIp(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    connectWiFiDevice();
-                  }
-                }}
-                style={{ 
-                  flex: 1, 
-                  padding: '8px 12px', 
-                  backgroundColor: '#353550', 
-                  border: '1px solid #454560', 
-                  borderRadius: '8px', 
-                  color: 'white', 
-                  fontSize: '14px',
-                  outline: 'none'
-                }}
-              />
-              <button 
+              <div className="field" style={{ flex: 1 }}>
+                <input
+                  type="text"
+                  placeholder={'\u8bbe\u5907 IP \u5730\u5740:\u7aef\u53e3'}
+                  value={wifiIp}
+                  onChange={(e) => setWifiIp(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      connectWiFiDevice();
+                    }
+                  }}
+                />
+              </div>
+              <button
                 onClick={connectWiFiDevice}
-                style={{ 
-                  padding: '0 16px', 
-                  backgroundColor: '#4a90d9', 
-                  border: 'none', 
-                  borderRadius: '8px', 
-                  color: 'white', 
-                  cursor: 'pointer'
-                }}
+                className="btn primary"
               >{'\u8fde\u63a5'}</button>
             </div>
 
             <div style={{ marginTop: '8px' }}>
-              <button
+              <span
+                className="link"
                 onClick={() => setShowPairForm((v) => !v)}
-                style={{ background: 'none', border: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: '12px', padding: 0 }}
-              >{showPairForm ? '\u6536\u8d77\u914d\u5bf9' : 'Android 11+ \u65e0\u7ebf\u8c03\u8bd5\uff1f\u70b9\u6b64\u914d\u5bf9'}</button>
+                style={{ fontSize: '12px' }}
+              >{showPairForm ? '\u6536\u8d77\u914d\u5bf9' : 'Android 11+ \u65e0\u7ebf\u8c03\u8bd5\uff1f\u70b9\u6b64\u914d\u5bf9'}</span>
             </div>
 
             {showPairForm && (
-              <div style={{ marginTop: '8px', padding: '10px', backgroundColor: '#2a2a40', borderRadius: '8px' }}>
-                <div style={{ fontSize: '11px', color: '#9ca3af', lineHeight: '1.6', marginBottom: '8px' }}>
+              <div className="subpanel" style={{ marginTop: '8px', padding: '10px' }}>
+                <div style={{ fontSize: '11px', color: 'var(--fg-secondary)', lineHeight: '1.6', marginBottom: '8px' }}>
                   {'\u8bbe\u5907\uff1a\u8bbe\u7f6e \u2192 \u5f00\u53d1\u8005\u9009\u9879 \u2192 \u65e0\u7ebf\u8c03\u8bd5 \u2192 \u300c\u4f7f\u7528\u914d\u5bf9\u7801\u914d\u5bf9\u8bbe\u5907\u300d\uff0c\u586b\u4e0b\u65b9\u5f39\u7a97\u91cc\u7684\u914d\u5bf9\u5730\u5740\uff08IP:\u7aef\u53e3\uff09\u548c 6 \u4f4d\u914d\u5bf9\u7801\u3002\u914d\u5bf9\u6210\u529f\u540e\u4f1a\u81ea\u52a8\u8fde\u63a5\u8bbe\u5907\uff0c\u65e0\u9700\u518d\u624b\u52a8\u586b\u7aef\u53e3\u3002'}
                 </div>
-                <input
-                  type="text"
-                  placeholder={'\u914d\u5bf9\u5730\u5740 IP:\u7aef\u53e3\uff08\u5982 192.168.1.75:37123\uff09'}
-                  value={pairAddress}
-                  onChange={(e) => setPairAddress(e.target.value)}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none', marginBottom: '8px' }}
-                />
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="field" style={{ marginBottom: '8px' }}>
                   <input
                     type="text"
-                    inputMode="numeric"
-                    placeholder={'6 \u4f4d\u914d\u5bf9\u7801'}
-                    value={pairCode}
-                    onChange={(e) => setPairCode(e.target.value)}
-                    onKeyPress={(e) => { if (e.key === 'Enter') { pairWiFiDevice(); } }}
-                    style={{ flex: 1, minWidth: 0, padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
+                    placeholder={'\u914d\u5bf9\u5730\u5740 IP:\u7aef\u53e3\uff08\u5982 192.168.1.75:37123\uff09'}
+                    value={pairAddress}
+                    onChange={(e) => setPairAddress(e.target.value)}
                   />
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <div className="field" style={{ flex: 1 }}>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder={'6 \u4f4d\u914d\u5bf9\u7801'}
+                      value={pairCode}
+                      onChange={(e) => setPairCode(e.target.value)}
+                      onKeyPress={(e) => { if (e.key === 'Enter') { pairWiFiDevice(); } }}
+                    />
+                  </div>
                   <button
                     onClick={pairWiFiDevice}
                     disabled={pairing}
-                    style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 16px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', cursor: pairing ? 'not-allowed' : 'pointer', fontSize: '13px', opacity: pairing ? 0.6 : 1 }}
+                    className="btn primary"
                   >{pairing ? '\u914d\u5bf9\u4e2d\u2026' : '\u914d\u5bf9'}</button>
                 </div>
               </div>
             )}
           </div>
 
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 4 }}>
-            <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u5386\u53f2\u8bbe\u5907'}</h2>
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)', order: 4 }}>
+            <div className="seclabel">{'\u5386\u53f2\u8bbe\u5907'}</div>
             {offlineHistoryDevices.length === 0 ? (
-              <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
+              <div style={{ fontSize: '12px', color: 'var(--fg-tertiary)', lineHeight: 1.6 }}>
                 {historyDevices.length === 0
                   ? '\u6682\u65e0\u5386\u53f2 WiFi \u8bbe\u5907\uff0c\u6210\u529f\u8fde\u63a5\u4e00\u6b21\u540e\u4f1a\u81ea\u52a8\u51fa\u73b0\u5728\u8fd9\u91cc\uff0c\u4e0b\u6b21\u53ef\u4e00\u952e\u5feb\u901f\u91cd\u8fde\u3002'
                   : '\u5386\u53f2 WiFi \u8bbe\u5907\u5df2\u5168\u90e8\u8fde\u63a5\uff0c\u65ad\u5f00\u6216\u91cd\u542f\u540e\u4f1a\u56de\u5230\u8fd9\u91cc\u3002'}
@@ -3022,35 +3076,36 @@ function SimpleApp() {
                   // 回退写入时存的显示名，再回退型号。
                   const displayName = customDeviceNames[item.lastAddress]?.trim() || item.name || item.model;
                   return (
-                    <div key={item.serialNo} style={{ padding: '10px', backgroundColor: '#2a2a40', borderRadius: '8px', border: '1px solid #353550' }}>
+                    <div key={item.serialNo} style={{ padding: '12px 14px', background: 'var(--bg-panel)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-default)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ color: '#fff', fontSize: '13px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayName}>{displayName}</span>
-                        <span style={{ flexShrink: 0, fontSize: '11px', color: '#9ca3af', backgroundColor: '#9ca3af22', padding: '2px 8px', borderRadius: '10px' }}>{'\u672a\u8fde\u63a5'}</span>
+                        <span style={{ color: 'var(--fg-primary)', fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayName}>{displayName}</span>
+                        <span style={{ flexShrink: 0, fontSize: '11px', color: 'var(--fg-tertiary)', border: '1px solid var(--border-default)', padding: '2px 8px', borderRadius: 'var(--r-pill)' }}>{'\u672a\u8fde\u63a5'}</span>
                       </div>
-                      <div style={{ marginTop: '6px', fontSize: '11px', color: '#9ca3af', lineHeight: 1.7 }}>
+                      <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--fg-tertiary)', lineHeight: 1.7 }}>
                         <div style={{ wordBreak: 'break-all' }}>{'SN\uff1a'}{item.serialNo}</div>
                         <div>{'\u4e0a\u6b21\u5730\u5740\uff1a'}{item.lastAddress}</div>
                         <div>{'\u4e0a\u6b21\u8fde\u63a5\uff1a'}{formatHistoryTime(item.lastConnectedAt)}</div>
                       </div>
                       {editing && (
                         <div style={{ marginTop: '8px', display: 'flex', gap: '6px' }}>
-                          <input
-                            type="text"
-                            placeholder={'\u8bbe\u5907 IP \u5730\u5740:\u7aef\u53e3'}
-                            value={inlineEditValue}
-                            onChange={(e) => setInlineEditValue(e.target.value)}
-                            onKeyPress={(e) => { if (e.key === 'Enter' && !connecting) { handleInlineReconnectHistory(item); } }}
-                            style={{ flex: 1, minWidth: 0, padding: '6px 8px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '12px', outline: 'none' }}
-                          />
+                          <div className="field" style={{ flex: 1 }}>
+                            <input
+                              type="text"
+                              placeholder={'\u8bbe\u5907 IP \u5730\u5740:\u7aef\u53e3'}
+                              value={inlineEditValue}
+                              onChange={(e) => setInlineEditValue(e.target.value)}
+                              onKeyPress={(e) => { if (e.key === 'Enter' && !connecting) { handleInlineReconnectHistory(item); } }}
+                            />
+                          </div>
                           <button
                             onClick={() => handleInlineReconnectHistory(item)}
                             disabled={connecting}
-                            style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '0 12px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', cursor: connecting ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: connecting ? 0.6 : 1 }}
+                            className="btn primary sm"
                           >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : '\u91cd\u8fde'}</button>
                         </div>
                       )}
                       {cardError && (
-                        <div style={{ marginTop: '6px', fontSize: '11px', color: '#fca5a5', lineHeight: 1.5 }}>{cardError}</div>
+                        <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--danger)', lineHeight: 1.5 }}>{cardError}</div>
                       )}
                       <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                         {!editing && (
@@ -3058,31 +3113,31 @@ function SimpleApp() {
                             onClick={() => handleQuickConnectHistory(item)}
                             disabled={connecting}
                             title={'\u4f7f\u7528\u4e0a\u6b21\u7684 IP:\u7aef\u53e3\u5feb\u901f\u8fde\u63a5'}
-                            style={{ padding: '4px 10px', backgroundColor: '#2f6fb0', border: 'none', borderRadius: '4px', color: '#fff', cursor: connecting ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: connecting ? 0.6 : 1 }}
+                            className="btn primary sm"
                           >{connecting ? '\u8fde\u63a5\u4e2d\u2026' : '\u5feb\u901f\u8fde\u63a5'}</button>
                         )}
                         {editing && (
                           <button
                             onClick={() => { setInlineEditSerial(null); setInlineEditValue(''); clearHistoryError(item.serialNo); }}
-                            style={{ padding: '4px 10px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                            className="btn secondary sm"
                           >{'\u6536\u8d77'}</button>
                         )}
                         {confirmRemoveSerial === item.serialNo ? (
                           <>
                             <button
                               onClick={() => handleRemoveHistory(item.serialNo)}
-                              style={{ padding: '4px 10px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
+                              className="btn sm" style={{ background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }}
                             >{'\u786e\u8ba4\u79fb\u9664'}</button>
                             <button
                               onClick={() => setConfirmRemoveSerial(null)}
-                              style={{ padding: '4px 10px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                              className="btn secondary sm"
                             >{'\u53d6\u6d88'}</button>
                           </>
                         ) : (
                           <button
                             onClick={() => setConfirmRemoveSerial(item.serialNo)}
                             title={'\u4ece\u5386\u53f2\u5217\u8868\u79fb\u9664\u8be5\u8bbe\u5907\uff08\u4e0d\u5f71\u54cd\u5f53\u524d\u5df2\u5efa\u7acb\u7684\u8fde\u63a5\uff09'}
-                            style={{ padding: '4px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: 'pointer', fontSize: '12px' }}
+                            className="btn outline o-red sm"
                           >{'\u79fb\u9664'}</button>
                         )}
                       </div>
@@ -3094,47 +3149,48 @@ function SimpleApp() {
           </div>
 
           {selectedDevice && (
-            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #353550', order: 3 }}>
-              <h2 style={{ fontSize: '14px', fontWeight: '500', color: '#888', margin: '0 0 12px 0' }}>{'\u8bbe\u5907\u4fe1\u606f'}</h2>
-              <div style={{ fontSize: '12px', color: '#888' }}>
+            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)', order: 3 }}>
+              <div className="seclabel">{'\u8bbe\u5907\u4fe1\u606f'}</div>
+              <div style={{ fontSize: '12px', color: 'var(--fg-secondary)' }}>
                 <div style={{ marginBottom: '10px' }}>
-                  <div style={{ marginBottom: '6px' }}>{'\u81ea\u5b9a\u4e49\u540d\u79f0'}</div>
+                  <div style={{ marginBottom: '6px', color: 'var(--fg-tertiary)' }}>{'\u81ea\u5b9a\u4e49\u540d\u79f0'}</div>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      value={customDeviceNames[selectedDevice.id] || ''}
-                      onChange={(e) => updateCustomDeviceName(selectedDevice.id, e.target.value)}
-                      placeholder={selectedDevice.name || selectedDevice.model || selectedDevice.id}
-                      style={{ flex: 1, padding: '8px 10px', backgroundColor: '#353550', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
-                    />
+                    <div className="field" style={{ flex: 1 }}>
+                      <input
+                        value={customDeviceNames[selectedDevice.id] || ''}
+                        onChange={(e) => updateCustomDeviceName(selectedDevice.id, e.target.value)}
+                        placeholder={selectedDevice.name || selectedDevice.model || selectedDevice.id}
+                      />
+                    </div>
                     <button
                       onClick={() => updateCustomDeviceName(selectedDevice.id, '')}
-                      style={{ padding: '0 10px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: '#d1d5db', cursor: 'pointer', fontSize: '12px' }}
+                      className="btn secondary sm"
                     >{'\u6062\u590d\u9ed8\u8ba4'}</button>
                   </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span>{'\u578b\u53f7'}</span>
-                  <span style={{ color: '#fff' }}>{selectedDevice.model}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{'\u578b\u53f7'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{selectedDevice.model}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', gap: '12px' }}>
-                  <span style={{ flexShrink: 0 }}>{'\u8bbe\u5907\u5e8f\u5217\u53f7'}</span>
-                  <span style={{ color: '#fff', wordBreak: 'break-all', textAlign: 'right' }}>{selectedDevice.serialNo || '--'}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12.5px', gap: '12px' }}>
+                  <span style={{ flexShrink: 0, color: 'var(--fg-tertiary)' }}>{'\u8bbe\u5907\u5e8f\u5217\u53f7'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)', wordBreak: 'break-all', textAlign: 'right' }}>{selectedDevice.serialNo || '--'}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span>{'\u5382\u5546'}</span>
-                  <span style={{ color: '#fff' }}>{selectedDevice.manufacturer}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{'\u5382\u5546'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{selectedDevice.manufacturer}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span>{'Android \u7248\u672c'}</span>
-                  <span style={{ color: '#fff' }}>{selectedDevice.androidVersion}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{'Android \u7248\u672c'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{selectedDevice.androidVersion}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span>{'API \u7b49\u7ea7'}</span>
-                  <span style={{ color: '#fff' }}>{selectedDevice.apiLevel}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{'API \u7b49\u7ea7'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--fg-primary)' }}>{selectedDevice.apiLevel}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{'\u8fde\u63a5\u65b9\u5f0f'}</span>
-                  <span style={{ color: selectedDevice.connectionType === 'wifi' ? '#4ade80' : '#60a5fa' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--fg-tertiary)' }}>{'\u8fde\u63a5\u65b9\u5f0f'}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: selectedDevice.connectionType === 'wifi' ? 'var(--success)' : 'var(--info)' }}>
                     {selectedDevice.connectionType === 'wifi' ? 'WiFi' : 'USB'}
                   </span>
                 </div>
@@ -3143,40 +3199,32 @@ function SimpleApp() {
           )}
         </aside>
         
-        <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%' }}>
-          <nav style={{ display: 'flex', borderBottom: '1px solid #353550' }}>
+        <main className="stage">
+            <div className="panel">
+              <nav className="tabs">
                 {[
-                  { key: 'devices' as TabType, label: '\u8bbe\u5907' },
-                  { key: 'logs' as TabType, label: '\u65e5\u5fd7' },
-                  { key: 'performance' as TabType, label: '\u6027\u80fd' },
-                  { key: 'network' as TabType, label: '\u7f51\u7edc' },
-                  { key: 'mirror' as TabType, label: '\u6295\u5c4f' },
+                  { key: 'devices' as TabType, label: '\u8bbe\u5907', icon: 'smartphone' },
+                  { key: 'logs' as TabType, label: '\u65e5\u5fd7', icon: 'scroll-text' },
+                  { key: 'performance' as TabType, label: '\u6027\u80fd', icon: 'activity' },
+                  { key: 'network' as TabType, label: '\u7f51\u7edc', icon: 'network' },
+                  { key: 'mirror' as TabType, label: '\u6295\u5c4f', icon: 'cast' },
                 ].map(tab => (
                   <button
                     key={tab.key}
+                    className={'tab' + (activeTab === tab.key ? ' active' : '')}
                     onClick={() => setActiveTab(tab.key)}
-                    style={{
-                      padding: '12px 24px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      backgroundColor: activeTab === tab.key ? '#353550' : 'transparent',
-                      color: activeTab === tab.key ? '#fff' : '#888',
-                      border: 'none',
-                      cursor: 'pointer',
-                      borderBottom: activeTab === tab.key ? '2px solid #4a90d9' : 'none'
-                    }}
                   >
-                    {tab.label}
+                    <Icon name={tab.icon} />{tab.label}
                   </button>
                 ))}
               </nav>
 
-              <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+              <div style={{ flex: 1, overflow: 'auto', padding: '16px', minHeight: 0 }}>
                 {/* 无设备时仍可进「性能」页查看采集回看（只读 + 导入）；其余 tab 显示选设备提示。 */}
                 {!selectedDevice && activeTab !== 'performance' ? (
-                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
+                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-tertiary)' }}>
                     <div style={{ textAlign: 'center' }}>
-                      <h2 style={{ fontSize: '24px', fontWeight: '600', color: 'white', margin: '0 0 8px 0' }}>{'请选择设备'}</h2>
+                      <h2 style={{ fontSize: '24px', fontWeight: '600', color: 'var(--fg-primary)', margin: '0 0 8px 0' }}>{'请选择设备'}</h2>
                       <p style={{ fontSize: '14px' }}>{'从左侧列表选择已连接的设备；无设备时可在「性能」页查看采集回看'}</p>
                     </div>
                   </div>
@@ -3190,27 +3238,29 @@ function SimpleApp() {
                     </div>
 
                   {/* 已安装应用：放左侧（order 1），占更宽，列表内部滚动 */}
-                  <div style={{ order: 1, flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#252540', borderRadius: '8px', padding: '16px', overflow: 'hidden' }}>
+                  <div className="subpanel" style={{ order: 1, flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-panel)', padding: '16px', overflow: 'hidden' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '12px', flexShrink: 0 }}>
-                      <h2 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
+                      <h2 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--fg-primary)', whiteSpace: 'nowrap' }}>
                         {'已安装应用'}
-                        <span style={{ fontSize: '13px', color: '#888', marginLeft: '8px', fontWeight: 400 }}>
+                        <span style={{ fontSize: '12.5px', color: 'var(--fg-tertiary)', marginLeft: '8px', fontWeight: 400 }}>
                           {installedPackagesLoading ? '加载中…' : `共 ${installedPackages.length} 个`}
                         </span>
                       </h2>
                       <div style={{ display: 'flex', gap: '8px', flex: 1, maxWidth: '420px' }}>
-                        <input
-                          type="text"
-                          placeholder={'搜索包名'}
-                          value={appFilter}
-                          onChange={(e) => setAppFilter(e.target.value)}
-                          style={{ flex: 1, padding: '8px 12px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
-                        />
+                        <div className="field" style={{ flex: 1, minWidth: 0 }}>
+                          <Icon name="search" />
+                          <input
+                            type="text"
+                            placeholder={'搜索包名'}
+                            value={appFilter}
+                            onChange={(e) => setAppFilter(e.target.value)}
+                          />
+                        </div>
                         <button
+                          className="btn secondary sm"
                           onClick={loadInstalledPackages}
                           disabled={installedPackagesLoading}
-                          style={{ padding: '8px 16px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: installedPackagesLoading ? 'not-allowed' : 'pointer', opacity: installedPackagesLoading ? 0.7 : 1 }}
-                        >{'刷新'}</button>
+                        ><Icon name="refresh-cw" />{'刷新'}</button>
                       </div>
                     </div>
 
@@ -3232,60 +3282,49 @@ function SimpleApp() {
                         return <div style={{ padding: '24px', textAlign: 'center', color: '#666', fontSize: '13px' }}>{'没有匹配的应用'}</div>;
                       }
                       return (
-                        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          {filtered.map(pkg => (
-                            <div
-                              key={pkg}
-                              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: '#1f1f33', borderRadius: '6px', gap: '12px' }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                                <span style={{ fontSize: '13px', color: '#e5e7eb', fontFamily: 'monospace', wordBreak: 'break-all' }}>{pkg}</span>
+                        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+                          {filtered.map(pkg => {
+                            const isBusy = busyPackage === pkg;
+                            const isRunning = runningPackages.has(pkg);
+                            return (
+                              <div
+                                key={pkg}
+                                className="app-row"
+                                style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '8px 12px', borderTop: '1px solid var(--border-subtle)' }}
+                              >
+                                <AppAvatar name={pkg} size={32} />
+                                <span style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: '12.5px', color: 'var(--fg-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pkg}</span>
                                 {deviceNew.has(pkg) && (
-                                  <span title={'本次新安装'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', padding: '2px 7px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', color: '#7dd3fc', backgroundColor: '#0ea5e91f', border: '1px solid #38bdf855', borderRadius: '999px' }}>{'NEW'}</span>
+                                  <span title={'本次新安装'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', height: 20, padding: '0 7px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--info)', background: 'var(--info-soft)', border: '1px solid var(--accent-soft-bd)', borderRadius: 'var(--r-pill)' }}>{'NEW'}</span>
                                 )}
-                                {runningPackages.has(pkg) && (
-                                  <span title={'应用正在运行'} style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 600, color: '#86efac', backgroundColor: '#22c55e1f', border: '1px solid #22c55e55', borderRadius: '999px' }}>
-                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#22c55e', boxShadow: '0 0 4px #22c55e' }} />{'运行中'}
-                                  </span>
-                                )}
+                                {isRunning && <Badge tone="success" dot>运行中</Badge>}
+                                <div style={{ flexShrink: 0, display: 'flex', gap: '6px' }}>
+                                  <button
+                                    className="btn sm outline o-green"
+                                    onClick={() => handleLaunchApp(pkg)}
+                                    disabled={isBusy || isRunning}
+                                    title={isRunning ? '应用已在运行，无需重复启动' : undefined}
+                                  >
+                                    {isBusy && busyAction === 'launch' ? '启动中…' : '启动'}
+                                  </button>
+                                  <button
+                                    className="btn sm outline o-amber"
+                                    onClick={() => handleForceStopApp(pkg)}
+                                    disabled={isBusy}
+                                  >
+                                    {isBusy && busyAction === 'stop' ? '关闭中…' : '关闭'}
+                                  </button>
+                                  <button
+                                    className="btn sm outline o-red"
+                                    onClick={() => handleUninstallApp(pkg)}
+                                    disabled={isBusy}
+                                  >
+                                    {isBusy && busyAction === 'uninstall' ? '卸载中…' : '卸载'}
+                                  </button>
+                                </div>
                               </div>
-                              {(() => {
-                                const isBusy = busyPackage === pkg;
-                                const isRunning = runningPackages.has(pkg);
-                                const busyStyle = (base: React.CSSProperties): React.CSSProperties => ({
-                                  ...base,
-                                  cursor: isBusy ? 'not-allowed' : 'pointer',
-                                  opacity: isBusy ? 0.5 : 1,
-                                });
-                                return (
-                                  <div style={{ flexShrink: 0, display: 'flex', gap: '6px' }}>
-                                    <button
-                                      onClick={() => handleLaunchApp(pkg)}
-                                      disabled={isBusy || isRunning}
-                                      title={isRunning ? '应用已在运行，无需重复启动' : undefined}
-                                      style={{ padding: '5px 12px', fontSize: '12px', color: '#86efac', backgroundColor: '#22c55e22', border: '1px solid #22c55e55', borderRadius: '6px', cursor: (isBusy || isRunning) ? 'not-allowed' : 'pointer', opacity: (isBusy || isRunning) ? 0.4 : 1 }}
-                                    >
-                                      {isBusy && busyAction === 'launch' ? '启动中…' : '启动'}
-                                    </button>
-                                    <button
-                                      onClick={() => handleForceStopApp(pkg)}
-                                      disabled={isBusy}
-                                      style={busyStyle({ padding: '5px 12px', fontSize: '12px', color: '#fcd34d', backgroundColor: '#f59e0b22', border: '1px solid #f59e0b55', borderRadius: '6px' })}
-                                    >
-                                      {isBusy && busyAction === 'stop' ? '关闭中…' : '关闭'}
-                                    </button>
-                                    <button
-                                      onClick={() => handleUninstallApp(pkg)}
-                                      disabled={isBusy}
-                                      style={busyStyle({ padding: '5px 12px', fontSize: '12px', color: '#fca5a5', backgroundColor: '#ef444422', border: '1px solid #ef444455', borderRadius: '6px' })}
-                                    >
-                                      {isBusy && busyAction === 'uninstall' ? '卸载中…' : '卸载'}
-                                    </button>
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       );
                     })()}
@@ -3349,6 +3388,7 @@ function SimpleApp() {
                 </>
                 )}
               </div>
+            </div>
         </main>
       </div>
 
