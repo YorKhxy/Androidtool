@@ -278,6 +278,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  // 渲染层重载/崩溃后据此对齐：返回主进程仍在进行的采集会话。
+  ipcMain.handle(IPC_CHANNELS.ACTIVE_CAPTURE_SESSIONS, async () => {
+    try {
+      return { success: true, data: captureController.getActiveSessions() };
+    } catch (error) {
+      return toIpcErrorResponse(error, '查询进行中采集失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.LIST_CAPTURE_SESSIONS, async () => {
     try {
       const sessions = await captureStore.listSessions();
@@ -915,7 +924,8 @@ app.whenReady().then(() => {
   captureController = new PerformanceCaptureController(
     adbManager,
     captureStore,
-    (channel, payload) => mainWindow?.webContents.send(channel, payload)
+    (channel, payload) => mainWindow?.webContents.send(channel, payload),
+    (deviceId) => scrcpyManager.isMirroring(deviceId)
   );
   registerPerformanceMediaProtocol(() => resolveRuntimeAppRoot(app));
   createWindow();

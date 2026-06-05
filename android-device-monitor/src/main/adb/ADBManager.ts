@@ -57,7 +57,12 @@ const execFileAsync = promisify(execFile);
 
 export class ADBManager extends EventEmitter {
   private readonly runtimeInspector = new AdbRuntimeInspector(
-    (args, options) => this.execAdb(args, options)
+    (args, options) => this.execAdb(args, options),
+    {
+      // Pico 常驻 PxrMetric 流用的 spawn 依赖：解析内置 adb 路径后 spawn 长进程；停止走跨平台进程树清理。
+      spawnAdb: async (args) => spawn((await this.resolveAdbBinary()).path, args),
+      stopChild: (child) => this.stopChildProcess(child),
+    }
   );
   // Phase 14 持续分段录制引擎（采集会话用）。
   private readonly captureRecorder = new PerformanceCaptureRecorder(
@@ -1609,6 +1614,16 @@ export class ADBManager extends EventEmitter {
     });
   }
 
+  // 跨平台终止 spawn 出来的子进程（如 Pico 常驻 logcat 流）：Windows 杀进程树，其它平台 SIGTERM。
+  private async stopChildProcess(child: ChildProcess): Promise<void> {
+    if (child.killed) return;
+    if (process.platform === 'win32' && child.pid) {
+      await this.killWindowsProcessTree(child.pid);
+    } else {
+      child.kill('SIGTERM');
+    }
+  }
+
   private parseHttpRequests(output: string, packageName = ''): NetworkRequest[] {
     const packets = this.parseTcpdumpPackets(output);
     const requestMessages: ParsedHttpRequestMessage[] = [];
@@ -2198,6 +2213,7 @@ export class ADBManager extends EventEmitter {
     logger.log('ADBManager: cleanup called, stopping all processes...');
 
     this.stopDeviceMonitoring();
+    this.runtimeInspector.stopPicoStreams();
 
     for (const [deviceId, stopEntry] of this.logcatProcesses.entries()) {
       try {

@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceSample } from '../../shared/types';
 import { CaptureChart } from './CaptureChart';
 import { CaptureFilterPanel } from './CaptureFilterPanel';
 import { Icon } from './ui';
-import { captureSegmentFrame, findNearestSample, getSingleEyeWrapperStyle, renderMetricOverlay, renderRecordingPlaceholder } from './captureReportHelpers';
+import { captureSegmentFrame, findNearestSample, renderMetricOverlay, renderRecordingPlaceholder } from './captureReportHelpers';
 import {
   buildSegmentMediaUrl,
   captureTotalMs,
@@ -208,35 +208,34 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
         </div>
       );
     }
+    // 单眼裁切且已知真实分辨率时：录像盒子按可用宽度 100% 铺开，高度由单眼画面比例(aspectRatio)决定。
+    // 侧栏折叠腾出横向空间 → 盒子变宽 → 高度随之等比增大，录像「变大撑满」可用空间——纯 CSS 自适应，
+    // 浏览器在容器尺寸变化（含侧栏 0.22s 过渡）时自动重排，无需手动测量或监听 resize。
+    const useCropFill = shouldCrop && hasVideoSize && !!videoSize;
+    const singleEyeRatio = videoSize
+      ? `${Math.max(1, Math.floor(videoSize.width / 2))} / ${Math.max(1, videoSize.height)}`
+      : undefined;
+    const videoBoxStyle: CSSProperties = useCropFill
+      ? { position: 'relative', width: '100%', aspectRatio: singleEyeRatio, borderRadius: 'var(--r-md)', backgroundColor: 'var(--bg-mirror)', border: '1px solid var(--border-subtle)', overflow: 'hidden' }
+      : { position: 'relative', height: `${REPORT_HEIGHT}px`, borderRadius: 'var(--r-md)', backgroundColor: 'var(--bg-mirror)', border: '1px solid var(--border-subtle)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' };
     return (
       <div>
-        <div style={{ position: 'relative', height: `${REPORT_HEIGHT}px`, borderRadius: 'var(--r-md)', backgroundColor: 'var(--bg-mirror)', border: '1px solid var(--border-subtle)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: shouldCrop ? 'flex-start' : 'center' }}>
-          {shouldCrop && hasVideoSize && videoSize ? (
-            <div style={getSingleEyeWrapperStyle(videoSize)}>
-              <video
-                key={activeSegmentIndex}
-                ref={videoRef}
-                src={segmentUrl}
-                playsInline
-                onLoadedMetadata={(e) => handleLoadedMetadata(e.currentTarget)}
-                onTimeUpdate={(e) => handleTimeUpdate(e.currentTarget)}
-                onEnded={handleEnded}
-                style={{ position: 'absolute', top: 0, left: 0, width: '200%', height: '100%', objectFit: 'fill', display: 'block' }}
-              />
-            </div>
-          ) : (
-            <video
-              key={activeSegmentIndex}
-              ref={videoRef}
-              src={segmentUrl}
-              playsInline
-              onLoadedMetadata={(e) => handleLoadedMetadata(e.currentTarget)}
-              onTimeUpdate={(e) => handleTimeUpdate(e.currentTarget)}
-              onEnded={handleEnded}
-              // 单眼裁切在拿到真实分辨率前先隐藏，避免闪现双眼画面。
-              style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'var(--bg-mirror)', opacity: shouldCrop ? 0 : 1 }}
-            />
-          )}
+        {/* 单眼裁切按宽度等比放大填充（hxy0601 功能），盒子配色用设计系统 token（ui-fresh 口径）。 */}
+        <div style={videoBoxStyle}>
+          <video
+            key={activeSegmentIndex}
+            ref={videoRef}
+            src={segmentUrl}
+            playsInline
+            onLoadedMetadata={(e) => handleLoadedMetadata(e.currentTarget)}
+            onTimeUpdate={(e) => handleTimeUpdate(e.currentTarget)}
+            onEnded={handleEnded}
+            // 裁切填充态：video 宽 200%、靠 wrapper overflow:hidden 只露左眼，objectFit:fill 铺满盒子。
+            // 未裁切 / 分辨率未知态：contain 居中；单眼在拿到真实分辨率前先隐藏，避免闪现双眼画面。
+            style={useCropFill
+              ? { position: 'absolute', top: 0, left: 0, width: '200%', height: '100%', objectFit: 'fill', display: 'block' }
+              : { width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'var(--bg-mirror)', opacity: shouldCrop ? 0 : 1 }}
+          />
           {renderMetricOverlay(currentSample)}
         </div>
         {/* 可拖动时间轴：播放头横跨整条逻辑轴，分段在轴上以刻度分隔。 */}
@@ -284,20 +283,25 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(0, 1fr)', gap: '16px', alignItems: 'start' }}>
-        <div style={{ height: `${REPORT_HEIGHT}px` }}>
-        <CaptureChart
-          session={session}
-          samples={samples}
-          totalMs={totalMs}
-          selectedSeriesKeys={selectedSeriesKeys}
-          onToggleSeries={toggleSeries}
-          playheadMs={playheadMs}
-          showPlayhead={!live && (segments.length > 0 || markCount > 0)}
-          onSeekToMs={!live && segments.length > 0 ? seekTo : undefined}
-          markers={appliedMarkers}
-          onMarkerClick={!live ? seekAndPause : undefined}
-        />
+      {/* 两列等高：录像按宽度放大变高后，曲线列 stretch 跟着拉伸填满，不在下方留空。
+          曲线用「相对盒 + 绝对填充」承载，避免 SVG 在百分比高度下塌缩；minHeight 兜底保证
+          无录像 / 实时态仍有基础高度。 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(0, 1fr)', gap: '16px', alignItems: 'stretch' }}>
+        <div style={{ position: 'relative', minHeight: `${REPORT_HEIGHT}px` }}>
+          <div style={{ position: 'absolute', inset: 0 }}>
+            <CaptureChart
+              session={session}
+              samples={samples}
+              totalMs={totalMs}
+              selectedSeriesKeys={selectedSeriesKeys}
+              onToggleSeries={toggleSeries}
+              playheadMs={playheadMs}
+              showPlayhead={!live && (segments.length > 0 || markCount > 0)}
+              onSeekToMs={!live && segments.length > 0 ? seekTo : undefined}
+              markers={appliedMarkers}
+              onMarkerClick={!live ? seekAndPause : undefined}
+            />
+          </div>
         </div>
         {renderVideoArea()}
       </div>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { DeviceInfo, PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceMetrics, PerformanceSample, PicoMetricsState } from '../../shared/types';
+import { useCooldown } from '../lib/useCooldown';
 import { CaptureReport } from './CaptureReport';
 import { CaptureHistoryList } from './CaptureHistoryList';
 import { formatClock, formatMemoryMb, METRIC_COLORS } from './perfFormat';
@@ -14,6 +15,8 @@ type PerformancePanelProps = {
   isCapturing: boolean;
   /** start/stop 异步进行中：禁用开关防重复点击。 */
   isCaptureBusy: boolean;
+  /** 当前设备是否正在投屏：用于提示「投屏会增加负载、轻微影响性能读数」（非阻塞）。 */
+  isDeviceMirroring?: boolean;
   elapsedMs: number;
   /** 软上限提醒文本（达 30 分钟 / 2GB），null 表示不显示。 */
   softLimitNotice: string | null;
@@ -31,6 +34,8 @@ type PerformancePanelProps = {
   onRenameCaptureSession: (sessionId: string, title: string) => void;
   onDeleteCaptureSession: (sessionId: string) => void;
   onExportCaptureSession: (sessionId: string) => void;
+  /** 刷新采集回看列表（手动重新拉取归档会话）。 */
+  onRefreshCaptureSessions: () => void;
   /** 选 zip 文件导入。 */
   onImportCaptureSessions: () => void;
   /** 拖拽导入（.zip 或会话文件夹路径）。 */
@@ -105,6 +110,7 @@ export function PerformancePanel({
   captureSamples,
   isCapturing,
   isCaptureBusy,
+  isDeviceMirroring,
   elapsedMs,
   softLimitNotice,
   captureMarkers,
@@ -118,6 +124,7 @@ export function PerformancePanel({
   onRenameCaptureSession,
   onDeleteCaptureSession,
   onExportCaptureSession,
+  onRefreshCaptureSessions,
   onImportCaptureSessions,
   onImportCapturePaths,
   onExportSession,
@@ -125,6 +132,8 @@ export function PerformancePanel({
   onRevealExportedCapture,
 }: PerformancePanelProps) {
   const [importDragOver, setImportDragOver] = useState(false);
+  // 刷新是瞬时动作（本地重拉列表），用假冷却给可见反馈。
+  const refreshCooldown = useCooldown();
   // 采集回看类型筛选：全部 / 仅安卓 / 仅 Pico（手动筛，不再跟随当前设备）。
   const [captureTypeFilter, setCaptureTypeFilter] = useState<'all' | 'android' | 'pico'>('all');
   // 回放时播放头处的样本（由 CaptureReport 上抛）：让「前台应用 + 参数」块跟随回放数据而非实时设备。
@@ -182,6 +191,12 @@ export function PerformancePanel({
           <div style={{ color: 'var(--fg-secondary)', fontSize: '12px', lineHeight: 1.5 }}>
             一次「开始采集 → 关闭采集」生成一份采集报告：曲线填满区域，录屏在报告内合并播放，拖动时间轴联动曲线游标与画面。
           </div>
+          {isDeviceMirroring && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', color: 'var(--warning)', backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--warning)', borderRadius: 'var(--r-sm)', padding: '7px 10px', fontSize: '12px', lineHeight: 1.5 }}>
+              <span style={{ flexShrink: 0, display: 'inline-flex', marginTop: '1px' }}><Icon name="alert-triangle" size={14} /></span>
+              <span>当前设备正在投屏：投屏会额外占用编码器与带宽，增加设备负载、轻微影响性能读数。追求更准的数据可先停止投屏再采集。</span>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button
               onClick={onToggleCapture}
@@ -241,6 +256,14 @@ export function PerformancePanel({
                   <Icon name="folder-open" />打开位置
                 </button>
               )}
+              <button
+                onClick={() => refreshCooldown.run(onRefreshCaptureSessions)}
+                disabled={refreshCooldown.cooling}
+                title="刷新采集回看列表"
+                className="btn secondary sm"
+              >
+                <span className={refreshCooldown.cooling ? 'adm-spin' : undefined} style={{ display: 'inline-flex' }}><Icon name="refresh-cw" /></span>刷新
+              </button>
               <button
                 onClick={onImportCaptureSessions}
                 title="导入采集会话（.zip）；也可把 zip 或会话文件夹拖到此区域"

@@ -281,6 +281,14 @@ export interface PerformanceCaptureSession {
   error?: string;
 }
 
+/** 进行中的采集会话快照：渲染层重载/崩溃后据此对齐采集状态。 */
+export interface ActiveCaptureSession {
+  deviceId: string;
+  session: PerformanceCaptureSession;
+  /** 已采集时长（毫秒） */
+  elapsedMs: number;
+}
+
 /** 导入会话结果：成功导入的会话 + 每个失败来源的错误说明。 */
 export interface CaptureImportResult {
   imported: PerformanceCaptureSession[];

@@ -1,7 +1,13 @@
-import type { ExecFileOptions } from 'child_process';
+import type { ChildProcess, ExecFileOptions } from 'child_process';
 import type { MetricReading, PerformanceMetrics, PicoAppSupportStatus } from '../../shared/types';
+import { PicoMetricsStream } from './picoMetricsStream';
 
 type ExecAdbText = (args: string[], options?: ExecFileOptions) => Promise<{ stdout: string; stderr: string }>;
+
+export type PicoStreamDeps = {
+  spawnAdb: (args: string[]) => Promise<ChildProcess>;
+  stopChild: (child: ChildProcess) => Promise<void>;
+};
 
 type ForegroundAppContext = {
   packageName?: string;
@@ -20,8 +26,18 @@ export type PicoAppSupportResult = {
   message: string;
 };
 
-const PICO_METRICS_LOG_ARGS = ['shell', 'logcat', '-d', '-v', 'time', '-s', 'PxrMetric'];
+// 只取最近若干行 PxrMetric：在「设备端」先按 tag 过滤再 tail，仅把这几行传回 PC。
+// 绝不能 `logcat -d -s PxrMetric` 全量 dump：游戏每帧一条，长会话缓冲可达数十 MB，全量回传会
+// 超过 execFile 的 maxBuffer / 拖过 timeout（非零退出、空 stderr），导致每拍读取失败、永远退回
+// Android 采样（真机实测：空闲时 5 行 0.4s 成功，游戏中海量日志即每拍失败）。
+// 整条管道必须作为「单个参数」交给 adb shell，由设备端 shell 解释管道。
+// 注意：不能用 `logcat -t N`——本机型 -t 是「先尾取后过滤」，叠加 -s 会取到空。
+const PICO_METRICS_LOG_ARGS = ['shell', 'logcat -d -v time -s PxrMetric | tail -n 20'];
 const PICO_HUB_START_THROTTLE_MS = 15000;
+// 流缓存最新行的有效期：Pico ~1 行/秒，留 3s 容忍偶发间隔；超过即视为「当前无最近指标」。
+const PICO_METRICS_FRESH_MS = 3000;
+// 流刚启动、还没收到第一行的预热窗口：此期间用一次性 tail 兜底，避免开头闪烁回退提示。
+const PICO_METRICS_WARMUP_MS = 2500;
 const XR_PROFILING_TOOLKIT_MARKERS = [
   'XRProfilingToolkitLogger',
   'XR_ProfilingToolkit',
@@ -33,8 +49,22 @@ export class PicoMetricsReader {
   private readonly picoDeviceCache = new Map<string, boolean>();
   private readonly metricsHubStartedAt = new Map<string, number>();
   private readonly appSupportCache = new Map<string, PicoAppSupportResult>();
+  private readonly picoStream: PicoMetricsStream | null;
 
-  constructor(private readonly execAdb: ExecAdbText) {}
+  constructor(private readonly execAdb: ExecAdbText, streamDeps?: PicoStreamDeps) {
+    // 有 spawn 依赖时启用常驻流（生产路径）；缺省（独立使用 / 结构测试）退回一次性 tail 读取。
+    this.picoStream = streamDeps
+      ? new PicoMetricsStream(streamDeps.spawnAdb, streamDeps.stopChild, (deviceId) => this.ensureMetricsHubStarted(deviceId))
+      : null;
+  }
+
+  stopStream(deviceId: string): void {
+    void this.picoStream?.stop(deviceId);
+  }
+
+  stopAllStreams(): void {
+    void this.picoStream?.stopAll();
+  }
 
   async isPicoDevice(deviceId: string): Promise<boolean> {
     if (this.picoDeviceCache.has(deviceId)) {
@@ -56,25 +86,50 @@ export class PicoMetricsReader {
       return null;
     }
 
-    await this.ensureMetricsHubStarted(deviceId);
+    if (this.picoStream) {
+      // 稳态：读常驻流缓存的最新行（无每拍 spawn）。流内部已在启动时开 hub；这里再幂等续开一次
+      //（throttle 15s 内空操作），防止 hub streaming 中途被关导致断流。
+      void this.ensureMetricsHubStarted(deviceId);
+      await this.picoStream.ensureStreaming(deviceId);
+      const streamed = this.picoStream.getFreshLine(deviceId, PICO_METRICS_FRESH_MS);
+      if (streamed) {
+        return this.parseMetricsLine(streamed, foregroundApp);
+      }
+      // 冷启动预热期：流刚起还没收到第一行，用一次性 tail 兜底，避免开头闪烁回退。
+      if (this.picoStream.isWarmingUp(deviceId, PICO_METRICS_WARMUP_MS)) {
+        const bridge = await this.readLatestLineOnce(deviceId);
+        if (bridge) {
+          return this.parseMetricsLine(bridge, foregroundApp);
+        }
+      }
+      // 预热已过仍无新鲜数据 = 当前确无最近 Pico 指标（如停在非 VR 界面）→ 交由上层回退/跳过，绝不显示旧值。
+      throw new Error('未读取到 PICO Metrics 实时数据。');
+    }
 
+    // 无流依赖：退回一次性 tail 读取。
+    await this.ensureMetricsHubStarted(deviceId);
+    const latestLine = await this.readLatestLineOnce(deviceId);
+    if (!latestLine) {
+      throw new Error('未读取到 PICO Metrics 实时数据。');
+    }
+    return this.parseMetricsLine(latestLine, foregroundApp);
+  }
+
+  // 一次性读取最近一行 PxrMetric：设备端先过滤再 tail，绝不全量 dump（见 PICO_METRICS_LOG_ARGS 注释）。
+  // 用于无流依赖场景与常驻流的冷启动预热兜底。
+  private async readLatestLineOnce(deviceId: string): Promise<string | null> {
     const { stdout } = await this.execAdb(['-s', deviceId, ...PICO_METRICS_LOG_ARGS], {
       timeout: 4000,
       maxBuffer: 1024 * 1024 * 2,
     });
-
-    const latestLine = stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .reverse()
-      .find((line) => line.includes('PxrMetric'));
-
-    if (!latestLine) {
-      throw new Error('未读取到 PICO Metrics 实时数据。');
-    }
-
-    return this.parseMetricsLine(latestLine, foregroundApp);
+    return (
+      stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .reverse()
+        .find((line) => line.includes('PxrMetric')) ?? null
+    );
   }
 
   async detectForegroundAppSupport(deviceId: string, foregroundApp: ForegroundAppContext): Promise<PicoAppSupportResult> {

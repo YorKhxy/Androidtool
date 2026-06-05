@@ -31,6 +31,22 @@ const selectStyle: CSSProperties = {
   fontSize: '12px',
 };
 
+// 自绘阈值步进按钮（▲/▼）：贴合工具暗色主题，替代原生 number 上下箭头。
+const stepButtonStyle: CSSProperties = {
+  border: 'none',
+  backgroundColor: 'var(--bg-input)',
+  color: 'var(--fg-tertiary)',
+  cursor: 'pointer',
+  width: '20px',
+  height: '13px',
+  fontSize: '8px',
+  lineHeight: '13px',
+  padding: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
 const makeConditionId = () => `c-${Math.round(performance.now() * 1000)}-${Math.floor(Math.random() * 1e6)}`;
 
 export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isPico, hitCount, applied }: CaptureFilterPanelProps) {
@@ -85,15 +101,36 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
                   <option key={op} value={op}>{op}</option>
                 ))}
               </select>
-              <input
-                type="number"
-                inputMode="decimal"
-                placeholder="阈值"
-                value={Number.isFinite(condition.threshold) ? condition.threshold : ''}
-                onChange={(e) => updateCondition(condition.id, { threshold: e.target.value === '' ? NaN : Number(e.target.value) })}
-                style={{ ...selectStyle, width: '88px', border: `1px solid ${thresholdEmpty ? 'var(--danger)' : 'var(--border-default)'}` }}
-                aria-label="阈值"
-              />
+              {/* 阈值输入 + 自绘 ▲▼ 步进（hxy0601 功能）：整体一个边框容器、输入透明无边、步进列只加分隔线，
+                  颜色用设计系统 token（ui-fresh 口径）。隐藏原生上下箭头由 .adm-number 负责。 */}
+              <div style={{ display: 'flex', alignItems: 'stretch', height: '28px', borderRadius: 'var(--r-sm)', overflow: 'hidden', border: `1px solid ${thresholdEmpty ? 'var(--danger)' : 'var(--border-default)'}`, backgroundColor: 'var(--bg-input)' }}>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  className="adm-number"
+                  placeholder="阈值"
+                  value={Number.isFinite(condition.threshold) ? condition.threshold : ''}
+                  onChange={(e) => updateCondition(condition.id, { threshold: e.target.value === '' ? NaN : Number(e.target.value) })}
+                  style={{ width: '62px', backgroundColor: 'transparent', border: 'none', outline: 'none', color: 'var(--fg-primary)', padding: '0 8px', fontSize: '12px' }}
+                  aria-label="阈值"
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', borderLeft: `1px solid ${thresholdEmpty ? 'var(--danger)' : 'var(--border-default)'}` }}>
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-label="增大阈值"
+                    onClick={() => updateCondition(condition.id, { threshold: (Number.isFinite(condition.threshold) ? condition.threshold : 0) + 1 })}
+                    style={stepButtonStyle}
+                  >▲</button>
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-label="减小阈值"
+                    onClick={() => updateCondition(condition.id, { threshold: Math.max(0, (Number.isFinite(condition.threshold) ? condition.threshold : 0) - 1) })}
+                    style={{ ...stepButtonStyle, borderTop: '1px solid var(--border-default)' }}
+                  >▼</button>
+                </div>
+              </div>
               {thresholdEmpty && <span style={{ color: 'var(--danger)', fontSize: '11px' }}>阈值不能为空</span>}
               <button
                 type="button"

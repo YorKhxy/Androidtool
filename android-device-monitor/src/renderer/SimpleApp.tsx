@@ -284,6 +284,8 @@ function SimpleApp() {
   const [filterLevel, setFilterLevel] = useState<LogLevelFilter>('all');
   const [logTagFilter, setLogTagFilter] = useState('');
   const [logPackageFilter, setLogPackageFilter] = useState('');
+  // 包名过滤下拉（可主动输入 + 选当前设备已装应用）的显隐。
+  const [showLogPackageDropdown, setShowLogPackageDropdown] = useState(false);
   const [logPidFilter, setLogPidFilter] = useState('');
   const [useRegexSearch, setUseRegexSearch] = useState(false);
   const [pausedLogDeviceIds, setPausedLogDeviceIds] = useState<Set<string>>(() => new Set());
@@ -773,6 +775,29 @@ function SimpleApp() {
   useEffect(() => {
     if (activeTab === 'performance') void refreshCaptureSessions();
   }, [activeTab, refreshCaptureSessions]);
+
+  // 挂载时与主进程对齐进行中的采集：渲染层重载 / 崩溃 / 手动刷新窗口后，主进程的采集会话仍在跑，
+  // 而渲染态被重置成「未采集」——会导致点开始撞「已在采集中」死锁。这里恢复采集中状态、起始时间、
+  // 已用时长，并回填已累积样本（复用 loadCaptureSession，samples.jsonl 逐行容错可中途读取），
+  // 之后实时 CAPTURE_SAMPLE 继续累加。
+  useEffect(() => {
+    if (!hasElectronAPI()) return;
+    void (async () => {
+      const result = await window.electronAPI!.getActiveCaptureSessions();
+      if (!result.success || !result.data) return;
+      for (const { deviceId, session, elapsedMs } of result.data) {
+        setActiveCaptureByDeviceId((prev) => (prev[deviceId] ? prev : { ...prev, [deviceId]: session }));
+        setPerformanceSessionStartedAtByDeviceId((prev) => ({ ...prev, [deviceId]: new Date(session.startedAt) }));
+        setCaptureElapsedByDeviceId((prev) => ({ ...prev, [deviceId]: elapsedMs }));
+        const detail = await window.electronAPI!.loadCaptureSession(session.id);
+        if (detail.success && detail.data) {
+          const restored = detail.data.samples;
+          // 仅当磁盘历史比当前内存更全时回填，避免覆盖掉对齐期间已到达的实时样本。
+          setPerformanceSamplesByDeviceId((prev) => (restored.length > (prev[deviceId]?.length ?? 0) ? { ...prev, [deviceId]: restored } : prev));
+        }
+      }
+    })();
+  }, []);
 
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
@@ -2497,7 +2522,49 @@ function SimpleApp() {
           <option value="E">Error+</option>
           <option value="F">Fatal</option>
         </select>
-        <div className="field"><input value={logPackageFilter} onChange={(e) => setLogPackageFilter(e.target.value)} placeholder={'\u5e94\u7528/\u5305\u540d'} /></div>
+        {(() => {
+          // \u53ef\u4e3b\u52a8\u8f93\u5165 + \u4e0b\u62c9\u9009\u5f53\u524d\u8bbe\u5907\u5df2\u88c5\u5e94\u7528\uff08hxy0601 \u529f\u80fd\uff09\uff1a\u8f93\u5165\u5373\u6309\u5b50\u4e32\u8054\u60f3\u8fc7\u6ee4\uff0c\u5217\u8868\u4e0a\u9650 80 \u6761\u9632\u8fc7\u957f\u3002
+          // \u6837\u5f0f\u7528\u8bbe\u8ba1\u7cfb\u7edf token\uff08ui-fresh \u53e3\u5f84\uff09\uff1a\u8f93\u5165\u5957 .field\uff0c\u4e0b\u62c9\u7528 bg-elevated/border-default/sh-pop\u3002
+          const kw = logPackageFilter.trim().toLowerCase();
+          const matched = (kw ? installedPackages.filter((p) => p.toLowerCase().includes(kw)) : installedPackages).slice(0, 80);
+          return (
+            <div style={{ position: 'relative' }}>
+              <div className="field" style={{ width: '100%' }}>
+                <input
+                  value={logPackageFilter}
+                  onChange={(e) => { setLogPackageFilter(e.target.value); setShowLogPackageDropdown(true); }}
+                  onFocus={() => setShowLogPackageDropdown(true)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') setShowLogPackageDropdown(false); }}
+                  onBlur={() => window.setTimeout(() => setShowLogPackageDropdown(false), 150)}
+                  placeholder={'\u5e94\u7528/\u5305\u540d'}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              {showLogPackageDropdown && (
+                <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, maxHeight: '260px', overflowY: 'auto', background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-md)', boxShadow: 'var(--sh-pop)', minWidth: '260px' }}>
+                  {installedPackagesLoading && installedPackages.length === 0 ? (
+                    <div style={{ padding: '8px 10px', color: 'var(--fg-tertiary)', fontSize: '12px' }}>\u52a0\u8f7d\u5df2\u88c5\u5e94\u7528\u4e2d\u2026</div>
+                  ) : matched.length === 0 ? (
+                    <div style={{ padding: '8px 10px', color: 'var(--fg-tertiary)', fontSize: '12px' }}>
+                      {installedPackages.length === 0 ? '\u672a\u83b7\u53d6\u5230\u5df2\u88c5\u5e94\u7528\uff08\u53ef\u76f4\u63a5\u8f93\u5165\u5305\u540d\uff09' : '\u65e0\u5339\u914d\u7684\u5df2\u88c5\u5e94\u7528'}
+                    </div>
+                  ) : (
+                    matched.map((pkg) => (
+                      <div
+                        key={pkg}
+                        onMouseDown={(e) => { e.preventDefault(); setLogPackageFilter(pkg); setShowLogPackageDropdown(false); }}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-hover)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                        title={pkg}
+                        style={{ padding: '7px 10px', cursor: 'pointer', color: 'var(--fg-primary)', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >{pkg}</div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         <div className="field"><input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} /></div>
         <div style={{ position: 'relative' }}>
           <div className="field" style={{ width: '100%' }}>
@@ -2641,6 +2708,15 @@ function SimpleApp() {
         ::-webkit-scrollbar-thumb { background: #3a3a55; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
         ::-webkit-scrollbar-thumb:hover { background: #50506e; background-clip: content-box; }
         ::-webkit-scrollbar-corner { background: transparent; }
+        /* 全局按钮点击反馈：所有按钮按下时轻微缩放+压暗（禁用态不响应）。新按钮自动继承。 */
+        button { transition: transform 0.08s ease, filter 0.12s ease; }
+        button:active:not(:disabled) { transform: scale(0.96); filter: brightness(0.85); }
+        /* 瞬时动作按钮"假冷却"期内的图标转圈（配合 useCooldown）。 */
+        @keyframes adm-spin { to { transform: rotate(360deg); } }
+        .adm-spin { display: inline-block; animation: adm-spin 0.5s linear infinite; }
+        /* 数字输入隐藏原生上下箭头，改用应用内自绘 ▲▼ 步进控件。 */
+        .adm-number::-webkit-outer-spin-button, .adm-number::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .adm-number { -moz-appearance: textfield; appearance: textfield; }
       `}</style>
       {!appReady && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 3000, backgroundColor: '#1a1a2e', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -3342,6 +3418,7 @@ function SimpleApp() {
                     captureSamples={shownCaptureSamples}
                     isCapturing={isSelectedCapturing}
                     isCaptureBusy={isSelectedCaptureBusy}
+                    isDeviceMirroring={Boolean(selectedDeviceId && mirrorSessionsByDeviceId[selectedDeviceId]?.status === 'running')}
                     elapsedMs={selectedCaptureElapsed}
                     softLimitNotice={selectedSoftLimitNotice}
                     captureMarkers={shownCaptureMarkers}
@@ -3355,6 +3432,7 @@ function SimpleApp() {
                     onRenameCaptureSession={renameCaptureSession}
                     onDeleteCaptureSession={deleteCaptureSession}
                     onExportCaptureSession={exportCaptureSession}
+                    onRefreshCaptureSessions={() => void refreshCaptureSessions()}
                     onImportCaptureSessions={importCaptureViaDialog}
                     onImportCapturePaths={importCapturePaths}
                     onExportSession={exportPerformanceSession}
