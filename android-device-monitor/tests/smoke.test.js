@@ -751,8 +751,8 @@ describe('project smoke checks', () => {
     expect(rendererSource).toContain('关闭录制播放');
     expect(rendererSource).not.toContain('recording.videoPath &&');
     expect(rendererSource).not.toContain('recording.manifestPath &&');
-    const snapshotSectionIndex = rendererSource.indexOf('>性能快照</div>');
-    const recordingSectionIndex = rendererSource.indexOf('>性能录制</div>');
+    const snapshotSectionIndex = rendererSource.indexOf('>性能快照</h3>');
+    const recordingSectionIndex = rendererSource.indexOf('>性能录制</h3>');
     expect(snapshotSectionIndex).toBeGreaterThanOrEqual(0);
     expect(recordingSectionIndex).toBeGreaterThanOrEqual(0);
     expect(snapshotSectionIndex).toBeLessThan(recordingSectionIndex);
