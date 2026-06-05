@@ -2292,19 +2292,33 @@ function SimpleApp() {
     return colors[level];
   };
 
-  const renderLogcatPanel = () => (
+  const renderLogcatPanel = () => {
+    // 日志级别 → Design System 级别色 token（与计数 chip、日志行级别字母统一取色）。
+    const LOG_LEVEL_TOKEN: Record<LogEntry['level'], string> = {
+      V: 'var(--log-verbose)',
+      D: 'var(--log-debug)',
+      I: 'var(--log-info)',
+      W: 'var(--log-warn)',
+      E: 'var(--log-error)',
+      F: 'var(--log-fatal)',
+    };
+    return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '10px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '10px', backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', padding: '10px', background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)' }}>
         <button
           onClick={toggleLogcat}
-          style={{ padding: '8px 12px', backgroundColor: isSelectedLogcatRunning ? '#7f1d1d' : '#166534', border: 'none', borderRadius: '6px', color: 'white', cursor: 'pointer', fontSize: '13px' }}
+          className="btn sm"
+          style={isSelectedLogcatRunning
+            ? { background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }
+            : { background: 'var(--success)', color: '#fff', borderColor: 'var(--success)' }}
         >
           {isSelectedLogcatRunning ? '\u505c\u6b62' : '\u5f00\u59cb'}
         </button>
         <button
           onClick={toggleSelectedDevicePause}
           disabled={!isSelectedLogcatRunning}
-          style={{ padding: '8px 12px', backgroundColor: isSelectedLogPaused ? '#ca8a04' : '#353550', border: 'none', borderRadius: '6px', color: 'white', cursor: isSelectedLogcatRunning ? 'pointer' : 'not-allowed', fontSize: '13px', opacity: isSelectedLogcatRunning ? 1 : 0.5 }}
+          className="btn sm secondary"
+          style={isSelectedLogPaused ? { background: 'var(--warning)', color: '#fff', borderColor: 'var(--warning)' } : undefined}
         >
           {isSelectedLogPaused ? '\u7ee7\u7eed' : '\u6682\u505c'}
         </button>
@@ -2314,11 +2328,11 @@ function SimpleApp() {
               clearDeviceLogs(selectedDeviceId);
             }
           }}
-          style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: '#d1d5db', fontSize: '13px', cursor: 'pointer' }}
+          className="btn sm secondary"
         >{'\u6e05\u7a7a'}</button>
-        <button onClick={exportVisibleLogs} title={'导出当前可见 / 筛选后的日志（受等级、搜索与显示上限影响）'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa'}</button>
-        <button onClick={exportFullLogs} title={'从监控第一行到当前的完整原始日志（全等级，不受 2 万条上限与筛选影响）'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
-        <button onClick={exportFullLogsByPackage} title={'\u5728\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\u4e0a\uff0c\u7528\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u7684\u5305\u540d\u5173\u8054\u8fc7\u6ee4\uff0c\u5207\u51fa\u4e00\u4efd\u5b8c\u6574\u5b50\u96c6\uff08\u591a\u884c\u5806\u6808\u6574\u6761\u4fdd\u7559\uff0c\u4e0d\u91cd\u65b0\u91c7\u96c6\uff09'} style={{ padding: '8px 12px', backgroundColor: '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u6309\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
+        <button onClick={exportVisibleLogs} title={'导出当前可见 / 筛选后的日志（受等级、搜索与显示上限影响）'} className="btn sm secondary">{'\u5bfc\u51fa'}</button>
+        <button onClick={exportFullLogs} title={'从监控第一行到当前的完整原始日志（全等级，不受 2 万条上限与筛选影响）'} className="btn sm secondary">{'\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
+        <button onClick={exportFullLogsByPackage} title={'\u5728\u5b8c\u6574\u539f\u59cb\u65e5\u5fd7\u4e0a\uff0c\u7528\u300c\u5e94\u7528/\u5305\u540d\u300d\u91cc\u586b\u7684\u5305\u540d\u5173\u8054\u8fc7\u6ee4\uff0c\u5207\u51fa\u4e00\u4efd\u5b8c\u6574\u5b50\u96c6\uff08\u591a\u884c\u5806\u6808\u6574\u6761\u4fdd\u7559\uff0c\u4e0d\u91cd\u65b0\u91c7\u96c6\uff09'} className="btn sm secondary">{'\u6309\u5305\u540d\u5bfc\u51fa\u5b8c\u6574\u65e5\u5fd7'}</button>
         {lastExportedLogPath && (
           <button
             onClick={async () => {
@@ -2327,21 +2341,25 @@ function SimpleApp() {
               if (!r.success && r.error) setError(r.error);
             }}
             title={`\u6253\u5f00\u6700\u8fd1\u5bfc\u51fa\u7684\u65e5\u5fd7\u6240\u5728\u6587\u4ef6\u5939\uff1a${lastExportedLogPath}`}
-            style={{ padding: '8px 12px', backgroundColor: '#166534', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}
+            className="btn sm secondary"
           >{'\ud83d\udcc2 \u6253\u5f00\u4f4d\u7f6e'}</button>
         )}
-        <button onClick={showCrashAndAnrLogs} style={{ padding: '8px 12px', backgroundColor: '#7f1d1d', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5d29\u6e83/ANR'}</button>
-        <button onClick={scrollToBottom} style={{ padding: '8px 12px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u5230\u5e95\u90e8'}</button>
-        <button onClick={() => setAutoScrollEnabled(!autoScrollEnabled)} style={{ padding: '8px 12px', backgroundColor: autoScrollEnabled ? '#166534' : '#4b5563', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>
+        <button onClick={showCrashAndAnrLogs} className="btn sm" style={{ background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' }}>{'\u5d29\u6e83/ANR'}</button>
+        <button onClick={scrollToBottom} className="btn sm" style={{ background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }}>{'\u5230\u5e95\u90e8'}</button>
+        <button
+          onClick={() => setAutoScrollEnabled(!autoScrollEnabled)}
+          className="btn sm secondary"
+          style={autoScrollEnabled ? { background: 'var(--success)', color: '#fff', borderColor: 'var(--success)' } : undefined}
+        >
           {autoScrollEnabled ? '\u81ea\u52a8\u6eda\u52a8' : '\u624b\u52a8\u6eda\u52a8'}
         </button>
-        <div style={{ marginLeft: 'auto', color: '#9ca3af', fontSize: '12px' }}>
+        <div style={{ marginLeft: 'auto', color: 'var(--fg-tertiary)', fontSize: '12px' }}>
           {isSelectedLogcatRunning ? (isSelectedLogPaused ? '\u5df2\u6682\u505c' : '\u91c7\u96c6\u4e2d') : '\u5df2\u505c\u6b62'} · {'\u8fd0\u884c\u8bbe\u5907'} {runningLogDeviceIds.size} · {displayedLogCount}/{allLogCount} {'\u6761\u65e5\u5fd7'}
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '140px 150px 150px minmax(220px, 1fr) 90px 90px', gap: '8px', padding: '10px', backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px' }}>
-        <select value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevelFilter)} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '140px 150px 150px minmax(220px, 1fr) 90px 90px', gap: '8px', padding: '10px', background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)' }}>
+        <select className="nat" value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevelFilter)}>
           <option value="all">All levels</option>
           <option value="V">Verbose+</option>
           <option value="D">Debug+</option>
@@ -2350,9 +2368,10 @@ function SimpleApp() {
           <option value="E">Error+</option>
           <option value="F">Fatal</option>
         </select>
-        <input value={logPackageFilter} onChange={(e) => setLogPackageFilter(e.target.value)} placeholder={'\u5e94\u7528/\u5305\u540d'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
-        <input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
+        <div className="field"><input value={logPackageFilter} onChange={(e) => setLogPackageFilter(e.target.value)} placeholder={'\u5e94\u7528/\u5305\u540d'} /></div>
+        <div className="field"><input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} /></div>
         <div style={{ position: 'relative' }}>
+          <div className="field" style={{ width: '100%' }}>
           <input
             type="text"
             placeholder={useRegexSearch ? '\u6b63\u5219\u641c\u7d22' : '\u641c\u7d22\u65e5\u5fd7'}
@@ -2366,55 +2385,70 @@ function SimpleApp() {
             }}
             // \u8bb0\u5f55\u5173\u952e\u5b57\u5e76\u5ef6\u8fdf\u6536\u8d77\uff0c\u7559\u51fa\u65f6\u95f4\u8ba9\u4e0b\u62c9\u9879\u7684 mousedown \u5148\u89e6\u53d1\u9009\u62e9\u3002
             onBlur={() => { recordSearchHistory(searchTerm); window.setTimeout(() => setShowSearchHistory(false), 150); }}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
+            style={{ width: '100%' }}
           />
+          </div>
           {showSearchHistory && visibleSearchHistory.length > 0 && (
-            <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, maxHeight: '260px', overflowY: 'auto', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.45)' }}>
+            <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, maxHeight: '260px', overflowY: 'auto', background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-md)', boxShadow: 'var(--sh-pop)' }}>
               {visibleSearchHistory.map((keyword) => (
                 <div
                   key={keyword}
                   // \u7528 onMouseDown + preventDefault\uff1a\u5728 input \u5931\u7126\u524d\u5b8c\u6210\u9009\u62e9\uff0c\u907f\u514d\u4e0b\u62c9\u5148\u88ab\u5173\u6389\u3002
                   onMouseDown={(e) => { e.preventDefault(); setSearchTerm(keyword); recordSearchHistory(keyword); setShowSearchHistory(false); }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#33335a'; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-hover)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '7px 10px', cursor: 'pointer', color: '#e5e7eb', fontSize: '13px' }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '7px 10px', cursor: 'pointer', color: 'var(--fg-primary)', fontSize: '13px' }}
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{keyword}</span>
                   <span
                     onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); removeOneSearchHistory(keyword); }}
                     title={'\u4ece\u5386\u53f2\u79fb\u9664'}
-                    style={{ flexShrink: 0, color: '#9ca3af', cursor: 'pointer', padding: '0 4px', fontSize: '14px', lineHeight: 1 }}
+                    style={{ flexShrink: 0, color: 'var(--fg-tertiary)', cursor: 'pointer', padding: '0 4px', fontSize: '14px', lineHeight: 1 }}
                   >{'\u00d7'}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
-        <input value={logPidFilter} onChange={(e) => setLogPidFilter(e.target.value.replace(/\D/g, ''))} placeholder={'\u8fdb\u7a0b PID'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
-        <button onClick={() => setUseRegexSearch(!useRegexSearch)} style={{ padding: '8px 10px', backgroundColor: useRegexSearch ? '#4a90d9' : '#353550', border: 'none', borderRadius: '6px', color: 'white', fontSize: '13px', cursor: 'pointer' }}>{'\u6b63\u5219'}</button>
+        <div className="field"><input value={logPidFilter} onChange={(e) => setLogPidFilter(e.target.value.replace(/\D/g, ''))} placeholder={'\u8fdb\u7a0b PID'} /></div>
+        <button onClick={() => setUseRegexSearch(!useRegexSearch)} className={useRegexSearch ? 'btn sm outline o-blue' : 'btn sm secondary'}>{'\u6b63\u5219'}</button>
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', color: '#9ca3af', fontSize: '12px' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', color: 'var(--fg-tertiary)', fontSize: '12px' }}>
         {(['V', 'D', 'I', 'W', 'E', 'F'] as LogEntry['level'][]).map(level => (
-          <span key={level} style={{ color: getLevelColor(level), backgroundColor: '#252540', border: '1px solid #353550', borderRadius: '6px', padding: '4px 8px' }}>
-            {level} {logLevelCounts[level]}
+          <span
+            key={level}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              height: '24px',
+              padding: '0 11px',
+              borderRadius: 'var(--r-sm)',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            <span style={{ color: LOG_LEVEL_TOKEN[level], fontWeight: 700 }}>{level}</span>
+            <span style={{ color: 'var(--fg-tertiary)' }}>{logLevelCounts[level]}</span>
           </span>
         ))}
-        <span style={{ marginLeft: 'auto' }}>{'\u4fdd\u7559'} {maxLogEntries} · {'\u6279\u91cf'} {batchUpdateSize}</span>
+        <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', color: 'var(--fg-tertiary)' }}>{'\u4fdd\u7559'} {maxLogEntries} · {'\u6279\u91cf'} {batchUpdateSize}</span>
       </div>
 
-      <div ref={logsContainerRef} onScroll={handleScroll} style={{ flex: 1, backgroundColor: '#111827', border: '1px solid #353550', borderRadius: '8px', overflow: 'auto', fontFamily: 'Consolas, monospace', fontSize: '12px', minHeight: '260px' }}>
+      <div ref={logsContainerRef} onScroll={handleScroll} style={{ flex: 1, background: 'var(--bg-mirror)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', overflow: 'auto', fontFamily: 'var(--font-mono)', fontSize: '12px', minHeight: '260px' }}>
         {allLogCount === 0 && !isSelectedLogcatRunning ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6b7280' }}>
-            <div style={{ fontSize: '42px', marginBottom: '12px' }}>{'\u65e5\u5fd7'}</div>
-            <button onClick={toggleLogcat} style={{ padding: '10px 18px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: 'white', fontSize: '14px', cursor: 'pointer' }}>{'\u5f00\u59cb\u65e5\u5fd7'}</button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--fg-tertiary)' }}>
+            <div style={{ fontSize: '42px', marginBottom: '16px', fontWeight: 700, color: 'var(--border-default)' }}>{'\u65e5\u5fd7'}</div>
+            <button onClick={toggleLogcat} className="btn primary">{'\u5f00\u59cb\u65e5\u5fd7'}</button>
           </div>
         ) : displayedLogCount === 0 ? (
-          <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280' }}>{'\u6ca1\u6709\u5339\u914d\u7684\u65e5\u5fd7'}</div>
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-tertiary)' }}>{'\u6ca1\u6709\u5339\u914d\u7684\u65e5\u5fd7'}</div>
         ) : (
           // width:max-content + minWidth:100% 让内容随最长日志行增宽，超出容器时出现横向滚动条；行与表头同宽对齐。
           <div style={{ minHeight: totalLogHeight, width: 'max-content', minWidth: '100%' }}>
-            <div style={{ position: 'sticky', top: 0, zIndex: 1, width: '100%', display: 'grid', gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, max-content)', backgroundColor: '#1f2937', color: '#9ca3af', fontWeight: 700 }}>
+            <div style={{ position: 'sticky', top: 0, zIndex: 1, width: '100%', display: 'grid', gridTemplateColumns: '96px 64px 70px 130px 140px minmax(280px, max-content)', background: 'var(--bg-elevated)', color: 'var(--fg-tertiary)', fontWeight: 700, borderBottom: '1px solid var(--border-subtle)' }}>
               <div style={{ padding: '8px' }}>{'\u65f6\u95f4'}</div>
               <div style={{ padding: '8px' }}>Level</div>
               <div style={{ padding: '8px' }}>PID</div>
@@ -2436,19 +2470,19 @@ function SimpleApp() {
                   padding: '4px 0',
                   boxSizing: 'border-box',
                   alignItems: 'start',
-                  borderBottom: '1px solid #1f2937',
-                  backgroundColor: selectedLogEntry?.id === log.id ? '#1e3a5f' : 'transparent',
+                  borderBottom: '1px solid var(--border-subtle)',
+                  backgroundColor: selectedLogEntry?.id === log.id ? 'var(--bg-active)' : 'transparent',
                   cursor: 'pointer',
                 }}
               >
-                <div style={{ padding: '0 8px', color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden' }}>{new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</div>
-                <div style={{ padding: '0 8px', color: getLevelColor(log.level), fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }}>{getLevelLabel(log.level)}</div>
-                <div style={{ padding: '0 8px', color: '#9ca3af', whiteSpace: 'nowrap', overflow: 'hidden' }}>{log.processId || '--'}</div>
-                <div style={{ padding: '0 8px', color: '#60a5fa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.packageName || '--'}</div>
-                <div style={{ padding: '0 8px', color: '#93c5fd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.tag}</div>
+                <div style={{ padding: '0 8px', color: 'var(--fg-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden' }}>{new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</div>
+                <div style={{ padding: '0 8px', color: LOG_LEVEL_TOKEN[log.level], fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }}>{getLevelLabel(log.level)}</div>
+                <div style={{ padding: '0 8px', color: 'var(--fg-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden' }}>{log.processId || '--'}</div>
+                <div style={{ padding: '0 8px', color: 'var(--fg-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.packageName || '--'}</div>
+                <div style={{ padding: '0 8px', color: LOG_LEVEL_TOKEN[log.level], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.tag}</div>
                 {/* 整条铺开多行：white-space:pre 保留换行、每个逻辑行不自动换行（高度=行数×LOG_LINE_HEIGHT 可预测）。
                     不裁切，过长单行靠日志窗口横向滚动条拖动查看；完整内容也可点开看底部详情面板。 */}
-                <div style={{ padding: '0 8px', color: '#e5e7eb', whiteSpace: 'pre' }}>{log.message}</div>
+                <div style={{ padding: '0 8px', color: 'var(--fg-secondary)', whiteSpace: 'pre' }}>{log.message}</div>
               </div>
             ))}
             <div style={{ height: virtualBottomPadding }} />
@@ -2457,15 +2491,16 @@ function SimpleApp() {
       </div>
 
       {selectedLogEntry && (
-        <div style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '10px', color: '#d1d5db', fontFamily: 'Consolas, monospace', fontSize: '12px', maxHeight: '140px', overflow: 'auto' }}>
-          <div style={{ marginBottom: '6px', color: getLevelColor(selectedLogEntry.level), fontWeight: 700 }}>
+        <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '10px', color: 'var(--fg-secondary)', fontFamily: 'var(--font-mono)', fontSize: '12px', maxHeight: '140px', overflow: 'auto' }}>
+          <div style={{ marginBottom: '6px', color: LOG_LEVEL_TOKEN[selectedLogEntry.level], fontWeight: 700 }}>
             {getLevelLabel(selectedLogEntry.level)} / {selectedLogEntry.tag} / PID {selectedLogEntry.processId || '--'}
           </div>
           <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{selectedLogEntry.message}</div>
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   return (
     <div className="win" style={{ width: '100%', color: 'var(--fg-secondary)' }}>
