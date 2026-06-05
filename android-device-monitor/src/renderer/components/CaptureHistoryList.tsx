@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { PerformanceCaptureSession } from '../../shared/types';
 import { formatDuration, formatLocalDateTime } from './perfFormat';
+import { Icon } from './ui';
 
 type CaptureHistoryListProps = {
   sessions: PerformanceCaptureSession[];
@@ -31,7 +32,7 @@ export function CaptureHistoryList({ sessions, selectedSessionId, onSelect, onRe
 
   if (sessions.length === 0) {
     return (
-      <div style={{ color: '#6b7280', fontSize: '13px', padding: '18px', textAlign: 'center', border: '1px dashed #353550', borderRadius: '8px' }}>
+      <div style={{ color: 'var(--fg-tertiary)', fontSize: '13px', padding: '18px', textAlign: 'center', border: '1px dashed var(--border-default)', borderRadius: 'var(--r-md)' }}>
         还没有采集记录。点上方「开始采集」录一段，关闭后会归档到这里，随时回看。
       </div>
     );
@@ -53,9 +54,9 @@ export function CaptureHistoryList({ sessions, selectedSessionId, onSelect, onRe
               alignItems: 'center',
               gap: '12px',
               padding: '10px 12px',
-              borderRadius: '8px',
-              border: `1px solid ${selected ? '#6d28d9' : '#353550'}`,
-              backgroundColor: selected ? '#2a2150' : '#202038',
+              borderRadius: 'var(--r-md)',
+              border: `1px solid ${selected ? 'var(--border-selected)' : 'var(--border-subtle)'}`,
+              backgroundColor: selected ? 'var(--accent-soft)' : 'var(--bg-elevated)',
               cursor: 'pointer',
             }}
           >
@@ -71,20 +72,20 @@ export function CaptureHistoryList({ sessions, selectedSessionId, onSelect, onRe
                     if (e.key === 'Enter') commitEdit(session.id);
                     if (e.key === 'Escape') setEditingId(null);
                   }}
-                  style={{ width: '100%', backgroundColor: '#0f172a', border: '1px solid #6d28d9', borderRadius: '6px', color: '#e5e7eb', padding: '4px 8px', fontSize: '13px' }}
+                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-selected)', borderRadius: 'var(--r-sm)', color: 'var(--fg-primary)', padding: '4px 8px', fontSize: '13px' }}
                 />
               ) : (
                 <div
                   onDoubleClick={(e) => { e.stopPropagation(); beginEdit(session); }}
                   title="双击改名"
-                  style={{ color: '#fff', fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  style={{ color: 'var(--fg-primary)', fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                 >
                   {session.title || defaultTitle(session)}
                 </div>
               )}
-              <div style={{ color: '#94a3b8', fontSize: '12px', marginTop: '3px' }}>
+              <div style={{ color: 'var(--fg-tertiary)', fontSize: '12px', marginTop: '3px' }}>
                 {`${session.deviceSn} · ${formatLocalDateTime(session.startedAt)} · ${formatDuration(session.durationMs)}`}
-                {session.status === 'failed' && <span style={{ color: '#fca5a5', marginLeft: '8px' }}>失败</span>}
+                {session.status === 'failed' && <span style={{ color: 'var(--danger)', marginLeft: '8px' }}>失败</span>}
               </div>
             </div>
 
@@ -92,11 +93,12 @@ export function CaptureHistoryList({ sessions, selectedSessionId, onSelect, onRe
               <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => { onDelete(session.id); setConfirmingDeleteId(null); }}
-                  style={{ border: 'none', borderRadius: '6px', backgroundColor: '#7f1d1d', color: '#fff', cursor: 'pointer', padding: '5px 10px', fontSize: '12px' }}
+                  className="btn sm"
+                  style={{ border: 'none', backgroundColor: 'var(--danger)', color: '#fff' }}
                 >确认删除</button>
                 <button
                   onClick={() => setConfirmingDeleteId(null)}
-                  style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#cbd5e1', cursor: 'pointer', padding: '5px 10px', fontSize: '12px' }}
+                  className="btn secondary sm"
                 >取消</button>
               </div>
             ) : (
@@ -104,13 +106,13 @@ export function CaptureHistoryList({ sessions, selectedSessionId, onSelect, onRe
                 <button
                   onClick={() => onExport(session.id)}
                   title="导出为 zip（可拷到另一台 PC 导入查看）"
-                  style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer', padding: '5px 10px', fontSize: '12px' }}
-                >导出</button>
+                  className="btn ghost sm"
+                ><Icon name="download" />导出</button>
                 <button
                   onClick={() => setConfirmingDeleteId(session.id)}
                   title="删除该采集记录"
-                  style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer', padding: '5px 10px', fontSize: '12px' }}
-                >删除</button>
+                  className="btn ghost sm"
+                ><Icon name="trash-2" />删除</button>
               </div>
             )}
           </div>

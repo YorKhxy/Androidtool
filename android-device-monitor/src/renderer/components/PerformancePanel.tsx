@@ -3,6 +3,7 @@ import type { DeviceInfo, PerformanceCaptureMarker, PerformanceCaptureSession, P
 import { CaptureReport } from './CaptureReport';
 import { CaptureHistoryList } from './CaptureHistoryList';
 import { formatClock, formatMemoryMb, METRIC_COLORS } from './perfFormat';
+import { Badge, Icon } from './ui';
 
 type PerformancePanelProps = {
   device: DeviceInfo | null;
@@ -60,10 +61,10 @@ const buildMetricChips = (performance: PerformanceMetrics | null, isPicoView: bo
     return [
       ...base,
       { label: 'GPU', value: '--', color: METRIC_COLORS.gpu, muted: true },
-      { label: 'MTP', value: '--', color: '#60a5fa', muted: true },
-      { label: 'FrmCpu', value: '--', color: '#34d399', muted: true },
-      { label: 'FrmGpu', value: '--', color: '#f59e0b', muted: true },
-      { label: 'ATWGPU', value: '--', color: '#facc15', muted: true },
+      { label: 'MTP', value: '--', color: 'var(--info)', muted: true },
+      { label: 'FrmCpu', value: '--', color: 'var(--success)', muted: true },
+      { label: 'FrmGpu', value: '--', color: 'var(--warning)', muted: true },
+      { label: 'ATWGPU', value: '--', color: 'var(--gold)', muted: true },
     ];
   }
   const picoFps = pico?.fps?.value ?? performance?.fps;
@@ -72,21 +73,21 @@ const buildMetricChips = (performance: PerformanceMetrics | null, isPicoView: bo
     { label: 'CPU', value: cpu, unit: '%', color: METRIC_COLORS.cpu },
     { label: 'MEM', value: mem, unit: 'MB', color: METRIC_COLORS.mem },
     { label: 'GPU', value: pico?.gpuUtil ? String(pico.gpuUtil.value) : '--', unit: pico?.gpuUtil?.unit || '%', color: METRIC_COLORS.gpu },
-    { label: 'MTP', value: pico?.mtp ? String(pico.mtp.value) : '--', unit: pico?.mtp?.unit || '', color: '#60a5fa' },
-    { label: 'FrmCpu', value: pico?.frameCpu ? String(pico.frameCpu.value) : '--', unit: pico?.frameCpu?.unit || '', color: '#34d399' },
-    { label: 'FrmGpu', value: pico?.frameGpu ? String(pico.frameGpu.value) : '--', unit: pico?.frameGpu?.unit || '', color: '#f59e0b' },
-    { label: 'ATWGPU', value: pico?.atwGpu ? String(pico.atwGpu.value) : '--', unit: pico?.atwGpu?.unit || '', color: '#facc15' },
+    { label: 'MTP', value: pico?.mtp ? String(pico.mtp.value) : '--', unit: pico?.mtp?.unit || '', color: 'var(--info)' },
+    { label: 'FrmCpu', value: pico?.frameCpu ? String(pico.frameCpu.value) : '--', unit: pico?.frameCpu?.unit || '', color: 'var(--success)' },
+    { label: 'FrmGpu', value: pico?.frameGpu ? String(pico.frameGpu.value) : '--', unit: pico?.frameGpu?.unit || '', color: 'var(--warning)' },
+    { label: 'ATWGPU', value: pico?.atwGpu ? String(pico.atwGpu.value) : '--', unit: pico?.atwGpu?.unit || '', color: 'var(--gold)' },
   ];
 };
 
 const renderMetricStrip = (performance: PerformanceMetrics | null, isPicoView: boolean, showPicoFallback: boolean) => (
   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
     {buildMetricChips(performance, isPicoView, showPicoFallback).map((chip) => (
-      <div key={chip.label} style={{ display: 'flex', alignItems: 'center', gap: '7px', backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '7px 11px', opacity: chip.muted ? 0.5 : 1 }}>
+      <div key={chip.label} style={{ display: 'flex', alignItems: 'center', gap: '7px', backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-sm)', padding: '7px 11px', opacity: chip.muted ? 0.5 : 1 }}>
         <span style={{ width: '8px', height: '8px', borderRadius: '2px', backgroundColor: chip.color, flexShrink: 0 }} />
-        <span style={{ color: '#94a3b8', fontSize: '12px' }}>{chip.label}</span>
-        <span style={{ color: '#fff', fontSize: '15px', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{chip.value}</span>
-        {chip.unit ? <span style={{ color: '#6b7280', fontSize: '11px' }}>{chip.unit}</span> : null}
+        <span style={{ color: 'var(--fg-secondary)', fontSize: '12px' }}>{chip.label}</span>
+        <span style={{ color: 'var(--fg-primary)', fontSize: '15px', fontWeight: 600, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>{chip.value}</span>
+        {chip.unit ? <span style={{ color: 'var(--fg-tertiary)', fontSize: '11px' }}>{chip.unit}</span> : null}
       </div>
     ))}
   </div>
@@ -161,9 +162,9 @@ export function PerformancePanel({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       {softLimitNotice && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', backgroundColor: '#422006', border: '1px solid #b45309', borderRadius: '8px', padding: '10px 14px', color: '#fde68a' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', backgroundColor: 'var(--warning-soft)', border: '1px solid var(--warning)', borderRadius: 'var(--r-md)', padding: '10px 14px', color: 'var(--warning)' }}>
           <span style={{ fontSize: '13px' }}>{softLimitNotice}</span>
-          <button onClick={onDismissSoftLimit} style={{ border: '1px solid #b45309', borderRadius: '6px', backgroundColor: 'transparent', color: '#fde68a', cursor: 'pointer', padding: '4px 10px', fontSize: '12px', whiteSpace: 'nowrap' }}>知道了</button>
+          <button onClick={onDismissSoftLimit} className="btn outline o-amber sm" style={{ whiteSpace: 'nowrap' }}>知道了</button>
         </div>
       )}
 
@@ -171,61 +172,51 @@ export function PerformancePanel({
           stretch 让左列拉到与右侧回看等高，合并块 flex:1 填满采集控制下方空白。 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: '12px', alignItems: 'stretch' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <section style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <section style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }}>
-            <div style={{ color: '#fff', fontSize: '15px', fontWeight: 600 }}>采集控制</div>
-            <span style={{ color: isCapturing ? '#86efac' : '#9ca3af', backgroundColor: isCapturing ? '#14532d' : '#374151', borderRadius: '999px', padding: '3px 8px', fontSize: '12px', whiteSpace: 'nowrap' }}>
+            <div style={{ color: 'var(--fg-primary)', fontSize: '15px', fontWeight: 600 }}>采集控制</div>
+            <Badge tone={isCapturing ? 'success' : 'neutral'} dot>
               {isCapturing ? `采集中 ${formatClock(elapsedMs)}` : '未采集'}
-            </span>
+            </Badge>
           </div>
-          <div style={{ color: '#9ca3af', fontSize: '12px', lineHeight: 1.5 }}>
+          <div style={{ color: 'var(--fg-secondary)', fontSize: '12px', lineHeight: 1.5 }}>
             一次「开始采集 → 关闭采集」生成一份采集报告：曲线填满区域，录屏在报告内合并播放，拖动时间轴联动曲线游标与画面。
           </div>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button
               onClick={onToggleCapture}
               disabled={isCaptureBusy || !device}
+              className="btn"
               style={{
                 flex: 1,
                 minWidth: '120px',
-                padding: '9px 14px',
-                backgroundColor: isCaptureBusy || !device ? '#4b5563' : isCapturing ? '#7f1d1d' : '#166534',
+                color: '#fff',
                 border: 'none',
-                borderRadius: '6px',
-                color: 'white',
-                cursor: isCaptureBusy || !device ? 'not-allowed' : 'pointer',
-                whiteSpace: 'nowrap',
-                fontSize: '13px',
+                backgroundColor: isCaptureBusy || !device ? 'var(--bg-elevated)' : isCapturing ? 'var(--danger)' : 'var(--success)',
               }}
             >
+              <Icon name={isCapturing ? 'square' : 'play'} />
               {isCaptureBusy ? '处理中...' : isCapturing ? '关闭采集' : '开始采集'}
             </button>
             <button
               onClick={onExportSession}
               disabled={!canExport}
-              style={{
-                flex: 1,
-                minWidth: '120px',
-                padding: '9px 12px',
-                backgroundColor: canExport ? '#353550' : '#4b5563',
-                border: 'none',
-                borderRadius: '6px',
-                color: 'white',
-                cursor: canExport ? 'pointer' : 'not-allowed',
-                whiteSpace: 'nowrap',
-                fontSize: '13px',
-              }}
-            >导出报告</button>
+              className="btn secondary"
+              style={{ flex: 1, minWidth: '120px' }}
+            >
+              <Icon name="download" />
+              导出报告
+            </button>
           </div>
         </section>
 
         {/* 合并块：前台应用在上，参数指标条在下；flex:1 撑满左列剩余高度。 */}
-        <section style={{ flex: 1, backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px', justifyContent: 'center' }}>
+        <section style={{ flex: 1, backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px', justifyContent: 'center' }}>
           {(blockPerformance?.packageName || blockPerformance?.activityName) && (
             <div>
-              <div style={{ fontSize: '12px', color: '#888', marginBottom: '6px' }}>{blockIsPicoView ? '当前 Pico 指标关联前台应用' : '当前 FPS 口径'}</div>
-              <div style={{ fontSize: '14px', color: '#cbd5e1', marginBottom: '4px' }}>{blockPerformance?.packageName || '--'}</div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', wordBreak: 'break-all' }}>{blockPerformance?.activityName || '未能解析前台 Activity'}</div>
+              <div style={{ fontSize: '12px', color: 'var(--fg-tertiary)', marginBottom: '6px' }}>{blockIsPicoView ? '当前 Pico 指标关联前台应用' : '当前 FPS 口径'}</div>
+              <div style={{ fontSize: '14px', color: 'var(--fg-secondary)', marginBottom: '4px' }}>{blockPerformance?.packageName || '--'}</div>
+              <div style={{ fontSize: '12px', color: 'var(--fg-tertiary)', wordBreak: 'break-all' }}>{blockPerformance?.activityName || '未能解析前台 Activity'}</div>
             </div>
           )}
           {renderMetricStrip(blockPerformance, blockIsPicoView, blockShowPicoFallback)}
@@ -236,30 +227,34 @@ export function PerformancePanel({
           onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setImportDragOver(true); }}
           onDragLeave={(e) => { e.preventDefault(); setImportDragOver(false); }}
           onDrop={handleImportDrop}
-          style={{ backgroundColor: '#202038', border: `1px solid ${importDragOver ? '#6d28d9' : '#353550'}`, borderRadius: '8px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}
+          style={{ backgroundColor: 'var(--bg-panel)', border: `1px solid ${importDragOver ? 'var(--accent)' : 'var(--border-subtle)'}`, borderRadius: 'var(--r-md)', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
-            <div style={{ fontSize: '15px', fontWeight: 600, color: '#fff' }}>采集回看</div>
+            <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--fg-primary)' }}>采集回看</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               {lastExportedCapturePath && onRevealExportedCapture && (
                 <button
                   onClick={onRevealExportedCapture}
                   title={`在资源管理器中定位最近导出的采集：${lastExportedCapturePath}`}
-                  style={{ border: 'none', borderRadius: '6px', backgroundColor: '#166534', color: '#fff', cursor: 'pointer', padding: '5px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
-                >📂 打开位置</button>
+                  className="btn outline o-green sm"
+                >
+                  <Icon name="folder-open" />打开位置
+                </button>
               )}
               <button
                 onClick={onImportCaptureSessions}
                 title="导入采集会话（.zip）；也可把 zip 或会话文件夹拖到此区域"
-                style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#cbd5e1', cursor: 'pointer', padding: '5px 12px', fontSize: '12px' }}
-              >导入</button>
-              <div style={{ fontSize: '12px', color: '#94a3b8' }}>{`共 ${filteredSessions.length} 次`}</div>
+                className="btn secondary sm"
+              >
+                <Icon name="upload" />导入
+              </button>
+              <div style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>{`共 ${filteredSessions.length} 次`}</div>
             </div>
           </div>
           {/* 类型筛选：手动按全部 / 安卓 / Pico 筛选回看，不跟随当前设备。 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '12px', color: '#94a3b8' }}>类型</span>
-            <div style={{ display: 'inline-flex', backgroundColor: '#1a1a2e', border: '1px solid #353550', borderRadius: '8px', padding: '2px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>类型</span>
+            <div style={{ display: 'inline-flex', backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-sm)', padding: '2px' }}>
               {([
                 { key: 'all', label: '全部' },
                 { key: 'android', label: '安卓' },
@@ -270,14 +265,14 @@ export function PerformancePanel({
                   <button
                     key={opt.key}
                     onClick={() => setCaptureTypeFilter(opt.key)}
-                    style={{ border: 'none', borderRadius: '6px', cursor: 'pointer', padding: '4px 14px', fontSize: '12px', backgroundColor: active ? '#4a90d9' : 'transparent', color: active ? '#fff' : '#94a3b8', fontWeight: active ? 600 : 400 }}
+                    style={{ border: 'none', borderRadius: 'var(--r-xs)', cursor: 'pointer', padding: '4px 14px', fontSize: '12px', backgroundColor: active ? 'var(--accent)' : 'transparent', color: active ? '#fff' : 'var(--fg-tertiary)', fontWeight: active ? 600 : 400 }}
                   >{opt.label}</button>
                 );
               })}
             </div>
           </div>
           {importDragOver && (
-            <div style={{ color: '#c4b5fd', fontSize: '12px' }}>松开以导入采集会话（.zip 或会话文件夹）</div>
+            <div style={{ color: 'var(--accent)', fontSize: '12px' }}>松开以导入采集会话（.zip 或会话文件夹）</div>
           )}
           {/* 列表可能较长，限高并独立滚动，避免顶部行被撑过高。 */}
           <div style={{ maxHeight: '232px', overflowY: 'auto', paddingRight: filteredSessions.length ? '2px' : 0 }}>
@@ -294,10 +289,10 @@ export function PerformancePanel({
       </div>
 
       {/* 主区：采集报告（曲线 + 单眼视频）+ 参数过滤。 */}
-      <div style={{ backgroundColor: '#252540', borderRadius: '8px', padding: '14px' }}>
+      <div style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '14px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', alignItems: 'center' }}>
-          <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{isCapturing ? '实时采集' : '采集报告'}</div>
-          <div style={{ fontSize: '12px', color: '#94a3b8' }}>{`采样 ${captureSamples.length} 条`}</div>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--fg-primary)' }}>{isCapturing ? '实时采集' : '采集报告'}</div>
+          <div style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>{`采样 ${captureSamples.length} 条`}</div>
         </div>
         <CaptureReport
           session={captureSession}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceSample } from '../../shared/types';
 import { CaptureChart } from './CaptureChart';
 import { CaptureFilterPanel } from './CaptureFilterPanel';
+import { Icon } from './ui';
 import { captureSegmentFrame, findNearestSample, getSingleEyeWrapperStyle, renderMetricOverlay, renderRecordingPlaceholder } from './captureReportHelpers';
 import {
   buildSegmentMediaUrl,
@@ -73,7 +74,7 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
   }, [live, session, samples, playheadMs, onActiveSampleChange]);
 
   if (!session) {
-    return <div style={{ color: '#6b7280', fontSize: '13px' }}>开启采集后，这里会显示本次采集的指标曲线与录屏。</div>;
+    return <div style={{ color: 'var(--fg-tertiary)', fontSize: '13px' }}>开启采集后，这里会显示本次采集的指标曲线与录屏。</div>;
   }
 
   const segments = session.videoSegments;
@@ -202,14 +203,14 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
     }
     if (segments.length === 0 || !segmentUrl) {
       return (
-        <div style={{ height: `${REPORT_HEIGHT}px`, borderRadius: '10px', backgroundColor: '#020617', border: '1px solid #1f2937', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '13px' }}>
+        <div style={{ height: `${REPORT_HEIGHT}px`, borderRadius: 'var(--r-md)', backgroundColor: 'var(--bg-mirror)', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-tertiary)', fontSize: '13px' }}>
           本次采集没有录屏分段。
         </div>
       );
     }
     return (
       <div>
-        <div style={{ position: 'relative', height: `${REPORT_HEIGHT}px`, borderRadius: '10px', backgroundColor: '#020617', border: '1px solid #1f2937', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: shouldCrop ? 'flex-start' : 'center' }}>
+        <div style={{ position: 'relative', height: `${REPORT_HEIGHT}px`, borderRadius: 'var(--r-md)', backgroundColor: 'var(--bg-mirror)', border: '1px solid var(--border-subtle)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: shouldCrop ? 'flex-start' : 'center' }}>
           {shouldCrop && hasVideoSize && videoSize ? (
             <div style={getSingleEyeWrapperStyle(videoSize)}>
               <video
@@ -233,7 +234,7 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
               onTimeUpdate={(e) => handleTimeUpdate(e.currentTarget)}
               onEnded={handleEnded}
               // 单眼裁切在拿到真实分辨率前先隐藏，避免闪现双眼画面。
-              style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: '#000', opacity: shouldCrop ? 0 : 1 }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', backgroundColor: 'var(--bg-mirror)', opacity: shouldCrop ? 0 : 1 }}
             />
           )}
           {renderMetricOverlay(currentSample)}
@@ -243,10 +244,11 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
           <button
             type="button"
             onClick={togglePlay}
-            style={{ width: '40px', height: '40px', borderRadius: '999px', border: '1px solid #475569', backgroundColor: '#1e293b', color: '#fff', cursor: 'pointer', fontSize: '16px', flexShrink: 0 }}
+            className="btn iconbtn"
+            style={{ width: '40px', height: '40px', borderRadius: '999px', flexShrink: 0 }}
             aria-label={isPlaying ? '暂停' : '播放'}
           >
-            {isPlaying ? '❚❚' : '▶'}
+            <Icon name={isPlaying ? 'pause' : 'play'} size={18} />
           </button>
           <input
             type="range"
@@ -254,10 +256,10 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
             max={Math.round(totalMs)}
             value={Math.round(playheadMs)}
             onChange={(e) => seekTo(Number(e.target.value))}
-            style={{ flex: 1, accentColor: '#a855f7', cursor: 'pointer' }}
+            style={{ flex: 1, accentColor: 'var(--accent)', cursor: 'pointer' }}
             aria-label="采集时间轴"
           />
-          <div style={{ color: '#cbd5e1', fontSize: '12px', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+          <div style={{ color: 'var(--fg-secondary)', fontSize: '12px', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
             {formatClock(playheadMs)} / {formatClock(totalMs)}
           </div>
           {onSaveFrame && (
@@ -266,12 +268,13 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
               onClick={handleCaptureFrame}
               disabled={capturingFrame}
               title="把当前画面存为截图（自动归档到会话）"
-              style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: '#1e293b', color: '#fff', cursor: capturingFrame ? 'not-allowed' : 'pointer', padding: '7px 12px', fontSize: '12px', flexShrink: 0, whiteSpace: 'nowrap' }}
-            >{capturingFrame ? '截图中…' : '截图'}</button>
+              className="btn secondary sm"
+              style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+            ><Icon name="image" />{capturingFrame ? '截图中…' : '截图'}</button>
           )}
         </div>
         {frameNote && (
-          <div style={{ color: frameNote.startsWith('截图失败') ? '#fca5a5' : '#86efac', fontSize: '12px', marginTop: '6px' }}>{frameNote}</div>
+          <div style={{ color: frameNote.startsWith('截图失败') ? 'var(--danger)' : 'var(--success)', fontSize: '12px', marginTop: '6px' }}>{frameNote}</div>
         )}
       </div>
     );

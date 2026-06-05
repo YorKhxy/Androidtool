@@ -23,10 +23,10 @@ type CaptureFilterPanelProps = {
 const OPS: CaptureFilterOp[] = ['>', '=', '<'];
 
 const selectStyle: CSSProperties = {
-  backgroundColor: '#0f172a',
-  border: '1px solid #334155',
-  borderRadius: '6px',
-  color: '#e5e7eb',
+  backgroundColor: 'var(--bg-input)',
+  border: '1px solid var(--border-default)',
+  borderRadius: 'var(--r-sm)',
+  color: 'var(--fg-primary)',
   padding: '5px 8px',
   fontSize: '12px',
 };
@@ -49,14 +49,14 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
   const canApply = conditions.some((c) => Number.isFinite(c.threshold));
 
   return (
-    <div style={{ backgroundColor: '#202038', border: '1px solid #353550', borderRadius: '8px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+    <div style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
-        <div style={{ color: '#fff', fontSize: '13px', fontWeight: 600 }}>参数过滤</div>
-        <div style={{ color: '#94a3b8', fontSize: '12px' }}>每条独立标在对应指标曲线上（按颜色区分，跟随曲线显隐）</div>
+        <div style={{ color: 'var(--fg-primary)', fontSize: '13px', fontWeight: 600 }}>参数过滤</div>
+        <div style={{ color: 'var(--fg-tertiary)', fontSize: '12px' }}>每条独立标在对应指标曲线上（按颜色区分，跟随曲线显隐）</div>
       </div>
 
       {conditions.length === 0 ? (
-        <div style={{ color: '#6b7280', fontSize: '12px' }}>添加条件后点「过滤」，在曲线上标出命中时间点。</div>
+        <div style={{ color: 'var(--fg-tertiary)', fontSize: '12px' }}>添加条件后点「过滤」，在曲线上标出命中时间点。</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {conditions.map((condition) => {
@@ -91,14 +91,15 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
                 placeholder="阈值"
                 value={Number.isFinite(condition.threshold) ? condition.threshold : ''}
                 onChange={(e) => updateCondition(condition.id, { threshold: e.target.value === '' ? NaN : Number(e.target.value) })}
-                style={{ ...selectStyle, width: '88px', border: `1px solid ${thresholdEmpty ? '#ef4444' : '#334155'}` }}
+                style={{ ...selectStyle, width: '88px', border: `1px solid ${thresholdEmpty ? 'var(--danger)' : 'var(--border-default)'}` }}
                 aria-label="阈值"
               />
-              {thresholdEmpty && <span style={{ color: '#fca5a5', fontSize: '11px' }}>阈值不能为空</span>}
+              {thresholdEmpty && <span style={{ color: 'var(--danger)', fontSize: '11px' }}>阈值不能为空</span>}
               <button
                 type="button"
                 onClick={() => removeCondition(condition.id)}
-                style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#94a3b8', cursor: 'pointer', width: '28px', height: '28px', fontSize: '14px', marginLeft: 'auto' }}
+                className="btn ghost sm iconbtn"
+                style={{ marginLeft: 'auto' }}
                 aria-label="删除条件"
               >×</button>
             </div>
@@ -111,22 +112,23 @@ export function CaptureFilterPanel({ conditions, onChange, onApply, onClear, isP
         <button
           type="button"
           onClick={addCondition}
-          style={{ border: '1px dashed #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#cbd5e1', cursor: 'pointer', padding: '6px 12px', fontSize: '12px' }}
+          className="btn ghost sm"
+          style={{ borderStyle: 'dashed', borderColor: 'var(--border-default)' }}
         >+ 添加条件</button>
         <button
           type="button"
           onClick={onApply}
           disabled={!canApply}
-          style={{ border: 'none', borderRadius: '6px', backgroundColor: canApply ? '#6d28d9' : '#4b5563', color: '#fff', cursor: canApply ? 'pointer' : 'not-allowed', padding: '6px 14px', fontSize: '12px' }}
+          className="btn primary sm"
         >过滤</button>
         <button
           type="button"
           onClick={onClear}
           disabled={!applied && conditions.length === 0}
-          style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#cbd5e1', cursor: !applied && conditions.length === 0 ? 'not-allowed' : 'pointer', padding: '6px 14px', fontSize: '12px' }}
+          className="btn secondary sm"
         >清除</button>
         {applied && (
-          <span style={{ color: hitCount > 0 ? '#fbbf24' : '#94a3b8', fontSize: '12px' }}>
+          <span style={{ color: hitCount > 0 ? 'var(--gold)' : 'var(--fg-tertiary)', fontSize: '12px' }}>
             {hitCount > 0 ? `命中 ${hitCount} 处（点标记跳转）` : '无命中'}
           </span>
         )}

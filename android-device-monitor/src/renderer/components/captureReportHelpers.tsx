@@ -4,9 +4,9 @@ import { formatClock, formatMemoryMb, formatMetricReading, getGpuValue, sampleEl
 
 // 采集进行中的视频区占位：红点 + 「录制中」+ 已用时长，工具内不回传画面。
 export const renderRecordingPlaceholder = (elapsedMs: number) => (
-  <div style={{ height: '100%', minHeight: '260px', borderRadius: '10px', backgroundColor: '#020617', border: '1px solid #1f2937', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: '#94a3b8' }}>
-    <span style={{ width: '12px', height: '12px', borderRadius: '999px', backgroundColor: '#ef4444', boxShadow: '0 0 0 6px rgba(239,68,68,0.18)' }} />
-    <div style={{ fontSize: '14px', color: '#e5e7eb' }}>录制中</div>
+  <div style={{ height: '100%', minHeight: '260px', borderRadius: 'var(--r-md)', backgroundColor: 'var(--bg-mirror)', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', color: 'var(--fg-secondary)' }}>
+    <span style={{ width: '12px', height: '12px', borderRadius: '999px', backgroundColor: 'var(--danger)', boxShadow: '0 0 0 6px var(--danger-soft)' }} />
+    <div style={{ fontSize: '14px', color: 'var(--fg-primary)' }}>录制中</div>
     <div style={{ fontSize: '12px' }}>已录制 {formatClock(elapsedMs)}（采集中不在工具内回传画面）</div>
   </div>
 );
@@ -20,7 +20,7 @@ export const getSingleEyeWrapperStyle = (naturalSize: { width: number; height: n
   maxWidth: '100%',
   aspectRatio: `${Math.max(1, Math.floor(naturalSize.width / 2))} / ${Math.max(1, naturalSize.height)}`,
   overflow: 'hidden',
-  backgroundColor: '#000',
+  backgroundColor: 'var(--bg-mirror)',
   flexShrink: 0,
 });
 
@@ -94,9 +94,9 @@ export const renderMetricOverlay = (sample: PerformanceSample | null) => {
     `GPU ${pico?.gpuUtil ? formatMetricReading(pico.gpuUtil) : (getGpuValue(sample) ?? '--')}%`,
   ];
   return (
-    <div style={{ position: 'absolute', left: '12px', bottom: '12px', backgroundColor: 'rgba(2, 6, 23, 0.76)', border: '1px solid rgba(148, 163, 184, 0.35)', borderRadius: '8px', padding: '8px 10px', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, auto))', gap: '4px 12px', pointerEvents: 'none', boxShadow: '0 8px 20px rgba(0,0,0,0.3)' }}>
+    <div style={{ position: 'absolute', left: '12px', bottom: '12px', backgroundColor: 'var(--bg-scrim)', border: '1px solid var(--border-strong)', borderRadius: 'var(--r-sm)', padding: '8px 10px', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, auto))', gap: '4px 12px', pointerEvents: 'none', boxShadow: 'var(--sh-md)' }}>
       {lines.map((line) => (
-        <span key={line} style={{ color: '#cbd5e1', fontSize: '12px', whiteSpace: 'nowrap' }}>{line}</span>
+        <span key={line} style={{ color: 'var(--fg-secondary)', fontSize: '12px', whiteSpace: 'nowrap' }}>{line}</span>
       ))}
     </div>
   );
