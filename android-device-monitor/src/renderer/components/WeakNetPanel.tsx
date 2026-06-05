@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { WeakNetworkHelperStatus, WeakNetworkProfile } from '../../shared/types';
 import { WEAK_NETWORK_PRESETS } from '../../shared/types';
-import { Icon, Badge, type BadgeTone } from './ui';
+import { Icon, Badge, LineChart, type BadgeTone } from './ui';
 
 type WeakNetParams = Omit<WeakNetworkProfile, 'packageName'>;
 
@@ -11,6 +11,7 @@ type WeakNetPanelProps = {
   deviceConnected: boolean;
   status: WeakNetworkHelperStatus;
   traffic: WeakNetTraffic | null;
+  trafficHistory: { rx: number; tx: number }[];
   installedPackages: string[];
   loadingPackages: boolean;
   busy: boolean;
@@ -76,6 +77,7 @@ export function WeakNetPanel({
   deviceConnected,
   status,
   traffic,
+  trafficHistory,
   installedPackages,
   loadingPackages,
   busy,
@@ -206,23 +208,43 @@ export function WeakNetPanel({
         ))}
       </div>
 
-      {/* 实时流量（仅运行中显示，读 tun 计数算速率）*/}
+      {/* 实时流量（仅运行中显示，读 tun 计数算速率 + 曲线）*/}
       {isRunning && traffic && (
-        <div className="subpanel" style={{ display: 'flex', gap: '32px', padding: '12px 16px', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Icon name="arrow-up" size={16} color="var(--info)" />
-            <div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--fg-primary)' }}>{formatRate(traffic.txRate)}</div>
-              <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>上行 · 累计 {formatBytes(traffic.txBytes)}</div>
+        <div className="subpanel" style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px 16px' }}>
+          <div style={{ display: 'flex', gap: '32px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Icon name="arrow-up" size={16} color="var(--info)" />
+              <div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--fg-primary)' }}>{formatRate(traffic.txRate)}</div>
+                <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>上行 · 累计 {formatBytes(traffic.txBytes)}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Icon name="arrow-down" size={16} color="var(--success)" />
+              <div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--fg-primary)' }}>{formatRate(traffic.rxRate)}</div>
+                <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>下行 · 累计 {formatBytes(traffic.rxBytes)}</div>
+              </div>
+            </div>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: '14px', fontSize: '11.5px', color: 'var(--fg-tertiary)' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}><span style={{ width: 12, height: 2, background: 'var(--info)' }} />上行</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}><span style={{ width: 12, height: 2, background: 'var(--success)' }} />下行</span>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Icon name="arrow-down" size={16} color="var(--success)" />
-            <div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--fg-primary)' }}>{formatRate(traffic.rxRate)}</div>
-              <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>下行 · 累计 {formatBytes(traffic.rxBytes)}</div>
-            </div>
-          </div>
+          {trafficHistory.length >= 2 && (() => {
+            const max = Math.max(1, ...trafficHistory.map((p) => Math.max(p.rx, p.tx)));
+            return (
+              <div style={{ position: 'relative', height: 96, background: 'var(--bg-mirror)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', inset: 0 }}>
+                  <LineChart data={trafficHistory.map((p) => p.rx)} color="var(--success)" max={max} height={96} />
+                </div>
+                <div style={{ position: 'absolute', inset: 0 }}>
+                  <LineChart data={trafficHistory.map((p) => p.tx)} color="var(--info)" max={max} height={96} fill={false} />
+                </div>
+                <div style={{ position: 'absolute', top: 4, right: 8, fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--fg-tertiary)' }}>峰值 {formatRate(max)}</div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
