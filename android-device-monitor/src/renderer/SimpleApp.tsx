@@ -1692,11 +1692,10 @@ function SimpleApp() {
         if (result.data === 'running') {
           setWeakNetNeedsAuth(false); // 已起来，说明授权没问题，清掉「待授权」推断
         }
-      } else {
-        setWeakNetStatus('error');
       }
+      // 失败：保留上次状态，避免轮询瞬时失败把 isRunning 翻成 false 导致图表闪烁
     } catch {
-      setWeakNetStatus('error');
+      /* 保留上次状态 */
     }
   };
 
@@ -1727,7 +1726,7 @@ function SimpleApp() {
         setWeakNetTrafficHistory([]);
       }
     } catch {
-      setWeakNetTraffic(null);
+      /* 瞬时失败保留上次流量，避免闪烁；真正停止由状态切换/effect 清零 */
     }
   };
 
@@ -1735,9 +1734,12 @@ function SimpleApp() {
     if (!selectedDevice || !hasElectronAPI()) return;
     try {
       const result = await window.electronAPI!.queryWeakNetShaperStats(selectedDevice.id);
-      setWeakNetShaperStats(result.success ? result.data ?? null : null);
+      if (result.success && result.data) {
+        setWeakNetShaperStats(result.data);
+      }
+      // null/失败：保留上次值，避免轮询闪烁；重置由 effect 处理
     } catch {
-      setWeakNetShaperStats(null);
+      /* 保留上次值 */
     }
   };
 

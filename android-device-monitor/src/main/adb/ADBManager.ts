@@ -1479,7 +1479,8 @@ export class ADBManager extends EventEmitter {
   // JSON 契约：{"up","down","fwd"(决策总数),"drop","rttMs"(RTT 累计),"rttN"(样本数)}。
   async queryWeakNetworkShaperStats(deviceId: string): Promise<WeakNetworkShaperStats | null> {
     try {
-      const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'logcat', '-d', '-s', 'WeakNetStats:I'], {
+      // 只取最近几行（-t），不 dump 整个不断增长的 WeakNetStats 缓冲——否则越跑越慢、抢占 adb 管道致轮询超时闪烁。
+      const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'logcat', '-t', '5', '-s', 'WeakNetStats:I'], {
         timeout: 10 * 1000,
       });
       const candidate = stdout
