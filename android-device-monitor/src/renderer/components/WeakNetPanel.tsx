@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { WeakNetworkHelperStatus, WeakNetworkProfile, WeakNetworkShaperStats } from '../../shared/types';
 import { WEAK_NETWORK_PRESETS } from '../../shared/types';
 import { Icon, Badge, LineChart, type BadgeTone } from './ui';
@@ -74,6 +74,23 @@ const formatBytes = (n: number): string => {
   return `${Math.round(n)} B`;
 };
 const formatRate = (n: number): string => `${formatBytes(n)}/s`;
+
+// 抽成 memo 组件：只在流量历史(2.5s 才变)的引用变化时重绘，
+// 对 SimpleApp 的高频重渲染（日志批量推送每 250ms、电量轮询等）免疫，避免 SVG 反复重绘闪烁。
+const TrafficChart = memo(function TrafficChart({ history }: { history: { rx: number; tx: number }[] }) {
+  const max = Math.max(1, ...history.map((p) => Math.max(p.rx, p.tx)));
+  return (
+    <div style={{ position: 'relative', height: 96, background: 'var(--bg-mirror)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0 }}>
+        <LineChart data={history.map((p) => p.rx)} color="var(--success)" max={max} height={96} />
+      </div>
+      <div style={{ position: 'absolute', inset: 0 }}>
+        <LineChart data={history.map((p) => p.tx)} color="var(--info)" max={max} height={96} fill={false} />
+      </div>
+      <div style={{ position: 'absolute', top: 4, right: 8, fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--fg-tertiary)' }}>峰值 {formatRate(max)}</div>
+    </div>
+  );
+});
 
 export function WeakNetPanel({
   deviceConnected,
@@ -262,20 +279,7 @@ export function WeakNetPanel({
             </div>
           )}
 
-          {trafficHistory.length >= 2 && (() => {
-            const max = Math.max(1, ...trafficHistory.map((p) => Math.max(p.rx, p.tx)));
-            return (
-              <div style={{ position: 'relative', height: 96, background: 'var(--bg-mirror)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
-                <div style={{ position: 'absolute', inset: 0 }}>
-                  <LineChart data={trafficHistory.map((p) => p.rx)} color="var(--success)" max={max} height={96} />
-                </div>
-                <div style={{ position: 'absolute', inset: 0 }}>
-                  <LineChart data={trafficHistory.map((p) => p.tx)} color="var(--info)" max={max} height={96} fill={false} />
-                </div>
-                <div style={{ position: 'absolute', top: 4, right: 8, fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--fg-tertiary)' }}>峰值 {formatRate(max)}</div>
-              </div>
-            );
-          })()}
+          {trafficHistory.length >= 2 && <TrafficChart history={trafficHistory} />}
         </div>
       )}
 
