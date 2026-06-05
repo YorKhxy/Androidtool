@@ -1,0 +1,32 @@
+<!-- @dsCard group="Colors" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 24px; display: flex; gap: 26px; align-items: center; }
+  .big { width: 150px; flex: none; border-radius: var(--r-md);
+    background: var(--accent); color: var(--fg-on-accent); padding: 14px;
+    display: flex; flex-direction: column; justify-content: space-between; height: 84px; }
+  .big .n { font-weight: 600; font-size: 13px; }
+  .big .h { font-family: var(--font-mono); font-size: 12px; }
+  .states { display: flex; gap: 10px; flex: 1; }
+  .st { flex: 1; border-radius: var(--r-sm); height: 84px; display: flex;
+    align-items: flex-end; padding: 9px; color: #fff;
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; }
+  .soft { background: var(--accent-soft); border: 1px solid var(--accent-soft-bd);
+    color: var(--accent); align-items: center; justify-content: center;
+    flex-direction: column; gap: 4px; }
+</style>
+</head>
+<body class="adm">
+  <div class="big"><div class="n">Accent · 主蓝</div><div class="h">#5597DC</div></div>
+  <div class="states">
+    <div class="st" style="background:#69A6E5">hover #69A6E5</div>
+    <div class="st" style="background:#5597DC">base #5597DC</div>
+    <div class="st" style="background:#4285CB">press #4285CB</div>
+    <div class="st soft"><span style="font-size:13px;font-weight:600">soft</span><span>#5597DC · 15%</span></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!-- @dsCard group="Colors" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 22px 24px; }
+  .row { display: flex; gap: 10px; }
+  .sw { flex: 1; background: var(--bg-panel); border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md); padding: 13px; }
+  .t { font-size: 14px; margin-bottom: 8px; }
+  .hx { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-tertiary); }
+</style>
+</head>
+<body class="adm">
+  <div class="row">
+    <div class="sw"><div class="t" style="color:var(--fg-primary);font-weight:600">primary 主文本</div><div class="hx">#EEF1F8</div></div>
+    <div class="sw"><div class="t" style="color:var(--fg-secondary)">secondary 正文</div><div class="hx">#A7AFC6</div></div>
+    <div class="sw"><div class="t" style="color:var(--fg-tertiary)">tertiary 次要</div><div class="hx">#6E7693</div></div>
+    <div class="sw"><div class="t" style="color:var(--fg-disabled)">disabled 禁用</div><div class="hx">#464D69</div></div>
+  </div>
+</body>
+</html>

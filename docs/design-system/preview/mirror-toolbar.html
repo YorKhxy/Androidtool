@@ -1,0 +1,37 @@
+<!-- @dsCard group="Components" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-mirror); padding: 22px; display: flex; justify-content: center; align-items: center; }
+  .bar { display: inline-flex; align-items: center; gap: 4px; padding: 6px;
+    background: var(--bg-panel); border: 1px solid var(--border-default);
+    border-radius: var(--r-pill); box-shadow: var(--sh-pop); }
+  .b { width: 36px; height: 36px; border-radius: var(--r-pill); display: flex;
+    align-items: center; justify-content: center; color: var(--fg-secondary); cursor: pointer; }
+  .b:hover { background: var(--bg-hover); color: var(--fg-primary); }
+  .b.on { background: var(--accent-soft); color: var(--accent); }
+  .b [data-lucide] { width: 18px; height: 18px; }
+  .sep { width: 1px; height: 20px; background: var(--border-default); margin: 0 4px; }
+</style>
+</head>
+<body class="adm">
+  <div class="bar">
+    <div class="b"><i data-lucide="chevron-left"></i></div>
+    <div class="b"><i data-lucide="circle"></i></div>
+    <div class="b"><i data-lucide="square"></i></div>
+    <div class="sep"></div>
+    <div class="b on"><i data-lucide="volume-2"></i></div>
+    <div class="b"><i data-lucide="camera"></i></div>
+    <div class="b"><i data-lucide="rotate-cw"></i></div>
+    <div class="b"><i data-lucide="maximize"></i></div>
+    <div class="sep"></div>
+    <div class="b" style="color:var(--danger)"><i data-lucide="power"></i></div>
+  </div>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

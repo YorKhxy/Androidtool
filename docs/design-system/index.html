@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>安卓设备监控 · 设计系统总览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="colors_and_type.css" />
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg-base); font-family: var(--font-sans); color: var(--fg-secondary); }
+
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 28px 80px; }
+
+  /* hero */
+  .hero { padding: 56px 0 40px; display: flex; align-items: center; gap: 22px;
+    border-bottom: 1px solid var(--border-subtle); }
+  .hero .mark { width: 68px; height: 68px; border-radius: 16px; background: var(--bg-panel);
+    border: 1px solid var(--border-default); display: flex; align-items: center; justify-content: center; flex: none; }
+  .hero .mark .icon { width: 38px; height: 38px; color: var(--accent); }
+  .hero h1 { font-size: 34px; font-weight: 700; color: var(--fg-primary); margin: 0; letter-spacing: .01em; }
+  .hero .en { font-size: 13px; font-weight: 500; color: var(--fg-tertiary); letter-spacing: .18em;
+    text-transform: uppercase; margin-top: 6px; }
+  .hero .ver { margin-left: auto; align-self: flex-start; font-family: var(--font-mono); font-size: 12px;
+    color: var(--accent); border: 1px solid var(--accent-soft-bd); border-radius: var(--r-pill); padding: 3px 11px; }
+  .lede { font-size: 15px; line-height: 24px; color: var(--fg-secondary); max-width: 760px; margin: 26px 0 0; }
+  .lede b { color: var(--fg-primary); font-weight: 600; }
+  .swatches { display: flex; gap: 8px; margin-top: 22px; }
+  .swatches i { width: 38px; height: 38px; border-radius: 9px; display: block; }
+
+  /* section */
+  .sec { margin-top: 52px; }
+  .sec-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .sec-h .n { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+  .sec-h h2 { font-size: 20px; font-weight: 700; color: var(--fg-primary); margin: 0; }
+  .sec-h .d { font-size: 13px; color: var(--fg-tertiary); margin-left: auto; }
+  .sec-h .sec-link { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12.5px; color: var(--accent); text-decoration: none; }
+  .sec-h .sec-link:hover { text-decoration: underline; }
+  .sec-h .sec-link .icon { width: 13px; height: 13px; }
+
+  .grid { display: grid; gap: 16px; }
+  .cols-2 { grid-template-columns: 1fr 1fr; }
+  .cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+  .card { background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: var(--r-md);
+    overflow: hidden; }
+  .card .cap { display: flex; align-items: center; gap: 8px; padding: 9px 14px;
+    border-bottom: 1px solid var(--border-subtle); }
+  .card .cap .t { font-size: 12.5px; font-weight: 600; color: var(--fg-primary); }
+  .card .cap .s { font-size: 11.5px; color: var(--fg-tertiary); margin-left: auto; }
+  .card iframe { width: 100%; border: 0; display: block; background: var(--bg-base); }
+
+  /* live app embed — real DOM, crisp at any DPR; the app's own titlebar is the window chrome */
+  .appframe { position: relative; border: 1px solid var(--border-default); border-radius: var(--r-lg);
+    overflow: hidden; box-shadow: var(--sh-modal); background: var(--bg-base); }
+  .applive { display: block; width: 100%; height: 760px; border: 0; }
+  .applive-load { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 14px; color: var(--fg-tertiary); font-size: 13px; pointer-events: none;
+    transition: opacity var(--dur-med) var(--ease-out); }
+  .appframe.ready .applive-load { opacity: 0; }
+  .applive-load .spin { width: 26px; height: 26px; border-radius: 50%;
+    border: 2.5px solid var(--border-default); border-top-color: var(--accent); animation: sp 0.8s linear infinite; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .open-live { position: absolute; top: 11px; right: 14px; z-index: 3; display: inline-flex; align-items: center;
+    gap: 6px; height: 28px; padding: 0 12px; border-radius: var(--r-pill); white-space: nowrap;
+    background: rgba(30,33,56,0.82); border: 1px solid var(--border-default); backdrop-filter: blur(6px);
+    color: var(--fg-secondary); font-size: 12px; text-decoration: none; }
+  .open-live:hover { color: var(--accent); border-color: var(--accent-soft-bd); }
+  .open-live .icon { width: 13px; height: 13px; }
+  .sec-note { font-size: 12.5px; color: var(--fg-tertiary); margin: 12px 2px 0; line-height: 20px; }
+  .sec-note a { color: var(--accent); text-decoration: none; }
+  .sec-note a:hover { text-decoration: underline; }
+
+  .foot { margin-top: 56px; padding-top: 22px; border-top: 1px solid var(--border-subtle);
+    font-size: 12.5px; color: var(--fg-tertiary); line-height: 20px; }
+  .foot a { color: var(--accent); text-decoration: none; }
+  .foot a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <div class="mark"><span class="icon" data-lucide="monitor-smartphone"></span></div>
+    <div>
+      <h1>安卓设备监控</h1>
+      <div class="en">Android Device Monitor · Design System</div>
+    </div>
+    <div class="ver">v1.0.14</div>
+  </div>
+
+  <p class="lede">
+    一套从真实应用还原的设计系统 — <b>深靛蓝主题</b>搭配<b>矢车菊蓝主色 #5597DC</b>,
+    用于为这款 Windows 端 <b>Android / Pico VR 设备管理工具</b>生成贴合品牌的界面与素材。
+    颜色取自真实截图,绿色仅作语义色(已连接 / 启动)。
+  </p>
+  <div class="swatches">
+    <i style="background:#15162B;border:1px solid var(--border-default)"></i>
+    <i style="background:#1E2138"></i>
+    <i style="background:#272A45"></i>
+    <i style="background:#5597DC"></i>
+    <i style="background:#54C084"></i>
+    <i style="background:#DCA844"></i>
+    <i style="background:#E0746C"></i>
+    <i style="background:#E8B339"></i>
+  </div>
+
+  <!-- KIT -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">01</span><h2>桌面应用</h2>
+      <a class="sec-link" href="ui_kits/desktop-app/index.html" target="_blank">新标签页打开<span class="icon" data-lucide="external-link"></span></a></div>
+    <div class="appframe" id="appframe">
+      <div class="applive-load"><div class="spin"></div>正在加载真实界面…</div>
+      <iframe class="applive" id="appLive" src="ui_kits/desktop-app/index.html" title="安卓设备监控"></iframe>
+    </div>
+    <p class="sec-note">点击窗口内的标签页(设备 / 日志 / 性能 / 投屏)实时切换 —— 这是真实运行的界面,不是截图。</p>
+  </div>
+
+  <!-- TYPE -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">02</span><h2>字体</h2>
+      <span class="d">Segoe UI / 微软雅黑 · 等宽 JetBrains Mono</span></div>
+    <div class="grid cols-2">
+      <div class="card"><div class="cap"><span class="t">字阶</span><span class="s">display → label</span></div>
+        <iframe src="preview/type-scale.html" height="230" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">等宽 / 指标</span><span class="s">tabular + logcat</span></div>
+        <iframe src="preview/type-mono.html" height="140" scrolling="no"></iframe></div>
+    </div>
+  </div>
+
+  <!-- COLOR -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">03</span><h2>颜色</h2>
+      <span class="d">表面 · 主色 · 语义 · 文本 · Logcat</span></div>
+    <div class="grid cols-2">
+      <div class="card"><div class="cap"><span class="t">表面层级</span></div>
+        <iframe src="preview/color-surfaces.html" height="130" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">主色 矢车菊蓝</span></div>
+        <iframe src="preview/color-accent.html" height="132" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">语义状态色</span></div>
+        <iframe src="preview/color-semantic.html" height="116" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">深色文本</span></div>
+        <iframe src="preview/color-text.html" height="100" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">Logcat 等级</span><span class="s">V/D/I/W/E/F</span></div>
+        <iframe src="preview/color-logcat.html" height="160" scrolling="no"></iframe></div>
+    </div>
+  </div>
+
+  <!-- SPACING -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">04</span><h2>间距与立体</h2>
+      <span class="d">4px 基准 · 圆角 · 阴影</span></div>
+    <div class="grid cols-3">
+      <div class="card"><div class="cap"><span class="t">间距尺度</span></div>
+        <iframe src="preview/spacing-scale.html" height="200" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">圆角</span></div>
+        <iframe src="preview/radii.html" height="120" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">阴影层级</span></div>
+        <iframe src="preview/elevation.html" height="128" scrolling="no"></iframe></div>
+    </div>
+  </div>
+
+  <!-- COMPONENTS -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">05</span><h2>组件</h2>
+      <span class="d">按钮 · 输入 · 徽标 · 标签页 · 卡片 · 菜单</span></div>
+    <div class="grid cols-2">
+      <div class="card"><div class="cap"><span class="t">按钮</span><span class="s">主 / 次 / 描边 / 文件</span></div>
+        <iframe src="preview/buttons.html" height="160" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">输入</span></div>
+        <iframe src="preview/inputs.html" height="130" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">徽标与标签</span></div>
+        <iframe src="preview/badges-tags.html" height="110" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">顶部标签页</span></div>
+        <iframe src="preview/top-tabs.html" height="130" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">设备卡片</span></div>
+        <iframe src="preview/device-card.html" height="250" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">指标卡</span><span class="s">FPS/CPU/内存</span></div>
+        <iframe src="preview/metric-cards.html" height="160" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">Logcat 行</span></div>
+        <iframe src="preview/logcat-rows.html" height="150" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">右键菜单</span></div>
+        <iframe src="preview/context-menu.html" height="260" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">投屏工具栏</span></div>
+        <iframe src="preview/mirror-toolbar.html" height="110" scrolling="no"></iframe></div>
+    </div>
+  </div>
+
+  <!-- BRAND -->
+  <div class="sec">
+    <div class="sec-h"><span class="n">06</span><h2>品牌</h2>
+      <span class="d">标识 · 图标体系(Lucide)</span></div>
+    <div class="grid cols-2">
+      <div class="card"><div class="cap"><span class="t">品牌标识</span></div>
+        <iframe src="preview/brand-lockup.html" height="120" scrolling="no"></iframe></div>
+      <div class="card"><div class="cap"><span class="t">图标体系</span><span class="s">Lucide 线性图标</span></div>
+        <iframe src="preview/iconography.html" height="180" scrolling="no"></iframe></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    设计系统文件:<a href="README.md">README.md</a> · <a href="colors_and_type.css">colors_and_type.css</a>
+    · <a href="SKILL.md">SKILL.md</a> · <a href="ui_kits/desktop-app/index.html">UI Kit</a><br />
+    视觉 token 取自真实截图;设备 / 日志 / 性能 / 投屏 标签页已对照截图还原,网络标签为合理推测。
+  </div>
+
+</div>
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+  lucide.createIcons();
+  (function(){
+    var fr = document.getElementById('appLive');
+    var frame = document.getElementById('appframe');
+    if (fr) fr.addEventListener('load', function(){ frame.classList.add('ready'); });
+  })();
+</script>
+</body>
+</html>

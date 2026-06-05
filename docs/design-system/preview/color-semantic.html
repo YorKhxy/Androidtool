@@ -1,0 +1,28 @@
+<!-- @dsCard group="Colors" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 22px 24px; }
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .sw { border-radius: var(--r-md); padding: 12px; height: 70px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    border: 1px solid var(--border-subtle); }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .nm { font-size: 12px; font-weight: 600; color: var(--fg-primary); }
+  .hx { font-family: var(--font-mono); font-size: 10px; color: var(--fg-tertiary); }
+</style>
+</head>
+<body class="adm">
+  <div class="grid">
+    <div class="sw"><div class="dot" style="background:var(--success)"></div><div><div class="nm">success</div><div class="hx">#54C084 · 已连接</div></div></div>
+    <div class="sw"><div class="dot" style="background:var(--info)"></div><div><div class="nm">info</div><div class="hx">#5E9FD6 · 延迟</div></div></div>
+    <div class="sw"><div class="dot" style="background:var(--warning)"></div><div><div class="nm">warning</div><div class="hx">#DCA844 · 关闭</div></div></div>
+    <div class="sw"><div class="dot" style="background:var(--danger)"></div><div><div class="nm">danger</div><div class="hx">#E0746C · 断开</div></div></div>
+    <div class="sw"><div class="dot" style="background:var(--gold)"></div><div><div class="nm">gold</div><div class="hx">#E8B339 · 文件</div></div></div>
+    <div class="sw"><div class="dot" style="background:var(--purple)"></div><div><div class="nm">memory</div><div class="hx">#A78BFA</div></div></div>
+  </div>
+</body>
+</html>

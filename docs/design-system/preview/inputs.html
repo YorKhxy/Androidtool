@@ -1,0 +1,33 @@
+<!-- @dsCard group="Components" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 22px 24px;
+    display: flex; flex-direction: column; gap: 12px; }
+  .field { display: flex; align-items: center; gap: 8px; height: 32px;
+    padding: 0 11px; background: var(--bg-elevated); border: 1px solid var(--border-default);
+    border-radius: var(--r-sm); color: var(--fg-secondary); font-size: 13px; }
+  .field.focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .field input { background: none; border: 0; outline: 0; color: var(--fg-primary);
+    font-size: 13px; font-family: var(--font-sans); flex: 1; }
+  .field .ph { color: var(--fg-tertiary); flex: 1; }
+  [data-lucide] { width: 15px; height: 15px; color: var(--fg-tertiary); }
+  .sel [data-lucide].chev { margin-left: auto; }
+  .row { display: flex; gap: 10px; }
+  .row .field { flex: 1; }
+</style>
+</head>
+<body class="adm">
+  <div class="field focus"><i data-lucide="wifi"></i><input value="192.168.1.42:5555" /></div>
+  <div class="row">
+    <div class="field"><i data-lucide="search"></i><span class="ph">过滤日志 / filter…</span></div>
+    <div class="field sel" style="max-width:160px"><span style="color:var(--fg-primary)">全部等级</span><i data-lucide="chevron-down" class="chev"></i></div>
+  </div>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

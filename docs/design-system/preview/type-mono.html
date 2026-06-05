@@ -1,0 +1,44 @@
+<!-- @dsCard group="Type" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 22px 26px;
+    display: flex; gap: 26px; align-items: stretch; }
+  .col { flex: 1; }
+  .lbl { color: var(--fg-tertiary); font-family: var(--font-mono);
+    font-size: 11px; margin-bottom: 10px; }
+  .metric-row { display: flex; gap: 22px; align-items: flex-end; }
+  .m .v { font-family: var(--font-mono); font-size: var(--fs-metric);
+    font-weight: 600; color: var(--fg-primary); font-variant-numeric: tabular-nums; }
+  .m .u { font-family: var(--font-mono); font-size: 11px; color: var(--fg-tertiary); }
+  .log { font-family: var(--font-mono); font-size: var(--fs-mono);
+    line-height: 1.7; }
+  .t { color: var(--fg-tertiary); } .i { color: var(--log-info); }
+  .w { color: var(--log-warn); } .e { color: var(--log-error); }
+  .tag { color: var(--fg-secondary); }
+</style>
+</head>
+<body class="adm">
+  <div class="col">
+    <div class="lbl">metric · mono 22/600 · tabular</div>
+    <div class="metric-row">
+      <div class="m"><div class="v" style="color:var(--accent)">60</div><div class="u">FPS</div></div>
+      <div class="m"><div class="v">23.4</div><div class="u">CPU %</div></div>
+      <div class="m"><div class="v">418</div><div class="u">MB</div></div>
+      <div class="m"><div class="v">1.2<span style="font-size:13px">GB</span></div><div class="u">免费 / free</div></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="lbl">mono · 12/1.7 — logcat / data</div>
+    <div class="log">
+      <div><span class="t">06-04 14:22:01.337</span> <span class="i">I</span> <span class="tag">ActivityManager:</span> Start proc 8841</div>
+      <div><span class="t">06-04 14:22:01.902</span> <span class="w">W</span> <span class="tag">Choreographer:</span> Skipped 32 frames</div>
+      <div><span class="t">06-04 14:22:02.115</span> <span class="e">E</span> <span class="tag">AndroidRuntime:</span> FATAL EXCEPTION</div>
+    </div>
+  </div>
+</body>
+</html>

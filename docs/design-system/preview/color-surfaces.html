@@ -1,0 +1,27 @@
+<!-- @dsCard group="Colors" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 22px 24px; }
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .sw { border: 1px solid var(--border-subtle); border-radius: var(--r-md); overflow: hidden; }
+  .chip { height: 56px; }
+  .cap { padding: 7px 9px; }
+  .nm { color: var(--fg-primary); font-size: 12px; font-weight: 500; }
+  .hx { color: var(--fg-tertiary); font-family: var(--font-mono); font-size: 10.5px; }
+</style>
+</head>
+<body class="adm">
+  <div class="grid">
+    <div class="sw"><div class="chip" style="background:#15162B"></div><div class="cap"><div class="nm">base</div><div class="hx">#15162B</div></div></div>
+    <div class="sw"><div class="chip" style="background:#181A30"></div><div class="cap"><div class="nm">sidebar</div><div class="hx">#181A30</div></div></div>
+    <div class="sw"><div class="chip" style="background:#1E2138"></div><div class="cap"><div class="nm">panel</div><div class="hx">#1E2138</div></div></div>
+    <div class="sw"><div class="chip" style="background:#272A45"></div><div class="cap"><div class="nm">elevated</div><div class="hx">#272A45</div></div></div>
+    <div class="sw"><div class="chip" style="background:#2C3052"></div><div class="cap"><div class="nm">hover</div><div class="hx">#2C3052</div></div></div>
+    <div class="sw"><div class="chip" style="background:#313E63"></div><div class="cap"><div class="nm">active</div><div class="hx">#313E63</div></div></div>
+  </div>
+</body>
+</html>

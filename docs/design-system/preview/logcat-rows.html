@@ -1,0 +1,30 @@
+<!-- @dsCard group="Components" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-mirror); padding: 14px 16px; }
+  .log { font-family: var(--font-mono); font-size: 12px; line-height: 22px; }
+  .ln { display: flex; gap: 10px; padding: 1px 8px; border-radius: 3px; }
+  .ln.hl { background: var(--bg-hover); }
+  .ts { color: var(--fg-tertiary); flex: none; }
+  .lv { font-weight: 700; width: 12px; flex: none; text-align: center; }
+  .tag { flex: none; }
+  .msg { color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body class="adm">
+  <div class="log">
+    <div class="ln"><span class="ts">14:22:01.337</span><span class="lv" style="color:var(--log-info)">I</span><span class="tag" style="color:var(--log-info)">ActivityManager</span><span class="msg">Displayed com.example.app/.MainActivity: +812ms</span></div>
+    <div class="ln hl"><span class="ts">14:22:01.902</span><span class="lv" style="color:var(--log-warn)">W</span><span class="tag" style="color:var(--log-warn)">Choreographer</span><span class="msg">Skipped 32 frames! Main thread doing too much work.</span></div>
+    <div class="ln"><span class="ts">14:22:02.004</span><span class="lv" style="color:var(--log-debug)">D</span><span class="tag" style="color:var(--log-debug)">OkHttp</span><span class="msg">--&gt; GET https://api.example.com/v2/feed</span></div>
+    <div class="ln"><span class="ts">14:22:02.115</span><span class="lv" style="color:var(--log-error)">E</span><span class="tag" style="color:var(--log-error)">AndroidRuntime</span><span class="msg">FATAL EXCEPTION: main — NullPointerException</span></div>
+    <div class="ln"><span class="ts">14:22:02.220</span><span class="lv" style="color:var(--log-verbose)">V</span><span class="tag" style="color:var(--log-verbose)">InputDispatcher</span><span class="msg">dispatchPointer — MotionEvent ACTION_DOWN</span></div>
+  </div>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

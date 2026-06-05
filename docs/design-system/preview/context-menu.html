@@ -1,0 +1,36 @@
+<!-- @dsCard group="Components" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 20px; display: flex; justify-content: center; }
+  .menu { width: 220px; background: var(--bg-elevated); border: 1px solid var(--border-default);
+    border-radius: var(--r-md); box-shadow: var(--sh-pop); padding: 5px; }
+  .mi { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px;
+    border-radius: var(--r-sm); color: var(--fg-secondary); font-size: 13px; cursor: pointer; }
+  .mi:hover { background: var(--bg-hover); color: var(--fg-primary); }
+  .mi .k { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--fg-tertiary); }
+  .mi.danger { color: var(--danger); }
+  .mi.danger:hover { background: var(--danger-soft); }
+  .mi [data-lucide] { width: 15px; height: 15px; }
+  .sep { height: 1px; background: var(--border-subtle); margin: 5px 8px; }
+</style>
+</head>
+<body class="adm">
+  <div class="menu">
+    <div class="mi"><i data-lucide="cast"></i>投屏<span class="k">⏎</span></div>
+    <div class="mi"><i data-lucide="folder-open"></i>打开文件管理</div>
+    <div class="mi"><i data-lucide="download"></i>导出完整日志</div>
+    <div class="sep"></div>
+    <div class="mi"><i data-lucide="moon"></i>息屏</div>
+    <div class="mi"><i data-lucide="rotate-cw"></i>重启设备</div>
+    <div class="sep"></div>
+    <div class="mi danger"><i data-lucide="unplug"></i>断开连接</div>
+  </div>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!-- @dsCard group="Brand" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 26px; display: flex; align-items: center; gap: 26px; }
+  .mark { width: 56px; height: 56px; border-radius: 13px; background: var(--bg-panel);
+    border: 1px solid var(--border-default); display: flex; align-items: center; justify-content: center; flex: none; }
+  .mark [data-lucide] { width: 30px; height: 30px; color: var(--accent); }
+  .lockup .zh { font-size: 24px; font-weight: 700; color: var(--fg-primary); letter-spacing: .02em; }
+  .lockup .en { font-size: 12px; font-weight: 500; color: var(--fg-tertiary);
+    letter-spacing: .12em; text-transform: uppercase; margin-top: 3px; }
+  .div { width: 1px; height: 56px; background: var(--border-subtle); }
+  .alt { display: flex; align-items: center; gap: 9px; }
+  .alt [data-lucide] { width: 19px; height: 19px; color: var(--accent); }
+  .alt .t { font-size: 14px; font-weight: 600; color: var(--fg-primary); }
+  .ver { font-family: var(--font-mono); font-size: 11px; color: var(--fg-tertiary);
+    border: 1px solid var(--border-default); border-radius: var(--r-pill); padding: 1px 7px; }
+</style>
+</head>
+<body class="adm">
+  <div class="mark"><i data-lucide="monitor-smartphone"></i></div>
+  <div class="lockup">
+    <div class="zh">安卓设备监控</div>
+    <div class="en">Android Device Monitor</div>
+  </div>
+  <div class="div"></div>
+  <div class="alt">
+    <i data-lucide="monitor-smartphone"></i>
+    <span class="t">安卓设备监控</span>
+    <span class="ver">v1.0.12</span>
+  </div>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

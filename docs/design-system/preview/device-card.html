@@ -1,0 +1,54 @@
+<!-- @dsCard group="Components" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-sidebar); padding: 16px; display: flex; gap: 12px; }
+  .card { width: 320px; background: var(--bg-panel); border: 1px solid var(--border-default);
+    border-radius: var(--r-md); padding: 13px 15px; }
+  .card.sel { border-color: var(--border-selected); box-shadow: 0 0 0 1px var(--border-selected); }
+  .top { display: flex; align-items: center; gap: 8px; }
+  .nm { font-size: 16px; font-weight: 700; color: var(--fg-primary); }
+  .conn { margin-left: auto; font-size: 12px; }
+  .sn { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-tertiary); margin-top: 7px; }
+  .batt { display: flex; align-items: center; gap: 8px; margin: 9px 0; }
+  .bar { width: 92px; height: 8px; border-radius: 4px; background: var(--bg-active); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--success); }
+  .pct { font-family: var(--font-mono); font-size: 12px; color: var(--success); }
+  .ms { margin-left: auto; font-family: var(--font-mono); font-size: 11.5px; color: var(--info); }
+  .ctls { display: flex; gap: 7px; margin: 11px 0 9px; }
+  .ctl { font-size: 12px; cursor: pointer; }
+  .file { display: flex; align-items: center; justify-content: center; gap: 7px; height: 34px;
+    background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: var(--r-sm);
+    color: var(--fg-primary); font-size: 13px; }
+  .file [data-lucide] { width: 15px; height: 15px; color: var(--gold); }
+  .dis { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: var(--r-sm);
+    border: 1px solid var(--danger); color: var(--danger); font-size: 12px; margin-bottom: 9px; }
+</style>
+</head>
+<body class="adm">
+  <div class="card sel">
+    <div class="top"><span class="nm">WiFi 4</span><span class="conn" style="color:var(--success)">● 已连接</span></div>
+    <div class="sn">SN: PA9410MGK3220149G</div>
+    <div class="sn" style="margin-top:2px">192.168.1.39:5555</div>
+    <div class="batt"><div class="bar"><i style="width:100%"></i></div><span class="pct">100%</span><span class="ms">延迟 48ms</span></div>
+    <div class="ctls"><span class="ctl">息屏</span><span class="ctl" style="color:var(--success)">唤醒</span><span class="ctl">解锁</span><span class="ctl" style="color:var(--danger)">重启</span></div>
+    <div class="dis">断开设备</div>
+    <div class="file"><i data-lucide="folder"></i>文件管理</div>
+  </div>
+  <div class="card">
+    <div class="top"><span class="nm">WiFi 7</span><span class="conn" style="color:var(--success)">● 已连接</span></div>
+    <div class="sn">SN: PA9410MGJB250251G</div>
+    <div class="sn" style="margin-top:2px">192.168.1.60:5555</div>
+    <div class="batt"><div class="bar"><i style="width:27%"></i></div><span class="pct">27%</span><span class="ms">延迟 60ms</span></div>
+    <div class="ctls"><span class="ctl">息屏</span><span class="ctl" style="color:var(--success)">唤醒</span><span class="ctl">解锁</span><span class="ctl" style="color:var(--danger)">重启</span></div>
+    <div class="dis">断开设备</div>
+    <div class="file"><i data-lucide="folder"></i>文件管理</div>
+  </div>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

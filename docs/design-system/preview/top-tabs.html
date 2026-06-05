@@ -1,0 +1,35 @@
+<!-- @dsCard group="Components" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 22px; }
+  .panel { background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: var(--r-md); overflow: hidden; }
+  .tabs { display: flex; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--border-subtle); }
+  .tab { display: inline-flex; align-items: center; gap: 7px; height: 42px; padding: 0 16px;
+    font-size: 14px; font-weight: 500; color: var(--fg-tertiary); cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab:hover { color: var(--fg-secondary); }
+  .tab.active { color: var(--accent); font-weight: 600; border-bottom-color: var(--accent); }
+  .tab [data-lucide] { width: 16px; height: 16px; }
+  .body { padding: 18px; color: var(--fg-tertiary); font-size: 13px; }
+</style>
+</head>
+<body class="adm">
+  <div class="panel">
+    <div class="tabs">
+      <div class="tab active"><i data-lucide="smartphone"></i>设备</div>
+      <div class="tab"><i data-lucide="scroll-text"></i>日志</div>
+      <div class="tab"><i data-lucide="activity"></i>性能</div>
+      <div class="tab"><i data-lucide="network"></i>网络</div>
+      <div class="tab"><i data-lucide="cast"></i>投屏</div>
+    </div>
+    <div class="body">应用安装 · 已安装应用 · 设备控制 — 当前标签内容</div>
+  </div>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>
