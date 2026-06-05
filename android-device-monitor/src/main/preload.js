@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPerformance: (deviceId) => ipcRenderer.invoke('adb:get-performance', deviceId),
   startCaptureSession: (deviceId) => ipcRenderer.invoke('capture:start', deviceId),
   stopCaptureSession: (deviceId) => ipcRenderer.invoke('capture:stop', deviceId),
+  getActiveCaptureSessions: () => ipcRenderer.invoke('capture:active-sessions'),
   listCaptureSessions: () => ipcRenderer.invoke('capture:list'),
   loadCaptureSession: (sessionId) => ipcRenderer.invoke('capture:load', sessionId),
   deleteCaptureSession: (sessionId) => ipcRenderer.invoke('capture:delete', sessionId),

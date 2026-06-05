@@ -124,6 +124,40 @@ export function CaptureChart({
   const baseY = chartPadding.top + plotHeight;
   const elapsedToSample = new Map(samples.map((s) => [sampleElapsedMs(s, session.startedAt), s]));
 
+  // 波峰/波谷数值标签：先按可见曲线收集峰谷点，再做碰撞避让——x 相近且 y 太近的标签上下错开，
+  // 避免多条曲线的极值数字叠成一团（如 GPU 99 压住 FPS 85、MEM 8425 压住 FPS 97）。
+  const clampLabelY = (y: number) => Math.max(chartPadding.top + 9, Math.min(baseY - 5, y));
+  const peakValleyLabels = (() => {
+    if (hasFilterMarkers || samples.length < 2) return [] as Array<{ key: string; color: string; text: string; pointX: number; pointY: number; labelY: number }>;
+    const labels = visibleSeries.flatMap((series) => {
+      const axisMax = series.axis === 'memory' ? memoryAxisMax : leftAxisMax;
+      let maxI = 0, minI = 0, maxV = -Infinity, minV = Infinity;
+      samples.forEach((sample, i) => {
+        const v = Number(series.getValue(sample)) || 0;
+        if (v > maxV) { maxV = v; maxI = i; }
+        if (v < minV) { minV = v; minI = i; }
+      });
+      const peakY = yForValue(maxV, axisMax);
+      const valleyY = yForValue(minV, axisMax);
+      return [
+        { key: `${series.key}-peak`, color: series.color, text: String(Math.round(maxV)), pointX: xForSample(samples[maxI]), pointY: peakY, labelY: clampLabelY(peakY - 9) },
+        { key: `${series.key}-valley`, color: series.color, text: String(Math.round(minV)), pointX: xForSample(samples[minI]), pointY: valleyY, labelY: clampLabelY(valleyY + 14) },
+      ];
+    });
+    // 贪心避让：x 相近(<CLUSTER_X) 且 y 间距 < MIN_GAP 时，把后者沿 y 推开一个行高。标签数 ≤8，O(n²) 足够。
+    const CLUSTER_X = 36, MIN_GAP = 14;
+    const ordered = [...labels].sort((a, b) => a.pointX - b.pointX || a.labelY - b.labelY);
+    for (let i = 0; i < ordered.length; i++) {
+      for (let j = 0; j < i; j++) {
+        if (Math.abs(ordered[i].pointX - ordered[j].pointX) < CLUSTER_X && Math.abs(ordered[i].labelY - ordered[j].labelY) < MIN_GAP) {
+          const pushed = ordered[j].labelY + (ordered[i].labelY >= ordered[j].labelY ? MIN_GAP : -MIN_GAP);
+          ordered[i].labelY = clampLabelY(pushed);
+        }
+      }
+    }
+    return ordered;
+  })();
+
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
       {samples.length === 0 ? (
@@ -175,30 +209,16 @@ export function CaptureChart({
           {visibleSeries.map((series) => (
             <polyline key={series.key} points={buildLine(series)} fill="none" stroke={series.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
           ))}
-          {/* 波峰 / 波谷：过滤未激活时才显示，避免与过滤命中点叠加混乱。 */}
-          {!hasFilterMarkers && samples.length >= 2 && visibleSeries.flatMap((series) => {
-            const axisMax = series.axis === 'memory' ? memoryAxisMax : leftAxisMax;
-            let maxI = 0, minI = 0, maxV = -Infinity, minV = Infinity;
-            samples.forEach((sample, i) => {
-              const v = Number(series.getValue(sample)) || 0;
-              if (v > maxV) { maxV = v; maxI = i; }
-              if (v < minV) { minV = v; minI = i; }
-            });
-            const peak = { x: xForSample(samples[maxI]), y: yForValue(maxV, axisMax) };
-            const valley = { x: xForSample(samples[minI]), y: yForValue(minV, axisMax) };
-            // 贴顶/贴底时把标签翻到点的另一侧，避免溢出到顶部标题行或底部图例行。
-            const peakLabelY = peak.y - 7 < chartPadding.top + 9 ? peak.y + 14 : peak.y - 7;
-            const valleyLabelY = valley.y + 14 > baseY - 4 ? valley.y - 7 : valley.y + 14;
-            return [
-              <g key={`${series.key}-peak`} opacity={0.85}>
-                <circle cx={peak.x} cy={peak.y} r="2.5" fill={series.color} />
-                <text x={peak.x} y={peakLabelY} fill={series.color} fontSize="10" fontWeight="600" textAnchor="middle">{Math.round(maxV)}</text>
-              </g>,
-              <g key={`${series.key}-valley`} opacity={0.85}>
-                <circle cx={valley.x} cy={valley.y} r="2.5" fill={series.color} />
-                <text x={valley.x} y={valleyLabelY} fill={series.color} fontSize="10" fontWeight="600" textAnchor="middle">{Math.round(minV)}</text>
-              </g>,
-            ];
+          {/* 波峰 / 波谷：过滤未激活时才显示。已做碰撞避让 + 半透明底片（描边取曲线色），避免数字叠成一团、压在线上难读。 */}
+          {peakValleyLabels.map((l) => {
+            const chipW = l.text.length * 6.4 + 9;
+            return (
+              <g key={l.key}>
+                <circle cx={l.pointX} cy={l.pointY} r="2.5" fill={l.color} />
+                <rect x={l.pointX - chipW / 2} y={l.labelY - 10} width={chipW} height={14} rx="3.5" fill="rgba(15,16,32,0.74)" stroke={l.color} strokeOpacity={0.35} strokeWidth={0.75} />
+                <text x={l.pointX} y={l.labelY} fill={l.color} fontSize="10" fontWeight="600" textAnchor="middle">{l.text}</text>
+              </g>
+            );
           })}
           {/* 参数过滤命中标记：空心圆点打在该指标曲线对应数值位置，颜色取该曲线色，跟随其显隐。 */}
           {(markers ?? []).flatMap((marker) => {

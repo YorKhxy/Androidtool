@@ -948,11 +948,20 @@ describe('project smoke checks', () => {
     });
 
     // preload + electronApi 暴露
-    ['startCaptureSession', 'stopCaptureSession', 'listCaptureSessions', 'loadCaptureSession',
+    ['startCaptureSession', 'stopCaptureSession', 'getActiveCaptureSessions', 'listCaptureSessions', 'loadCaptureSession',
       'deleteCaptureSession', 'renameCaptureSession', 'saveCaptureMarkers', 'saveCaptureFrame',
       'onCaptureSample', 'onCaptureSizeLimit'].forEach((m) => {
       expect(preloadSource).toContain(m);
       expect(electronApiSource).toContain(m);
+    });
+
+    // 进行中采集对齐：通道 + controller 暴露 + 两入口 handler + 渲染层挂载时恢复（防重载/崩溃后 desync 死锁）。
+    expect(channelSource).toContain('ACTIVE_CAPTURE_SESSIONS:');
+    expect(controllerSource).toContain('getActiveSessions()');
+    const rendererSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');
+    expect(rendererSource).toContain('getActiveCaptureSessions()');
+    [indexSource, prodSource].forEach((src) => {
+      expect(src).toContain('captureController.getActiveSessions()');
     });
   });
 

@@ -11,6 +11,8 @@ export const IPC_CHANNELS = {
   EXPORT_PERFORMANCE_SESSION: 'performance:export-session',
   START_CAPTURE_SESSION: 'capture:start',
   STOP_CAPTURE_SESSION: 'capture:stop',
+  // 查询进行中的采集（渲染层重载/崩溃恢复后据此对齐采集状态，避免与主进程 desync）。
+  ACTIVE_CAPTURE_SESSIONS: 'capture:active-sessions',
   LIST_CAPTURE_SESSIONS: 'capture:list',
   LOAD_CAPTURE_SESSION: 'capture:load',
   DELETE_CAPTURE_SESSION: 'capture:delete',

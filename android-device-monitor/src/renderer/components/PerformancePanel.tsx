@@ -13,6 +13,8 @@ type PerformancePanelProps = {
   isCapturing: boolean;
   /** start/stop 异步进行中：禁用开关防重复点击。 */
   isCaptureBusy: boolean;
+  /** 当前设备是否正在投屏：用于提示「投屏会增加负载、轻微影响性能读数」（非阻塞）。 */
+  isDeviceMirroring?: boolean;
   elapsedMs: number;
   /** 软上限提醒文本（达 30 分钟 / 2GB），null 表示不显示。 */
   softLimitNotice: string | null;
@@ -30,6 +32,8 @@ type PerformancePanelProps = {
   onRenameCaptureSession: (sessionId: string, title: string) => void;
   onDeleteCaptureSession: (sessionId: string) => void;
   onExportCaptureSession: (sessionId: string) => void;
+  /** 刷新采集回看列表（手动重新拉取归档会话）。 */
+  onRefreshCaptureSessions: () => void;
   /** 选 zip 文件导入。 */
   onImportCaptureSessions: () => void;
   /** 拖拽导入（.zip 或会话文件夹路径）。 */
@@ -104,6 +108,7 @@ export function PerformancePanel({
   captureSamples,
   isCapturing,
   isCaptureBusy,
+  isDeviceMirroring,
   elapsedMs,
   softLimitNotice,
   captureMarkers,
@@ -117,6 +122,7 @@ export function PerformancePanel({
   onRenameCaptureSession,
   onDeleteCaptureSession,
   onExportCaptureSession,
+  onRefreshCaptureSessions,
   onImportCaptureSessions,
   onImportCapturePaths,
   onExportSession,
@@ -181,6 +187,11 @@ export function PerformancePanel({
           <div style={{ color: '#9ca3af', fontSize: '12px', lineHeight: 1.5 }}>
             一次「开始采集 → 关闭采集」生成一份采集报告：曲线填满区域，录屏在报告内合并播放，拖动时间轴联动曲线游标与画面。
           </div>
+          {isDeviceMirroring && (
+            <div style={{ color: '#fcd34d', backgroundColor: 'rgba(120, 90, 10, 0.25)', border: '1px solid rgba(252, 211, 77, 0.35)', borderRadius: '6px', padding: '7px 10px', fontSize: '12px', lineHeight: 1.5 }}>
+              ⚠ 当前设备正在投屏：投屏会额外占用编码器与带宽，增加设备负载、轻微影响性能读数。追求更准的数据可先停止投屏再采集。
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button
               onClick={onToggleCapture}
@@ -248,6 +259,11 @@ export function PerformancePanel({
                   style={{ border: 'none', borderRadius: '6px', backgroundColor: '#166534', color: '#fff', cursor: 'pointer', padding: '5px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
                 >📂 打开位置</button>
               )}
+              <button
+                onClick={onRefreshCaptureSessions}
+                title="刷新采集回看列表"
+                style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#cbd5e1', cursor: 'pointer', padding: '5px 12px', fontSize: '12px' }}
+              >🔄 刷新</button>
               <button
                 onClick={onImportCaptureSessions}
                 title="导入采集会话（.zip）；也可把 zip 或会话文件夹拖到此区域"
