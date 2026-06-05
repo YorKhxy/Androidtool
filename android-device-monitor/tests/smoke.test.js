@@ -29,6 +29,9 @@ describe('project smoke checks', () => {
     expect(ps1Source).toContain('ensure-electron-runtime.js');
     expect(ps1Source).toContain('vendor\\platform-tools');
     expect(ps1Source).toContain('vendor\\scrcpy');
+    // 免安装包必须把生产依赖装进 resources/app/node_modules，否则主进程 require 第三方包
+    // （adm-zip / electron-updater）运行时崩溃（Cannot find module）。
+    expect(ps1Source).toContain('npm install --omit=dev');
     expect(electronRuntimeSource).toContain('restoreFromTempElectronRuntime');
     expect(pkg.build.extraResources).toEqual(
       expect.arrayContaining([
