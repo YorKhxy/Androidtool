@@ -83,7 +83,9 @@ export function CaptureChart({
   const hasFilterMarkers = (markers ?? []).some((m) => m.atMs.length > 0);
 
   const memoryValues = samples.map((s) => Number(formatMemoryMb(s.metrics.memoryUsage))).filter(Number.isFinite);
-  const memoryAxisMax = Math.max(512, Math.ceil(Math.max(1, ...memoryValues) / 512) * 512);
+  // 顶部留 ~12% 空白：否则内存峰值（如 8662）几乎贴轴顶（8704），其峰值标签会和右上角
+  // 「MEM MB」标题、顶刻度叠成一团。乘 1.12 后再向上取整到 512 的倍数，曲线峰值落在 ~89% 处。
+  const memoryAxisMax = Math.max(512, Math.ceil((Math.max(1, ...memoryValues) * 1.12) / 512) * 512);
   const fpsMax = Math.max(0, ...samples.map((s) => s.metrics.fps).filter(Number.isFinite));
   const FPS_TIERS = [100, 120, 144, 165, 240];
   const leftAxisMax = Math.max(100, FPS_TIERS.find((t) => t >= fpsMax) ?? Math.ceil(fpsMax / 60) * 60);
@@ -184,14 +186,17 @@ export function CaptureChart({
             });
             const peak = { x: xForSample(samples[maxI]), y: yForValue(maxV, axisMax) };
             const valley = { x: xForSample(samples[minI]), y: yForValue(minV, axisMax) };
+            // 贴顶/贴底时把标签翻到点的另一侧，避免溢出到顶部标题行或底部图例行。
+            const peakLabelY = peak.y - 7 < chartPadding.top + 9 ? peak.y + 14 : peak.y - 7;
+            const valleyLabelY = valley.y + 14 > baseY - 4 ? valley.y - 7 : valley.y + 14;
             return [
               <g key={`${series.key}-peak`} opacity={0.85}>
                 <circle cx={peak.x} cy={peak.y} r="2.5" fill={series.color} />
-                <text x={peak.x} y={peak.y - 7} fill={series.color} fontSize="10" fontWeight="600" textAnchor="middle">{Math.round(maxV)}</text>
+                <text x={peak.x} y={peakLabelY} fill={series.color} fontSize="10" fontWeight="600" textAnchor="middle">{Math.round(maxV)}</text>
               </g>,
               <g key={`${series.key}-valley`} opacity={0.85}>
                 <circle cx={valley.x} cy={valley.y} r="2.5" fill={series.color} />
-                <text x={valley.x} y={valley.y + 14} fill={series.color} fontSize="10" fontWeight="600" textAnchor="middle">{Math.round(minV)}</text>
+                <text x={valley.x} y={valleyLabelY} fill={series.color} fontSize="10" fontWeight="600" textAnchor="middle">{Math.round(minV)}</text>
               </g>,
             ];
           })}
