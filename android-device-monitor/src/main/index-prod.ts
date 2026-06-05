@@ -4,11 +4,15 @@ import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
 import { ScrcpyManager } from './scrcpy/scrcpyManager';
-import { LogEntry, MirrorStartOptions, PerformanceMetrics, PerformanceRecordingOptions, PerformanceSessionExportPayload } from '../shared/types';
+import { LogEntry, MirrorStartOptions, PerformanceSessionExportPayload } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
-import { persistPerformanceSnapshot, resolveRuntimeAppRoot } from './performanceSnapshots';
+import { resolveRuntimeAppRoot } from './runtimeAppRoot';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
 import { registerPerformanceMediaProtocol, registerPerformanceMediaScheme } from './performanceMedia';
+import { PerformanceCaptureStore } from './performanceCaptureStore';
+import { zipSessionDir, extractZipToSessionDir } from './performanceCaptureTransfer';
+import { PerformanceCaptureController } from './performanceCaptureController';
+import type { PerformanceCaptureMarker, PerformanceCaptureSession } from '../shared/types';
 import { initAutoUpdate, checkForUpdates, downloadUpdate, quitAndInstallUpdate, getLastUpdateStatus } from './autoUpdate';
 import * as fullLogRecorder from './fullLogRecorder';
 import * as transferJournal from './transferJournal';
@@ -22,6 +26,8 @@ import {
 
 let mainWindow: BrowserWindow | null = null;
 let adbManager: ADBManager;
+let captureStore: PerformanceCaptureStore;
+let captureController: PerformanceCaptureController;
 const scrcpyManager = new ScrcpyManager();
 let isCleanupComplete = false;
 let cleanupPromise: Promise<void> | null = null;
@@ -52,6 +58,9 @@ const cleanupBeforeQuit = async () => {
     clearLogQueue();
     fullLogRecorder.stopAll();
     scrcpyManager.stopAll();
+    if (captureController) {
+      await captureController.stopAll();
+    }
     if (adbManager) {
       // 先置位「退出中」：让被 SIGTERM 中断的传输保留为 transferring（可恢复），不被当成失败清出 journal。
       transferJournal.setQuitting(true);
@@ -116,20 +125,6 @@ const toIpcErrorResponse = (error: unknown, fallbackMessage: string) => {
     success: false,
     error: error instanceof Error ? error.message : fallbackMessage,
   };
-};
-
-const readSnapshotImageAsDataUrl = async (screenshotPath: string) => {
-  const appRoot = resolveRuntimeAppRoot(app);
-  const snapshotRoot = path.resolve(appRoot, 'performance-snapshots');
-  const resolvedPath = path.resolve(screenshotPath);
-  const relativePath = path.relative(snapshotRoot, resolvedPath);
-
-  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-    throw new Error('快照图片路径不在允许目录内');
-  }
-
-  const image = await fs.readFile(resolvedPath);
-  return `data:image/png;base64,${image.toString('base64')}`;
 };
 
 const resolveRendererIndexPath = (): string => {
@@ -264,36 +259,135 @@ const setupIpcHandlers = () => {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.CAPTURE_PERFORMANCE_SNAPSHOT, async (_event, deviceId: string, currentMetrics?: PerformanceMetrics) => {
+  // —— Phase 14 采集会话 —— //
+  ipcMain.handle(IPC_CHANNELS.START_CAPTURE_SESSION, async (_event, deviceId: string) => {
     try {
-      const snapshotPayload = await adbManager.capturePerformanceSnapshot(deviceId, currentMetrics);
-      const snapshot = await persistPerformanceSnapshot(resolveRuntimeAppRoot(app), {
-        deviceId,
-        snapshot: snapshotPayload,
-        trigger: 'manual',
+      const session = await captureController.start(deviceId);
+      return { success: true, data: session };
+    } catch (error) {
+      return toIpcErrorResponse(error, '开始采集失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.STOP_CAPTURE_SESSION, async (_event, deviceId: string) => {
+    try {
+      const session = await captureController.stop(deviceId);
+      return { success: true, data: session };
+    } catch (error) {
+      return toIpcErrorResponse(error, '关闭采集失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LIST_CAPTURE_SESSIONS, async () => {
+    try {
+      const sessions = await captureStore.listSessions();
+      return { success: true, data: sessions };
+    } catch (error) {
+      return toIpcErrorResponse(error, '加载采集列表失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.LOAD_CAPTURE_SESSION, async (_event, sessionId: string) => {
+    try {
+      const detail = await captureStore.loadSession(sessionId);
+      return { success: true, data: detail };
+    } catch (error) {
+      return toIpcErrorResponse(error, '加载采集记录失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.DELETE_CAPTURE_SESSION, async (_event, sessionId: string) => {
+    try {
+      await captureStore.deleteSession(sessionId);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '删除采集记录失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RENAME_CAPTURE_SESSION, async (_event, sessionId: string, title: string) => {
+    try {
+      const session = await captureStore.renameSession(sessionId, title);
+      return { success: true, data: session };
+    } catch (error) {
+      return toIpcErrorResponse(error, '重命名采集记录失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SAVE_CAPTURE_MARKERS, async (_event, sessionId: string, markers: PerformanceCaptureMarker[]) => {
+    try {
+      await captureStore.saveMarkers(sessionId, markers);
+      return { success: true };
+    } catch (error) {
+      return toIpcErrorResponse(error, '保存过滤标记失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SAVE_CAPTURE_FRAME, async (_event, sessionId: string, dataUrl: string) => {
+    try {
+      const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+      const relativePath = await captureStore.saveScreenshot(sessionId, Buffer.from(base64, 'base64'));
+      return { success: true, data: relativePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '保存截图失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EXPORT_CAPTURE_SESSION, async (_event, sessionId: string) => {
+    try {
+      const sessionDir = captureStore.getSessionDir(sessionId);
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: '导出采集会话',
+        defaultPath: `${sessionId}.zip`,
+        filters: [{ name: '采集会话压缩包', extensions: ['zip'] }],
       });
-      return { success: true, data: snapshot };
+      if (result.canceled || !result.filePath) {
+        return { success: true, data: undefined };
+      }
+      zipSessionDir(sessionDir, result.filePath);
+      return { success: true, data: result.filePath };
     } catch (error) {
-      return toIpcErrorResponse(error, '抓取性能快照失败');
+      return toIpcErrorResponse(error, '导出采集会话失败');
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.START_PERFORMANCE_RECORDING, async (_event, deviceId: string, options: PerformanceRecordingOptions) => {
+  ipcMain.handle(IPC_CHANNELS.SELECT_IMPORT_FILES, async () => {
     try {
-      const recording = await adbManager.startPerformanceRecording(deviceId, resolveRuntimeAppRoot(app), options);
-      return { success: true, data: recording };
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: '导入采集会话',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: '采集会话压缩包', extensions: ['zip'] }],
+      });
+      return { success: true, data: result.canceled ? [] : result.filePaths };
     } catch (error) {
-      return toIpcErrorResponse(error, '性能录制失败');
+      return toIpcErrorResponse(error, '选择导入文件失败');
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.READ_SNAPSHOT_IMAGE, async (_event, screenshotPath: string) => {
-    try {
-      const dataUrl = await readSnapshotImageAsDataUrl(screenshotPath);
-      return { success: true, data: dataUrl };
-    } catch (error) {
-      return toIpcErrorResponse(error, '读取快照图片失败');
+  // 导入：逐个处理 zip / 会话文件夹，单个失败不影响其余，收集结果与错误一并返回。
+  ipcMain.handle(IPC_CHANNELS.IMPORT_CAPTURE_SESSIONS, async (_event, paths: string[]) => {
+    const imported: PerformanceCaptureSession[] = [];
+    const errors: string[] = [];
+    for (const sourcePath of paths || []) {
+      try {
+        const stat = await fs.stat(sourcePath);
+        if (stat.isDirectory()) {
+          imported.push(await captureStore.importFromDirectory(sourcePath));
+        } else if (sourcePath.toLowerCase().endsWith('.zip')) {
+          const { sessionDir, cleanup } = await extractZipToSessionDir(sourcePath);
+          try {
+            imported.push(await captureStore.importFromDirectory(sessionDir));
+          } finally {
+            await cleanup();
+          }
+        } else {
+          errors.push(`${path.basename(sourcePath)}：仅支持 .zip 或采集会话文件夹`);
+        }
+      } catch (error) {
+        errors.push(`${path.basename(sourcePath)}：${error instanceof Error ? error.message : String(error)}`);
+      }
     }
+    return { success: true, data: { imported, errors } };
   });
 
   ipcMain.handle(IPC_CHANNELS.GET_PROCESSES, async (_event, deviceId: string) => {
@@ -817,6 +911,12 @@ const setupIpcHandlers = () => {
 
 app.whenReady().then(() => {
   adbManager = new ADBManager();
+  captureStore = new PerformanceCaptureStore(() => resolveRuntimeAppRoot(app));
+  captureController = new PerformanceCaptureController(
+    adbManager,
+    captureStore,
+    (channel, payload) => mainWindow?.webContents.send(channel, payload)
+  );
   registerPerformanceMediaProtocol(() => resolveRuntimeAppRoot(app));
   createWindow();
   setupIpcHandlers();

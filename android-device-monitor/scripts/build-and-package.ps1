@@ -80,6 +80,22 @@ try {
     
     (Get-Content $pkgJsonPath -Raw) -replace '"main":\s*"./dist/main/main/index.js"', '"main": "./main/index.js"' | Set-Content $pkgJsonPath -NoNewline
 
+    # 主进程运行时依赖第三方包（adm-zip 做采集 zip 导入导出、electron-updater 做热更）。
+    # 这些不会被 tsc 打包进 dist，必须把生产依赖装进 resources/app/node_modules，否则运行时
+    # require 直接崩（Cannot find module 'adm-zip'）。--omit=dev 只装 dependencies，
+    # 不会重装 devDependencies 里 ~200MB 的 electron；react 等 renderer 依赖虽会被装入但已由
+    # webpack 打进 bundle，体积小可接受。
+    Write-Host "Installing production dependencies into app..." -ForegroundColor Yellow
+    $appDir = Join-Path $appResources "app"
+    Push-Location $appDir
+    npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+    $npmExit = $LASTEXITCODE
+    Pop-Location
+    if ($npmExit -ne 0) {
+        throw "Production dependency install failed (exit $npmExit)"
+    }
+    Write-Host "Production dependencies installed" -ForegroundColor Green
+
     Write-Host "Created portable package in: $winUnpackedDir" -ForegroundColor Green
 
     Write-Host "[5/5] Copying to release directory..." -ForegroundColor Yellow

@@ -8,10 +8,13 @@ import type {
   MirrorStartOptions,
   NetworkRequest,
   PerformanceMetrics,
-  PerformanceRecording,
-  PerformanceRecordingOptions,
   PerformanceSessionExportPayload,
-  PerformanceSnapshot,
+  PerformanceCaptureSession,
+  PerformanceCaptureSessionDetail,
+  PerformanceCaptureMarker,
+  CaptureImportResult,
+  CaptureSamplePayload,
+  CaptureSizeLimitPayload,
   PairResult,
   DeviceFileList,
   PushProgress,
@@ -46,9 +49,19 @@ export interface ElectronAPI {
   ) => Promise<ElectronResult<undefined>>;
   stopLogcat: (deviceId: string) => Promise<ElectronResult<undefined>>;
   getPerformance: (deviceId: string) => Promise<ElectronResult<PerformanceMetrics>>;
-  capturePerformanceSnapshot: (deviceId: string, currentMetrics?: PerformanceMetrics) => Promise<ElectronResult<PerformanceSnapshot>>;
-  startPerformanceRecording: (deviceId: string, options: PerformanceRecordingOptions) => Promise<ElectronResult<PerformanceRecording>>;
-  readSnapshotImage: (screenshotPath: string) => Promise<ElectronResult<string>>;
+  startCaptureSession: (deviceId: string) => Promise<ElectronResult<PerformanceCaptureSession>>;
+  stopCaptureSession: (deviceId: string) => Promise<ElectronResult<PerformanceCaptureSession>>;
+  listCaptureSessions: () => Promise<ElectronResult<PerformanceCaptureSession[]>>;
+  loadCaptureSession: (sessionId: string) => Promise<ElectronResult<PerformanceCaptureSessionDetail>>;
+  deleteCaptureSession: (sessionId: string) => Promise<ElectronResult<undefined>>;
+  renameCaptureSession: (sessionId: string, title: string) => Promise<ElectronResult<PerformanceCaptureSession>>;
+  saveCaptureMarkers: (sessionId: string, markers: PerformanceCaptureMarker[]) => Promise<ElectronResult<undefined>>;
+  saveCaptureFrame: (sessionId: string, dataUrl: string) => Promise<ElectronResult<string>>;
+  exportCaptureSession: (sessionId: string) => Promise<ElectronResult<string | undefined>>;
+  selectImportFiles: () => Promise<ElectronResult<string[]>>;
+  importCaptureSessions: (paths: string[]) => Promise<ElectronResult<CaptureImportResult>>;
+  onCaptureSample: (callback: (payload: CaptureSamplePayload) => void) => () => void;
+  onCaptureSizeLimit: (callback: (payload: CaptureSizeLimitPayload) => void) => () => void;
   getProcesses: (deviceId: string) => Promise<ElectronResult<ProcessInfo[]>>;
   getRunningPackages: (deviceId: string) => Promise<ElectronResult<string[]>>;
   connectUSB: () => Promise<ElectronResult<DeviceInfo[]>>;

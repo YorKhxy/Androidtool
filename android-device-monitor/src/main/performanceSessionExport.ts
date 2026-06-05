@@ -1,4 +1,4 @@
-import type { PerformanceMetrics, PerformanceSample, PerformanceSessionExportPayload, PerformanceSnapshot } from '../shared/types';
+import type { PerformanceMetrics, PerformanceSample, PerformanceSessionExportPayload } from '../shared/types';
 
 const escapeXml = (value: unknown) => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -43,7 +43,6 @@ const buildSummaryRows = (payload: PerformanceSessionExportPayload) => {
     row(['Started At', formatDate(payload.startedAt)]),
     row(['Ended At', formatDate(payload.endedAt)]),
     row(['Samples', samples.length]),
-    row(['Snapshots', payload.snapshots.length]),
     row(['Average FPS', Number(average(fpsValues).toFixed(1))]),
     row(['Min FPS', fpsValues.length ? Number(Math.min(...fpsValues).toFixed(1)) : '']),
     row(['Average CPU %', Number(average(cpuValues).toFixed(1))]),
@@ -51,31 +50,17 @@ const buildSummaryRows = (payload: PerformanceSessionExportPayload) => {
   ].join('');
 };
 
-const snapshotMarkerForSample = (sample: PerformanceSample, snapshots: PerformanceSnapshot[]) => {
-  const sampleTime = new Date(sample.capturedAt).getTime();
-  const markerIndex = snapshots.findIndex((snapshot) => Math.abs(new Date(snapshot.capturedAt).getTime() - sampleTime) <= 750);
-  return markerIndex >= 0 ? `S${markerIndex + 1}` : '';
-};
-
-const buildRawRows = (samples: PerformanceSample[], snapshots: PerformanceSnapshot[]) => [
+const buildRawRows = (samples: PerformanceSample[]) => [
   row([
     'Time', 'FPS', 'CPU %', 'MEM MB', 'GPU %', 'MTP', 'FrmCpu', 'FrmGpu', 'ATWGPU',
-    'Provider', 'Package', 'Activity', 'Snapshot Marker', 'Pico Raw Line',
+    'Provider', 'Package', 'Activity', 'Pico Raw Line',
   ], 'Header'),
   ...samples.map((sample) => row([
     formatDate(sample.capturedAt), sample.metrics.fps, Number(sample.metrics.cpuUsage.toFixed(1)),
     Number(memoryMb(sample.metrics).toFixed(1)), picoValue(sample.metrics, 'gpuUtil'),
     picoValue(sample.metrics, 'mtp'), picoValue(sample.metrics, 'frameCpu'), picoValue(sample.metrics, 'frameGpu'),
     picoValue(sample.metrics, 'atwGpu'), sample.metrics.provider, sample.metrics.packageName || '',
-    sample.metrics.activityName || '', snapshotMarkerForSample(sample, snapshots), sample.metrics.picoMetrics?.rawLine || '',
-  ])),
-].join('');
-
-const buildSnapshotRows = (snapshots: PerformanceSnapshot[]) => [
-  row(['ID', 'Time', 'FPS', 'CPU %', 'MEM MB', 'Image Path'], 'Header'),
-  ...snapshots.map((snapshot, index) => row([
-    `S${index + 1}`, formatDate(snapshot.capturedAt), snapshot.metrics.fps,
-    Number(snapshot.metrics.cpuUsage.toFixed(1)), Number(memoryMb(snapshot.metrics).toFixed(1)), snapshot.screenshotPath || '',
+    sample.metrics.activityName || '', sample.metrics.picoMetrics?.rawLine || '',
   ])),
 ].join('');
 
@@ -90,7 +75,6 @@ export function buildPerformanceSessionWorkbook(payload: PerformanceSessionExpor
   <Style ss:ID="Header"><Font ss:Bold="1"/><Interior ss:Color="#D9EAF7" ss:Pattern="Solid"/></Style>
  </Styles>
  ${worksheet('Summary', buildSummaryRows(payload))}
- ${worksheet('Raw Data', buildRawRows(payload.samples, payload.snapshots))}
- ${worksheet('Snapshots', buildSnapshotRows(payload.snapshots))}
+ ${worksheet('Raw Data', buildRawRows(payload.samples))}
 </Workbook>`;
 }

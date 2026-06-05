@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceCaptureSession, PerformanceCaptureSessionDetail, PerformanceCaptureMarker, PerformanceSample, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
@@ -191,6 +191,8 @@ function SimpleApp() {
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
   const [customDeviceNames, setCustomDeviceNames] = useState<Record<string, string>>(() => loadStoredDeviceNames());
   const [activeTab, setActiveTab] = useState<TabType>('devices');
+  // 侧边设备栏折叠：收起后宽度归零，主内容（含性能曲线）自动占满腾出的横向空间。
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mirrorSessionsByDeviceId, setMirrorSessionsByDeviceId] = useState<Record<string, MirrorSession>>({});
   const [mirrorStartingDeviceIds, setMirrorStartingDeviceIds] = useState<Set<string>>(new Set());
   const [logVersion, setLogVersion] = useState(0);
@@ -198,10 +200,32 @@ function SimpleApp() {
   const [performanceByDeviceId, setPerformanceByDeviceId] = useState<Record<string, PerformanceMetrics>>({});
   const [performanceSamplesByDeviceId, setPerformanceSamplesByDeviceId] = useState<Record<string, PerformanceSample[]>>({});
   const [performanceSessionStartedAtByDeviceId, setPerformanceSessionStartedAtByDeviceId] = useState<Record<string, Date>>({});
-  const [performanceEnabledDeviceIds, setPerformanceEnabledDeviceIds] = useState<Set<string>>(() => new Set());
-  const [performanceSnapshots, setPerformanceSnapshots] = useState<PerformanceSnapshot[]>([]);
-  const [performanceRecordings, setPerformanceRecordings] = useState<PerformanceRecording[]>([]);
-  const [recordingDeviceIds, setRecordingDeviceIds] = useState<Set<string>>(() => new Set());
+  // —— Phase 14 采集会话状态（按设备）——
+  // 进行中的采集会话（点开始采集时设入，关闭后移除）；start/stop 异步进行中集合。
+  const [activeCaptureByDeviceId, setActiveCaptureByDeviceId] = useState<Record<string, PerformanceCaptureSession>>({});
+  const [captureBusyDeviceIds, setCaptureBusyDeviceIds] = useState<Set<string>>(() => new Set());
+  const [captureElapsedByDeviceId, setCaptureElapsedByDeviceId] = useState<Record<string, number>>({});
+  const [softLimitNoticeByDeviceId, setSoftLimitNoticeByDeviceId] = useState<Record<string, string>>({});
+  // 采集回看：归档会话列表（倒序）+ 当前在报告区展示的会话明细（停止采集后或点列表加载）。
+  const [captureSessions, setCaptureSessions] = useState<PerformanceCaptureSession[]>([]);
+  // 报告区展示的会话明细，按设备隔离：切设备只看该设备自己的报告，不串台。
+  const [loadedReportByDeviceId, setLoadedReportByDeviceId] = useState<Record<string, PerformanceCaptureSessionDetail | null>>({});
+  const setLoadedReportFor = (deviceId: string, detail: PerformanceCaptureSessionDetail | null) =>
+    setLoadedReportByDeviceId((prev) => ({ ...prev, [deviceId]: detail }));
+  // 跨所有设备槽位更新匹配某会话的报告（改名/删除/标记保存：该会话可能正被某台设备展示）。
+  const mutateLoadedReports = (mutate: (detail: PerformanceCaptureSessionDetail | null) => PerformanceCaptureSessionDetail | null) =>
+    setLoadedReportByDeviceId((prev) => {
+      let changed = false;
+      const next: Record<string, PerformanceCaptureSessionDetail | null> = { ...prev };
+      for (const key of Object.keys(next)) {
+        const updated = mutate(next[key]);
+        if (updated !== next[key]) {
+          next[key] = updated;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
   const [installedPackages, setInstalledPackages] = useState<string[]>([]);
   const [installedPackagesLoading, setInstalledPackagesLoading] = useState(false);
   const [appFilter, setAppFilter] = useState('');
@@ -269,7 +293,6 @@ function SimpleApp() {
   const [batchUpdateSize, setBatchUpdateSize] = useState(BATCH_UPDATE_SIZE);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
-  const [isCapturingSnapshot, setIsCapturingSnapshot] = useState(false);
   const [apkInstallStates, setApkInstallStates] = useState<Record<string, DeviceApkInstallState>>({});
   const [pendingApks, setPendingApks] = useState<{ path: string; fileName: string }[]>([]);
   const [isApkDragOver, setIsApkDragOver] = useState(false); // 拖拽 APK 到待安装区时高亮
@@ -286,13 +309,14 @@ function SimpleApp() {
   const [confirmRebootId, setConfirmRebootId] = useState<string | null>(null);
   // 最近一次导出日志保存到 PC 的路径，用于「打开所在文件夹」快捷按钮
   const [lastExportedLogPath, setLastExportedLogPath] = useState<string | null>(null);
+  // 最近一次导出采集会话 zip 到 PC 的路径，用于「打开位置」快捷按钮（导出回看后立即定位）
+  const [lastExportedCapturePath, setLastExportedCapturePath] = useState<string | null>(null);
   
   const logStatesRef = useRef(new Map<string, DeviceLogState>());
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const selectedDeviceRef = useRef<DeviceInfo | null>(null);
   const maxLogEntriesRef = useRef(MAX_LOG_ENTRIES);
   const batchUpdateSizeRef = useRef(BATCH_UPDATE_SIZE);
-  const performanceRequestInFlightRef = useRef(new Set<string>());
   const apkInstallProgressTimersRef = useRef(new Map<string, number>());
 
   const resetDeviceRuntimeState = useCallback(() => {
@@ -626,6 +650,25 @@ function SimpleApp() {
             return next;
           });
         });
+        // 采集中实时样本：主进程每秒推一条，累积到该设备样本缓冲（供实时曲线 + 关闭后报告），
+        // 同时刷新指标卡与已用时长。上限 7200 条（约 2 小时）防长采集内存膨胀。
+        const unsubscribeCaptureSample = window.electronAPI!.onCaptureSample((payload) => {
+          setPerformanceByDeviceId(prev => ({ ...prev, [payload.deviceId]: payload.sample.metrics }));
+          setPerformanceSamplesByDeviceId(prev => ({
+            ...prev,
+            [payload.deviceId]: [
+              ...(prev[payload.deviceId] || []),
+              { ...payload.sample, capturedAt: new Date(payload.sample.capturedAt) },
+            ].slice(-7200),
+          }));
+          setCaptureElapsedByDeviceId(prev => ({ ...prev, [payload.deviceId]: payload.elapsedMs }));
+        });
+        const unsubscribeCaptureSizeLimit = window.electronAPI!.onCaptureSizeLimit((payload) => {
+          const text = payload.reason === 'duration'
+            ? '本次采集已录制 30 分钟，可继续，也可手动关闭采集。'
+            : '本次采集录屏已达 2GB，可继续，也可手动关闭采集。';
+          setSoftLimitNoticeByDeviceId(prev => ({ ...prev, [payload.deviceId]: text }));
+        });
 
         // 初始数据加载完、所有 IPC 事件订阅就绪 → 标记 app 就绪，撤掉「启动中」遮罩，放开操作。
         setAppReady(true);
@@ -638,6 +681,8 @@ function SimpleApp() {
           unsubscribeLogEntry();
           unsubscribeLogBatch();
           unsubscribeMirrorStatus();
+          unsubscribeCaptureSample();
+          unsubscribeCaptureSizeLimit();
           unsubscribeUpdateStatus();
           logStatesRef.current.forEach(state => {
             if (state.flushTimer !== null) {
@@ -714,15 +759,19 @@ function SimpleApp() {
 
 
 
+  // 采集中的指标采样由主进程编排（PerformanceCaptureController 每秒一次），经 onCaptureSample
+  // 实时推送到渲染层，渲染层不再自行轮询 getPerformance。
+
+  // 采集回看列表加载（进性能页时 + 停止/删除/改名后各自刷新）。
+  const refreshCaptureSessions = useCallback(async () => {
+    if (!hasElectronAPI()) return;
+    const result = await window.electronAPI!.listCaptureSessions();
+    if (result.success && result.data) setCaptureSessions(result.data);
+  }, []);
+
   useEffect(() => {
-    if (selectedDevice && activeTab === 'performance' && performanceEnabledDeviceIds.has(selectedDevice.id)) {
-      void loadPerformance(selectedDevice.id, true);
-      const interval = setInterval(() => {
-        loadPerformance(selectedDevice.id, true);
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-  }, [selectedDevice, activeTab, performanceEnabledDeviceIds]);
+    if (activeTab === 'performance') void refreshCaptureSessions();
+  }, [activeTab, refreshCaptureSessions]);
 
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
@@ -1162,139 +1211,222 @@ function SimpleApp() {
     setLogVersion(version => version + 1);
   };
 
-  const loadPerformance = async (deviceId = selectedDevice?.id, recordSample = false) => {
-    if (!deviceId || !hasElectronAPI()) return;
-    if (performanceRequestInFlightRef.current.has(deviceId)) return;
-    performanceRequestInFlightRef.current.add(deviceId);
+  // 执行采集开关：点开始 → startCaptureSession（主进程同启采样循环 + 持续分段录制）；
+  // 点关闭 → stopCaptureSession（停采样停录制 + finalize），把 finalize 的会话留作报告渲染。
+  const runCaptureToggle = async (deviceId: string, isActive: boolean) => {
+    setCaptureBusyDeviceIds((prev) => new Set(prev).add(deviceId));
     try {
-      const result = await window.electronAPI!.getPerformance(deviceId);
-      if (result.success && result.data) {
-        setPerformanceByDeviceId((previous) => ({ ...previous, [deviceId]: result.data! }));
-        if (recordSample) {
-          const capturedAt = new Date();
-          setPerformanceSamplesByDeviceId((previous) => ({
-            ...previous,
-            [deviceId]: [
-              ...(previous[deviceId] || []),
-              { id: `${deviceId}-${capturedAt.getTime()}`, deviceId, capturedAt, metrics: result.data! },
-            ].slice(-3600),
-          }));
+      if (isActive) {
+        const result = await window.electronAPI!.stopCaptureSession(deviceId);
+        if (result.success && result.data) {
+          const finalized = result.data;
+          setActiveCaptureByDeviceId((prev) => {
+            const next = { ...prev };
+            delete next[deviceId];
+            return next;
+          });
+          // 用内存里刚累积的样本直接生成报告（无需再从磁盘加载），并刷新回看列表（新会话已归档）。
+          setLoadedReportFor(deviceId, { session: finalized, samples: performanceSamplesByDeviceId[deviceId] || [], markers: [] });
+          void refreshCaptureSessions();
+          setError('');
+        } else {
+          setError(result.error || '关闭采集失败');
+        }
+      } else {
+        // 开始前清空上次缓冲、报告与提醒，避免新旧会话数据串味。
+        setPerformanceSamplesByDeviceId((prev) => ({ ...prev, [deviceId]: [] }));
+        setLoadedReportFor(deviceId, null);
+        setCaptureElapsedByDeviceId((prev) => ({ ...prev, [deviceId]: 0 }));
+        setSoftLimitNoticeByDeviceId((prev) => {
+          const next = { ...prev };
+          delete next[deviceId];
+          return next;
+        });
+        const result = await window.electronAPI!.startCaptureSession(deviceId);
+        if (result.success && result.data) {
+          const session = result.data;
+          setActiveCaptureByDeviceId((prev) => ({ ...prev, [deviceId]: session }));
+          setPerformanceSessionStartedAtByDeviceId((prev) => ({ ...prev, [deviceId]: new Date(session.startedAt) }));
+          setError('');
+        } else {
+          setError(result.error || '开始采集失败');
         }
       }
     } catch (err) {
-      console.error('Load performance error:', err);
+      setError((isActive ? '关闭采集失败：' : '开始采集失败：') + (err as Error).message);
     } finally {
-      performanceRequestInFlightRef.current.delete(deviceId);
-    }
-  };
-
-  const togglePerformanceMonitoring = () => {
-    if (!selectedDevice) return;
-    const deviceId = selectedDevice.id;
-    setPerformanceEnabledDeviceIds((previous) => {
-      const next = new Set(previous);
-      if (next.has(deviceId)) {
-        next.delete(deviceId);
-      } else {
-        next.add(deviceId);
-        setPerformanceSamplesByDeviceId((previous) => ({ ...previous, [deviceId]: [] }));
-        setPerformanceSessionStartedAtByDeviceId((previous) => ({ ...previous, [deviceId]: new Date() }));
-        void loadPerformance(deviceId, true);
-      }
-      return next;
-    });
-  };
-
-  const capturePerformanceSnapshot = async () => {
-    if (!selectedDevice || !hasElectronAPI()) return;
-    const deviceId = selectedDevice.id;
-    const currentPerformance = performanceByDeviceId[deviceId];
-    if (!performanceEnabledDeviceIds.has(deviceId)) {
-      setPerformanceEnabledDeviceIds((previous) => new Set(previous).add(deviceId));
-      setPerformanceSamplesByDeviceId((previous) => ({ ...previous, [deviceId]: previous[deviceId] || [] }));
-      setPerformanceSessionStartedAtByDeviceId((previous) => ({ ...previous, [deviceId]: previous[deviceId] || new Date() }));
-    }
-
-    setIsCapturingSnapshot(true);
-    try {
-      const result = await window.electronAPI!.capturePerformanceSnapshot(deviceId, currentPerformance);
-      if (result.success && result.data) {
-        setPerformanceByDeviceId((previous) => ({ ...previous, [deviceId]: result.data!.metrics }));
-        setPerformanceSamplesByDeviceId((previous) => ({
-          ...previous,
-          [deviceId]: [
-            ...(previous[deviceId] || []),
-            { id: `${deviceId}-${new Date(result.data!.capturedAt).getTime()}-snapshot`, deviceId, capturedAt: result.data!.capturedAt, metrics: result.data!.metrics },
-          ].slice(-3600),
-        }));
-        setPerformanceSnapshots((previousSnapshots) => [result.data!, ...previousSnapshots].slice(0, 20));
-        setError('');
-      } else {
-        setError(result.error || '抓取性能快照失败');
-      }
-    } catch (err) {
-      setError('抓取性能快照失败：' + (err as Error).message);
-    } finally {
-      setIsCapturingSnapshot(false);
-    }
-  };
-
-  const startPerformanceRecording = async (durationSeconds: 10 | 30 | 60) => {
-    if (!selectedDevice || !hasElectronAPI()) return;
-    const deviceId = selectedDevice.id;
-    if (recordingDeviceIds.has(deviceId)) {
-      setError('当前设备正在录制性能片段。');
-      return;
-    }
-
-    setRecordingDeviceIds((previous) => new Set(previous).add(deviceId));
-    if (!performanceEnabledDeviceIds.has(deviceId)) {
-      setPerformanceEnabledDeviceIds((previous) => new Set(previous).add(deviceId));
-      setPerformanceSamplesByDeviceId((previous) => ({ ...previous, [deviceId]: previous[deviceId] || [] }));
-      setPerformanceSessionStartedAtByDeviceId((previous) => ({ ...previous, [deviceId]: previous[deviceId] || new Date() }));
-    }
-
-    try {
-      const result = await window.electronAPI!.startPerformanceRecording(deviceId, { durationSeconds, bitRateMbps: 8 });
-      if (result.success && result.data) {
-        setPerformanceRecordings((previous) => [result.data!, ...previous].slice(0, 12));
-        if (result.data.samples.length > 0) {
-          setPerformanceSamplesByDeviceId((previous) => ({
-            ...previous,
-            [deviceId]: [...(previous[deviceId] || []), ...result.data!.samples].slice(-300),
-          }));
-          const lastSample = result.data.samples[result.data.samples.length - 1];
-          setPerformanceByDeviceId((previous) => ({ ...previous, [deviceId]: lastSample.metrics }));
-        }
-        setError('');
-      } else {
-        setError(result.error || '性能录制失败');
-      }
-    } catch (err) {
-      setError('性能录制失败：' + (err as Error).message);
-    } finally {
-      setRecordingDeviceIds((previous) => {
-        const next = new Set(previous);
+      setCaptureBusyDeviceIds((prev) => {
+        const next = new Set(prev);
         next.delete(deviceId);
         return next;
       });
     }
   };
 
+  // 单一开关：开始采集直接开；关闭采集走统一确认弹窗二次确认，避免误触中断正在进行的录制。
+  const toggleCaptureSession = () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    const deviceId = selectedDevice.id;
+    if (captureBusyDeviceIds.has(deviceId)) return;
+    const isActive = Boolean(activeCaptureByDeviceId[deviceId]);
+    if (isActive) {
+      requestConfirm({
+        message: '确定关闭采集吗？\n关闭后会结束本次录制并生成采集报告。',
+        confirmText: '关闭采集',
+        danger: true,
+        onConfirm: () => {
+          void runCaptureToggle(deviceId, true);
+        },
+      });
+    } else {
+      void runCaptureToggle(deviceId, false);
+    }
+  };
+
+  const dismissSoftLimit = (deviceId: string) =>
+    setSoftLimitNoticeByDeviceId((prev) => {
+      const next = { ...prev };
+      delete next[deviceId];
+      return next;
+    });
+
+  // 过滤标记持久化到会话（写 data/markers.json），失败给错误提示，不阻塞 UI。
+  const saveCaptureMarkers = async (sessionId: string, markers: PerformanceCaptureMarker[]) => {
+    if (!hasElectronAPI()) return;
+    // 同步到正展示该会话的设备槽位，回看时再加载即一致。
+    mutateLoadedReports((detail) => (detail && detail.session.id === sessionId ? { ...detail, markers } : detail));
+    try {
+      const result = await window.electronAPI!.saveCaptureMarkers(sessionId, markers);
+      if (!result.success) setError(result.error || '保存过滤标记失败');
+    } catch (err) {
+      setError('保存过滤标记失败：' + (err as Error).message);
+    }
+  };
+
+  // —— Phase 14 采集回看：加载 / 改名 / 删除 / 截图归档 —— //（refreshCaptureSessions 在上方定义）
+  const selectCaptureSession = async (sessionId: string) => {
+    if (!hasElectronAPI() || !selectedDevice) return;
+    const deviceId = selectedDevice.id;
+    // 护栏：采集进行中不切回看——实时采集优先占着报告区，加载了也看不到，且会在关闭采集时被新报告覆盖。
+    // 直接拦截并提示，避免「点了没反应 + 列表高亮与报告区不一致 + 选择被悄悄丢弃」的困惑。
+    if (activeCaptureByDeviceId[deviceId]) {
+      setSuccess('采集进行中，关闭采集后即可回看历史采集。');
+      return;
+    }
+    const result = await window.electronAPI!.loadCaptureSession(sessionId);
+    if (result.success && result.data) {
+      // 加载到「当前查看的设备」槽位：在哪台设备上点回看，就在那台的报告区展示。
+      setLoadedReportFor(deviceId, result.data);
+      setError('');
+    } else {
+      setError(result.error || '加载采集会话失败');
+    }
+  };
+
+  const renameCaptureSession = async (sessionId: string, title: string) => {
+    if (!hasElectronAPI()) return;
+    const result = await window.electronAPI!.renameCaptureSession(sessionId, title);
+    if (result.success) {
+      void refreshCaptureSessions();
+      const trimmed = title.trim();
+      mutateLoadedReports((detail) =>
+        detail && detail.session.id === sessionId ? { ...detail, session: { ...detail.session, title: trimmed || undefined } } : detail
+      );
+    } else {
+      setError(result.error || '重命名采集会话失败');
+    }
+  };
+
+  const deleteCaptureSession = async (sessionId: string) => {
+    if (!hasElectronAPI()) return;
+    const result = await window.electronAPI!.deleteCaptureSession(sessionId);
+    if (result.success) {
+      void refreshCaptureSessions();
+      mutateLoadedReports((detail) => (detail && detail.session.id === sessionId ? null : detail));
+    } else {
+      setError(result.error || '删除采集会话失败');
+    }
+  };
+
+  // 截图归档：成功返回相对路径；失败抛错，由 CaptureReport 就地提示（不双重弹错误条）。
+  const saveCaptureFrame = async (sessionId: string, dataUrl: string): Promise<string | undefined> => {
+    if (!hasElectronAPI()) throw new Error('Electron 接口不可用');
+    const result = await window.electronAPI!.saveCaptureFrame(sessionId, dataUrl);
+    if (!result.success) throw new Error(result.error || '保存截图失败');
+    return result.data;
+  };
+
+  // 导出会话为 zip（弹系统保存框；取消则 data 为空，不提示）。
+  const exportCaptureSession = async (sessionId: string) => {
+    if (!hasElectronAPI()) return;
+    try {
+      const result = await window.electronAPI!.exportCaptureSession(sessionId);
+      if (!result.success) setError(result.error || '导出采集会话失败');
+      else if (result.data) {
+        setLastExportedCapturePath(result.data);
+        setSuccess(`已导出：${result.data}`);
+      }
+    } catch (err) {
+      setError('导出采集会话失败：' + (err as Error).message);
+    }
+  };
+
+  // 「打开位置」：在资源管理器中定位最近导出的采集 zip（导出回看后立即跳到 PC 对应位置）。
+  const revealExportedCapture = async () => {
+    if (!hasElectronAPI() || !lastExportedCapturePath) return;
+    const r = await window.electronAPI!.showItemInFolder(lastExportedCapturePath);
+    if (!r.success && r.error) setError(r.error);
+  };
+
+  // 导入会话（zip / 会话文件夹路径，来自选择对话框或拖拽），完成后刷新列表。
+  const importCapturePaths = async (paths: string[]) => {
+    if (!hasElectronAPI() || paths.length === 0) return;
+    try {
+      const result = await window.electronAPI!.importCaptureSessions(paths);
+      if (result.success && result.data) {
+        void refreshCaptureSessions();
+        const { imported, errors } = result.data;
+        if (errors.length > 0) {
+          setError(`导入完成 ${imported.length} 个，${errors.length} 个失败：${errors.join('；')}`);
+        } else {
+          setSuccess(`已导入 ${imported.length} 个采集会话`);
+        }
+      } else if (!result.success) {
+        setError(result.error || '导入采集会话失败');
+      }
+    } catch (err) {
+      setError('导入采集会话失败：' + (err as Error).message);
+    }
+  };
+
+  const importCaptureViaDialog = async () => {
+    if (!hasElectronAPI()) return;
+    const result = await window.electronAPI!.selectImportFiles();
+    if (result.success && result.data && result.data.length > 0) {
+      await importCapturePaths(result.data);
+    } else if (!result.success) {
+      setError(result.error || '选择导入文件失败');
+    }
+  };
+
   const exportPerformanceSession = async () => {
     if (!selectedDevice || !hasElectronAPI()) return;
-    const samples = performanceSamplesByDeviceId[selectedDevice.id] || [];
+    const capturing = Boolean(activeCaptureByDeviceId[selectedDevice.id]);
+    const loaded = loadedReportByDeviceId[selectedDevice.id] ?? null;
+    // 采集中导出实时缓冲；否则导出报告区当前展示的会话（含加载的历史会话）。
+    const samples = capturing
+      ? performanceSamplesByDeviceId[selectedDevice.id] || []
+      : loaded?.samples ?? performanceSamplesByDeviceId[selectedDevice.id] ?? [];
     if (samples.length === 0) {
-      setError('当前设备还没有性能采样数据，请先开启采集。');
+      setError('当前没有性能采样数据，请先开始采集或选择一条采集记录。');
       return;
     }
 
     const result = await window.electronAPI!.exportPerformanceSession({
       device: selectedDevice,
-      startedAt: performanceSessionStartedAtByDeviceId[selectedDevice.id] || samples[0].capturedAt,
+      startedAt: (!capturing && loaded?.session.startedAt) || performanceSessionStartedAtByDeviceId[selectedDevice.id] || samples[0].capturedAt,
       endedAt: new Date(),
       samples,
-      snapshots: visibleSessionSnapshots,
     });
 
     if (result.success) {
@@ -1893,21 +2025,18 @@ function SimpleApp() {
   const isSelectedLogPaused = Boolean(selectedDeviceId && pausedLogDeviceIds.has(selectedDeviceId));
   const selectedPerformance = selectedDeviceId ? performanceByDeviceId[selectedDeviceId] || null : null;
   const selectedPerformanceSamples = selectedDeviceId ? performanceSamplesByDeviceId[selectedDeviceId] || [] : [];
-  const isSelectedPerformanceEnabled = Boolean(selectedDeviceId && performanceEnabledDeviceIds.has(selectedDeviceId));
-  const visiblePerformanceSnapshots = useMemo(
-    () => performanceSnapshots.filter((snapshot) => snapshot.deviceId === selectedDeviceId),
-    [performanceSnapshots, selectedDeviceId]
-  );
-  const visiblePerformanceRecordings = useMemo(
-    () => performanceRecordings.filter((recording) => recording.deviceId === selectedDeviceId),
-    [performanceRecordings, selectedDeviceId]
-  );
-  const visibleSessionSnapshots = useMemo(() => {
-    const sessionStartedAt = selectedDeviceId ? performanceSessionStartedAtByDeviceId[selectedDeviceId] : undefined;
-    if (!sessionStartedAt) return [];
-    const sessionStartTime = new Date(sessionStartedAt).getTime();
-    return visiblePerformanceSnapshots.filter((snapshot) => new Date(snapshot.capturedAt).getTime() >= sessionStartTime);
-  }, [performanceSessionStartedAtByDeviceId, selectedDeviceId, visiblePerformanceSnapshots]);
+  const isSelectedCapturing = Boolean(selectedDeviceId && activeCaptureByDeviceId[selectedDeviceId]);
+  const liveCaptureSession = selectedDeviceId ? activeCaptureByDeviceId[selectedDeviceId] || null : null;
+  // 报告区展示：采集中=活动会话+实时样本；否则=该设备自己已加载的回看/刚停止报告（按设备隔离）。
+  const selectedLoadedReport = selectedDeviceId ? loadedReportByDeviceId[selectedDeviceId] ?? null : null;
+  const shownCaptureSession = isSelectedCapturing ? liveCaptureSession : selectedLoadedReport?.session ?? null;
+  const shownCaptureSamples = isSelectedCapturing ? selectedPerformanceSamples : selectedLoadedReport?.samples ?? [];
+  const shownCaptureMarkers = isSelectedCapturing ? [] : selectedLoadedReport?.markers ?? [];
+  // 采集中报告区显示实时曲线，回看列表不应高亮任何历史会话（与护栏一致，避免高亮和报告区不一致）。
+  const loadedSessionId = isSelectedCapturing ? null : (selectedLoadedReport?.session.id ?? null);
+  const isSelectedCaptureBusy = Boolean(selectedDeviceId && captureBusyDeviceIds.has(selectedDeviceId));
+  const selectedCaptureElapsed = selectedDeviceId ? captureElapsedByDeviceId[selectedDeviceId] || 0 : 0;
+  const selectedSoftLimitNotice = selectedDeviceId ? softLimitNoticeByDeviceId[selectedDeviceId] || null : null;
   const getApkInstallStatusMeta = (status: ApkInstallStatus) => {
     switch (status) {
       case 'installing':
@@ -2545,6 +2674,13 @@ function SimpleApp() {
         </div>
       )}
       <header style={{ height: '56px', backgroundColor: '#252540', borderBottom: '1px solid #353550', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <button
+          onClick={() => setSidebarCollapsed((v) => !v)}
+          title={sidebarCollapsed ? '\u5c55\u5f00\u8bbe\u5907\u680f' : '\u6536\u8d77\u8bbe\u5907\u680f'}
+          aria-label={sidebarCollapsed ? '\u5c55\u5f00\u8bbe\u5907\u680f' : '\u6536\u8d77\u8bbe\u5907\u680f'}
+          style={{ width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', lineHeight: 1, color: '#cbd5e1', background: 'none', border: '1px solid #454560', borderRadius: '6px', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+        >{sidebarCollapsed ? '\u00bb' : '\u00ab'}</button>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
           <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
           {appVersion && (
@@ -2579,6 +2715,7 @@ function SimpleApp() {
             <span style={{ fontSize: '12px', color: '#9ca3af' }}>{checkResult}</span>
           )}
         </div>
+        </div>
       </header>
       {showReleaseNotes && (
         <div onClick={() => setShowReleaseNotes(false)} style={{ position: 'fixed', inset: 0, zIndex: 1200, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2595,9 +2732,50 @@ function SimpleApp() {
       )}
       
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* 折叠后的最小设备轨道：保留快捷切换设备能力，其余横向空间让给主模块。
+            每台设备一个小方块（USB=U / WiFi=W + 在线状态点 + 选中高亮），点击即切换，hover 看全名。 */}
+        {sidebarCollapsed && (
+          <div style={{ width: '56px', flexShrink: 0, backgroundColor: '#252540', borderRight: '1px solid #353550', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '56px 0 10px', overflowY: 'auto', overflowX: 'hidden' }}>
+            {devices.map((device) => {
+              const selected = selectedDevice?.id === device.id;
+              const statusMeta = getDeviceStatusMeta(device.status);
+              const isWifi = device.connectionType === 'wifi';
+              // 方块显示 SN 后 4 位以区分设备；无 SN 时回退连接方式字母。
+              const snTail = device.serialNo && device.serialNo !== 'Unknown' ? device.serialNo.slice(-4) : (isWifi ? 'W' : 'U');
+              return (
+                <button
+                  key={device.id}
+                  onClick={() => setSelectedDevice(device)}
+                  title={`${getDeviceLabel(device)} · ${isWifi ? 'WiFi' : 'USB'} · ${statusMeta.label}${device.serialNo ? ` · SN ${device.serialNo}` : ''}`}
+                  style={{
+                    position: 'relative',
+                    width: '40px',
+                    height: '40px',
+                    flexShrink: 0,
+                    borderRadius: '8px',
+                    border: selected ? '1px solid #60a5fa' : '1px solid #353550',
+                    backgroundColor: selected ? '#4a90d9' : '#353550',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    fontVariantNumeric: 'tabular-nums',
+                    letterSpacing: '0.3px',
+                  }}
+                >
+                  {snTail}
+                  <span style={{ position: 'absolute', top: '2px', right: '2px', width: '8px', height: '8px', borderRadius: '999px', backgroundColor: statusMeta.color, border: '1.5px solid #252540' }} />
+                </button>
+              );
+            })}
+          </div>
+        )}
         {/* 侧栏用 flex 列 + 各区块 order 控制顺序：ADB状态(0) → WiFi连接(1) → 设备列表(2) → 设备信息(3) → 历史设备(4)。
             用 order 而非物理调整 JSX 顺序，避免大段含中文的块搬运出错；ADB 状态保持默认 order 0 居首。 */}
-        <aside style={{ width: '288px', backgroundColor: '#252540', borderRight: '1px solid #353550', padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <aside style={{ width: sidebarCollapsed ? 0 : '288px', minWidth: 0, flexShrink: 0, backgroundColor: '#252540', borderRight: sidebarCollapsed ? 'none' : '1px solid #353550', padding: sidebarCollapsed ? 0 : '16px', overflowY: sidebarCollapsed ? 'hidden' : 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', transition: 'width 0.22s ease, padding 0.22s ease' }}>
           {adbStatus && (
             <div
               style={{
@@ -2966,9 +3144,7 @@ function SimpleApp() {
         </aside>
         
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%' }}>
-          {selectedDevice ? (
-            <>
-              <nav style={{ display: 'flex', borderBottom: '1px solid #353550' }}>
+          <nav style={{ display: 'flex', borderBottom: '1px solid #353550' }}>
                 {[
                   { key: 'devices' as TabType, label: '\u8bbe\u5907' },
                   { key: 'logs' as TabType, label: '\u65e5\u5fd7' },
@@ -2996,6 +3172,16 @@ function SimpleApp() {
               </nav>
 
               <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+                {/* 无设备时仍可进「性能」页查看采集回看（只读 + 导入）；其余 tab 显示选设备提示。 */}
+                {!selectedDevice && activeTab !== 'performance' ? (
+                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <h2 style={{ fontSize: '24px', fontWeight: '600', color: 'white', margin: '0 0 8px 0' }}>{'请选择设备'}</h2>
+                      <p style={{ fontSize: '14px' }}>{'从左侧列表选择已连接的设备；无设备时可在「性能」页查看采集回看'}</p>
+                    </div>
+                  </div>
+                ) : (
+                <>
                 {activeTab === 'devices' && (
                   <div style={{ display: 'flex', flexDirection: 'row', gap: '16px', height: '100%', alignItems: 'stretch' }}>
                     {/* 应用安装：放右侧（order 2），内部分操作区 + 安装详情两段 */}
@@ -3113,17 +3299,28 @@ function SimpleApp() {
                   <PerformancePanel
                     device={selectedDevice}
                     performance={selectedPerformance}
-                    samples={selectedPerformanceSamples}
-                    snapshots={visiblePerformanceSnapshots}
-                    sessionSnapshots={visibleSessionSnapshots}
-                    isMonitoringPerformance={isSelectedPerformanceEnabled}
-                    isCapturingSnapshot={isCapturingSnapshot}
-                    isRecording={Boolean(selectedDeviceId && recordingDeviceIds.has(selectedDeviceId))}
-                    recordings={visiblePerformanceRecordings}
-                    onToggleMonitoring={togglePerformanceMonitoring}
-                    onCaptureSnapshot={capturePerformanceSnapshot}
-                    onStartRecording={startPerformanceRecording}
+                    captureSession={shownCaptureSession}
+                    captureSamples={shownCaptureSamples}
+                    isCapturing={isSelectedCapturing}
+                    isCaptureBusy={isSelectedCaptureBusy}
+                    elapsedMs={selectedCaptureElapsed}
+                    softLimitNotice={selectedSoftLimitNotice}
+                    captureMarkers={shownCaptureMarkers}
+                    captureSessions={captureSessions}
+                    loadedSessionId={loadedSessionId}
+                    onToggleCapture={toggleCaptureSession}
+                    onDismissSoftLimit={() => selectedDeviceId && dismissSoftLimit(selectedDeviceId)}
+                    onSaveCaptureMarkers={saveCaptureMarkers}
+                    onSaveCaptureFrame={saveCaptureFrame}
+                    onSelectCaptureSession={selectCaptureSession}
+                    onRenameCaptureSession={renameCaptureSession}
+                    onDeleteCaptureSession={deleteCaptureSession}
+                    onExportCaptureSession={exportCaptureSession}
+                    onImportCaptureSessions={importCaptureViaDialog}
+                    onImportCapturePaths={importCapturePaths}
                     onExportSession={exportPerformanceSession}
+                    lastExportedCapturePath={lastExportedCapturePath}
+                    onRevealExportedCapture={revealExportedCapture}
                   />
                 )}
 
@@ -3149,16 +3346,9 @@ function SimpleApp() {
                     onToggleAudio={handleToggleMirrorAudio}
                   />
                 )}
+                </>
+                )}
               </div>
-            </>
-          ) : (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
-            <div style={{ textAlign: 'center' }}>
-              <h2 style={{ fontSize: '24px', fontWeight: '600', color: 'white', margin: '0 0 8px 0' }}>{'\u8bf7\u9009\u62e9\u8bbe\u5907'}</h2>
-              <p style={{ fontSize: '14px' }}>{'\u4ece\u5de6\u4fa7\u5217\u8868\u9009\u62e9\u5df2\u8fde\u63a5\u7684 Android \u8bbe\u5907'}</p>
-              </div>
-            </div>
-          )}
         </main>
       </div>
 
