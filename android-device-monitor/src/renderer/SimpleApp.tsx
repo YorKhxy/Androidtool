@@ -191,6 +191,8 @@ function SimpleApp() {
   const [selectedDevice, setSelectedDevice] = useState<DeviceInfo | null>(null);
   const [customDeviceNames, setCustomDeviceNames] = useState<Record<string, string>>(() => loadStoredDeviceNames());
   const [activeTab, setActiveTab] = useState<TabType>('devices');
+  // 侧边设备栏折叠：收起后宽度归零，主内容（含性能曲线）自动占满腾出的横向空间。
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mirrorSessionsByDeviceId, setMirrorSessionsByDeviceId] = useState<Record<string, MirrorSession>>({});
   const [mirrorStartingDeviceIds, setMirrorStartingDeviceIds] = useState<Set<string>>(new Set());
   const [logVersion, setLogVersion] = useState(0);
@@ -307,6 +309,8 @@ function SimpleApp() {
   const [confirmRebootId, setConfirmRebootId] = useState<string | null>(null);
   // 最近一次导出日志保存到 PC 的路径，用于「打开所在文件夹」快捷按钮
   const [lastExportedLogPath, setLastExportedLogPath] = useState<string | null>(null);
+  // 最近一次导出采集会话 zip 到 PC 的路径，用于「打开位置」快捷按钮（导出回看后立即定位）
+  const [lastExportedCapturePath, setLastExportedCapturePath] = useState<string | null>(null);
   
   const logStatesRef = useRef(new Map<string, DeviceLogState>());
   const logsContainerRef = useRef<HTMLDivElement>(null);
@@ -1303,6 +1307,12 @@ function SimpleApp() {
   const selectCaptureSession = async (sessionId: string) => {
     if (!hasElectronAPI() || !selectedDevice) return;
     const deviceId = selectedDevice.id;
+    // 护栏：采集进行中不切回看——实时采集优先占着报告区，加载了也看不到，且会在关闭采集时被新报告覆盖。
+    // 直接拦截并提示，避免「点了没反应 + 列表高亮与报告区不一致 + 选择被悄悄丢弃」的困惑。
+    if (activeCaptureByDeviceId[deviceId]) {
+      setSuccess('采集进行中，关闭采集后即可回看历史采集。');
+      return;
+    }
     const result = await window.electronAPI!.loadCaptureSession(sessionId);
     if (result.success && result.data) {
       // 加载到「当前查看的设备」槽位：在哪台设备上点回看，就在那台的报告区展示。
@@ -1352,10 +1362,20 @@ function SimpleApp() {
     try {
       const result = await window.electronAPI!.exportCaptureSession(sessionId);
       if (!result.success) setError(result.error || '导出采集会话失败');
-      else if (result.data) setSuccess(`已导出：${result.data}`);
+      else if (result.data) {
+        setLastExportedCapturePath(result.data);
+        setSuccess(`已导出：${result.data}`);
+      }
     } catch (err) {
       setError('导出采集会话失败：' + (err as Error).message);
     }
+  };
+
+  // 「打开位置」：在资源管理器中定位最近导出的采集 zip（导出回看后立即跳到 PC 对应位置）。
+  const revealExportedCapture = async () => {
+    if (!hasElectronAPI() || !lastExportedCapturePath) return;
+    const r = await window.electronAPI!.showItemInFolder(lastExportedCapturePath);
+    if (!r.success && r.error) setError(r.error);
   };
 
   // 导入会话（zip / 会话文件夹路径，来自选择对话框或拖拽），完成后刷新列表。
@@ -2012,7 +2032,8 @@ function SimpleApp() {
   const shownCaptureSession = isSelectedCapturing ? liveCaptureSession : selectedLoadedReport?.session ?? null;
   const shownCaptureSamples = isSelectedCapturing ? selectedPerformanceSamples : selectedLoadedReport?.samples ?? [];
   const shownCaptureMarkers = isSelectedCapturing ? [] : selectedLoadedReport?.markers ?? [];
-  const loadedSessionId = selectedLoadedReport?.session.id ?? null;
+  // 采集中报告区显示实时曲线，回看列表不应高亮任何历史会话（与护栏一致，避免高亮和报告区不一致）。
+  const loadedSessionId = isSelectedCapturing ? null : (selectedLoadedReport?.session.id ?? null);
   const isSelectedCaptureBusy = Boolean(selectedDeviceId && captureBusyDeviceIds.has(selectedDeviceId));
   const selectedCaptureElapsed = selectedDeviceId ? captureElapsedByDeviceId[selectedDeviceId] || 0 : 0;
   const selectedSoftLimitNotice = selectedDeviceId ? softLimitNoticeByDeviceId[selectedDeviceId] || null : null;
@@ -2653,6 +2674,13 @@ function SimpleApp() {
         </div>
       )}
       <header style={{ height: '56px', backgroundColor: '#252540', borderBottom: '1px solid #353550', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <button
+          onClick={() => setSidebarCollapsed((v) => !v)}
+          title={sidebarCollapsed ? '\u5c55\u5f00\u8bbe\u5907\u680f' : '\u6536\u8d77\u8bbe\u5907\u680f'}
+          aria-label={sidebarCollapsed ? '\u5c55\u5f00\u8bbe\u5907\u680f' : '\u6536\u8d77\u8bbe\u5907\u680f'}
+          style={{ width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', lineHeight: 1, color: '#cbd5e1', background: 'none', border: '1px solid #454560', borderRadius: '6px', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+        >{sidebarCollapsed ? '\u00bb' : '\u00ab'}</button>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
           <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>{'\u5b89\u5353\u8bbe\u5907\u76d1\u63a7'}</h1>
           {appVersion && (
@@ -2687,6 +2715,7 @@ function SimpleApp() {
             <span style={{ fontSize: '12px', color: '#9ca3af' }}>{checkResult}</span>
           )}
         </div>
+        </div>
       </header>
       {showReleaseNotes && (
         <div onClick={() => setShowReleaseNotes(false)} style={{ position: 'fixed', inset: 0, zIndex: 1200, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2703,9 +2732,50 @@ function SimpleApp() {
       )}
       
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* 折叠后的最小设备轨道：保留快捷切换设备能力，其余横向空间让给主模块。
+            每台设备一个小方块（USB=U / WiFi=W + 在线状态点 + 选中高亮），点击即切换，hover 看全名。 */}
+        {sidebarCollapsed && (
+          <div style={{ width: '56px', flexShrink: 0, backgroundColor: '#252540', borderRight: '1px solid #353550', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '56px 0 10px', overflowY: 'auto', overflowX: 'hidden' }}>
+            {devices.map((device) => {
+              const selected = selectedDevice?.id === device.id;
+              const statusMeta = getDeviceStatusMeta(device.status);
+              const isWifi = device.connectionType === 'wifi';
+              // 方块显示 SN 后 4 位以区分设备；无 SN 时回退连接方式字母。
+              const snTail = device.serialNo && device.serialNo !== 'Unknown' ? device.serialNo.slice(-4) : (isWifi ? 'W' : 'U');
+              return (
+                <button
+                  key={device.id}
+                  onClick={() => setSelectedDevice(device)}
+                  title={`${getDeviceLabel(device)} · ${isWifi ? 'WiFi' : 'USB'} · ${statusMeta.label}${device.serialNo ? ` · SN ${device.serialNo}` : ''}`}
+                  style={{
+                    position: 'relative',
+                    width: '40px',
+                    height: '40px',
+                    flexShrink: 0,
+                    borderRadius: '8px',
+                    border: selected ? '1px solid #60a5fa' : '1px solid #353550',
+                    backgroundColor: selected ? '#4a90d9' : '#353550',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    fontVariantNumeric: 'tabular-nums',
+                    letterSpacing: '0.3px',
+                  }}
+                >
+                  {snTail}
+                  <span style={{ position: 'absolute', top: '2px', right: '2px', width: '8px', height: '8px', borderRadius: '999px', backgroundColor: statusMeta.color, border: '1.5px solid #252540' }} />
+                </button>
+              );
+            })}
+          </div>
+        )}
         {/* 侧栏用 flex 列 + 各区块 order 控制顺序：ADB状态(0) → WiFi连接(1) → 设备列表(2) → 设备信息(3) → 历史设备(4)。
             用 order 而非物理调整 JSX 顺序，避免大段含中文的块搬运出错；ADB 状态保持默认 order 0 居首。 */}
-        <aside style={{ width: '288px', backgroundColor: '#252540', borderRight: '1px solid #353550', padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <aside style={{ width: sidebarCollapsed ? 0 : '288px', minWidth: 0, flexShrink: 0, backgroundColor: '#252540', borderRight: sidebarCollapsed ? 'none' : '1px solid #353550', padding: sidebarCollapsed ? 0 : '16px', overflowY: sidebarCollapsed ? 'hidden' : 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', transition: 'width 0.22s ease, padding 0.22s ease' }}>
           {adbStatus && (
             <div
               style={{
@@ -3074,9 +3144,7 @@ function SimpleApp() {
         </aside>
         
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: '100%' }}>
-          {selectedDevice ? (
-            <>
-              <nav style={{ display: 'flex', borderBottom: '1px solid #353550' }}>
+          <nav style={{ display: 'flex', borderBottom: '1px solid #353550' }}>
                 {[
                   { key: 'devices' as TabType, label: '\u8bbe\u5907' },
                   { key: 'logs' as TabType, label: '\u65e5\u5fd7' },
@@ -3104,6 +3172,16 @@ function SimpleApp() {
               </nav>
 
               <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+                {/* 无设备时仍可进「性能」页查看采集回看（只读 + 导入）；其余 tab 显示选设备提示。 */}
+                {!selectedDevice && activeTab !== 'performance' ? (
+                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <h2 style={{ fontSize: '24px', fontWeight: '600', color: 'white', margin: '0 0 8px 0' }}>{'请选择设备'}</h2>
+                      <p style={{ fontSize: '14px' }}>{'从左侧列表选择已连接的设备；无设备时可在「性能」页查看采集回看'}</p>
+                    </div>
+                  </div>
+                ) : (
+                <>
                 {activeTab === 'devices' && (
                   <div style={{ display: 'flex', flexDirection: 'row', gap: '16px', height: '100%', alignItems: 'stretch' }}>
                     {/* 应用安装：放右侧（order 2），内部分操作区 + 安装详情两段 */}
@@ -3241,6 +3319,8 @@ function SimpleApp() {
                     onImportCaptureSessions={importCaptureViaDialog}
                     onImportCapturePaths={importCapturePaths}
                     onExportSession={exportPerformanceSession}
+                    lastExportedCapturePath={lastExportedCapturePath}
+                    onRevealExportedCapture={revealExportedCapture}
                   />
                 )}
 
@@ -3266,16 +3346,9 @@ function SimpleApp() {
                     onToggleAudio={handleToggleMirrorAudio}
                   />
                 )}
+                </>
+                )}
               </div>
-            </>
-          ) : (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
-            <div style={{ textAlign: 'center' }}>
-              <h2 style={{ fontSize: '24px', fontWeight: '600', color: 'white', margin: '0 0 8px 0' }}>{'\u8bf7\u9009\u62e9\u8bbe\u5907'}</h2>
-              <p style={{ fontSize: '14px' }}>{'\u4ece\u5de6\u4fa7\u5217\u8868\u9009\u62e9\u5df2\u8fde\u63a5\u7684 Android \u8bbe\u5907'}</p>
-              </div>
-            </div>
-          )}
         </main>
       </div>
 

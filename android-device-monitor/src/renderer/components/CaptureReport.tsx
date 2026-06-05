@@ -28,9 +28,11 @@ type CaptureReportProps = {
   onSaveMarkers?: (sessionId: string, markers: PerformanceCaptureMarker[]) => void;
   /** 视频快捷截图：把当前帧 PNG dataUrl 归档到会话 screenshots/（SimpleApp 走 saveCaptureFrame），成功返回相对路径。 */
   onSaveFrame?: (sessionId: string, dataUrl: string) => Promise<string | undefined>;
+  /** 回放时上抛播放头处的样本，让上层「前台应用 + 参数」块跟随回放数据（Pico/安卓口径自适应）。 */
+  onActiveSampleChange?: (sample: PerformanceSample | null) => void;
 };
 
-export function CaptureReport({ session, samples, live, elapsedMs, markers, onSaveMarkers, onSaveFrame }: CaptureReportProps) {
+export function CaptureReport({ session, samples, live, elapsedMs, markers, onSaveMarkers, onSaveFrame, onActiveSampleChange }: CaptureReportProps) {
   const [selectedSeriesKeys, setSelectedSeriesKeys] = useState<Set<string>>(new Set());
   const [playheadMs, setPlayheadMs] = useState(0);
   const [activeSegmentIndex, setActiveSegmentIndex] = useState(0);
@@ -60,6 +62,15 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
     setAppliedMarkers(loadedMarkers);
     setFilterConditions(loadedMarkers.map((m) => ({ id: `${m.metricKey}-${m.op}-${m.threshold}`, metricKey: m.metricKey, op: m.op, threshold: m.threshold })));
   }, [sessionId, live]);
+
+  // 上抛播放头处样本（回放态）：让上层指标块跟随回放数据。采集中(live)不抛，上层用实时 performance。
+  useEffect(() => {
+    if (live || !session) {
+      onActiveSampleChange?.(null);
+      return;
+    }
+    onActiveSampleChange?.(findNearestSample(samples, new Date(session.startedAt), playheadMs));
+  }, [live, session, samples, playheadMs, onActiveSampleChange]);
 
   if (!session) {
     return <div style={{ color: '#6b7280', fontSize: '13px' }}>开启采集后，这里会显示本次采集的指标曲线与录屏。</div>;
