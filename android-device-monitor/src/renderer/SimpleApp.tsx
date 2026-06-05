@@ -2487,8 +2487,8 @@ function SimpleApp() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '140px 150px 150px minmax(220px, 1fr) 90px 90px', gap: '8px', padding: '10px', background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)' }}>
-        <select className="nat" value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevelFilter)}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', padding: '10px', background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)' }}>
+        <select className="nat" style={{ flex: '0 0 140px' }} value={filterLevel} onChange={(e) => setFilterLevel(e.target.value as LogLevelFilter)}>
           <option value="all">All levels</option>
           <option value="V">Verbose+</option>
           <option value="D">Debug+</option>
@@ -2497,9 +2497,9 @@ function SimpleApp() {
           <option value="E">Error+</option>
           <option value="F">Fatal</option>
         </select>
-        <div className="field"><input value={logPackageFilter} onChange={(e) => setLogPackageFilter(e.target.value)} placeholder={'\u5e94\u7528/\u5305\u540d'} /></div>
-        <div className="field"><input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} /></div>
-        <div style={{ position: 'relative' }}>
+        <div className="field" style={{ flex: '1 1 130px', minWidth: 0 }}><input value={logPackageFilter} onChange={(e) => setLogPackageFilter(e.target.value)} placeholder={'\u5e94\u7528/\u5305\u540d'} /></div>
+        <div className="field" style={{ flex: '1 1 110px', minWidth: 0 }}><input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} /></div>
+        <div style={{ position: 'relative', flex: '2 1 200px', minWidth: 0 }}>
           <div className="field" style={{ width: '100%' }}>
           <input
             type="text"
@@ -2539,8 +2539,8 @@ function SimpleApp() {
             </div>
           )}
         </div>
-        <div className="field"><input value={logPidFilter} onChange={(e) => setLogPidFilter(e.target.value.replace(/\D/g, ''))} placeholder={'\u8fdb\u7a0b PID'} /></div>
-        <button onClick={() => setUseRegexSearch(!useRegexSearch)} className={useRegexSearch ? 'btn sm outline o-blue' : 'btn sm secondary'}>{'\u6b63\u5219'}</button>
+        <div className="field" style={{ flex: '0 0 120px', minWidth: 0 }}><input value={logPidFilter} onChange={(e) => setLogPidFilter(e.target.value.replace(/\D/g, ''))} placeholder={'\u8fdb\u7a0b PID'} style={{ width: '100%' }} /></div>
+        <button onClick={() => setUseRegexSearch(!useRegexSearch)} className={useRegexSearch ? 'btn sm outline o-blue' : 'btn sm secondary'} style={{ flex: '0 0 auto' }}>{'\u6b63\u5219'}</button>
       </div>
 
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', color: 'var(--fg-tertiary)', fontSize: '12px' }}>
