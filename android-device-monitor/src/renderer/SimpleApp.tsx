@@ -200,6 +200,11 @@ function SimpleApp() {
   const [weakNetLoadingPackages, setWeakNetLoadingPackages] = useState(false);
   const [weakNetBusy, setWeakNetBusy] = useState(false);
   const [weakNetError, setWeakNetError] = useState<string | null>(null);
+  // 实时流量（上下行速率 + 累计字节，由 tun 计数差值算出）；弱网未运行时为 null。
+  const [weakNetTraffic, setWeakNetTraffic] = useState<{ rxBytes: number; txBytes: number; rxRate: number; txRate: number } | null>(null);
+  const weakNetTrafficPrevRef = useRef<{ rxBytes: number; txBytes: number; at: number } | null>(null);
+  // 启动后 tun 未建起来，推断为「未在头显授予 VPN 权限」的 sticky 标志；运行成功即清除。
+  const [weakNetNeedsAuth, setWeakNetNeedsAuth] = useState(false);
   const [logVersion, setLogVersion] = useState(0);
   const [logViewport, setLogViewport] = useState({ scrollTop: 0, height: 320 });
   const [performanceByDeviceId, setPerformanceByDeviceId] = useState<Record<string, PerformanceMetrics>>({});
@@ -731,13 +736,23 @@ function SimpleApp() {
     }
   }, [selectedDevice, activeTab, performanceEnabledDeviceIds]);
 
-  // 进入「弱网」标签或切换设备时，拉取助手状态与已安装应用列表。
+  // 进入「弱网」标签或切换设备时拉取一次，并定时轮询助手状态 + 隧道流量（每 2.5s）。
   useEffect(() => {
-    if (selectedDevice && activeTab === 'weaknet') {
-      setWeakNetError(null);
-      void loadWeakNetStatus();
-      void loadWeakNetPackages();
+    if (!(selectedDevice && activeTab === 'weaknet')) {
+      return;
     }
+    setWeakNetError(null);
+    setWeakNetNeedsAuth(false);
+    weakNetTrafficPrevRef.current = null;
+    setWeakNetTraffic(null);
+    void loadWeakNetStatus();
+    void loadWeakNetPackages();
+    void loadWeakNetTraffic();
+    const timer = setInterval(() => {
+      void loadWeakNetStatus();
+      void loadWeakNetTraffic();
+    }, 2500);
+    return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDevice, activeTab]);
 
@@ -1666,11 +1681,39 @@ function SimpleApp() {
       const result = await window.electronAPI!.queryWeakNetStatus(selectedDevice.id);
       if (result.success && result.data) {
         setWeakNetStatus(result.data);
+        if (result.data === 'running') {
+          setWeakNetNeedsAuth(false); // 已起来，说明授权没问题，清掉「待授权」推断
+        }
       } else {
         setWeakNetStatus('error');
       }
     } catch {
       setWeakNetStatus('error');
+    }
+  };
+
+  const loadWeakNetTraffic = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    try {
+      const result = await window.electronAPI!.queryWeakNetTraffic(selectedDevice.id);
+      if (result.success && result.data) {
+        const now = Date.now();
+        const prev = weakNetTrafficPrevRef.current;
+        let rxRate = 0;
+        let txRate = 0;
+        if (prev && now > prev.at) {
+          const dt = (now - prev.at) / 1000;
+          rxRate = Math.max(0, (result.data.rxBytes - prev.rxBytes) / dt);
+          txRate = Math.max(0, (result.data.txBytes - prev.txBytes) / dt);
+        }
+        weakNetTrafficPrevRef.current = { rxBytes: result.data.rxBytes, txBytes: result.data.txBytes, at: now };
+        setWeakNetTraffic({ rxBytes: result.data.rxBytes, txBytes: result.data.txBytes, rxRate, txRate });
+      } else {
+        weakNetTrafficPrevRef.current = null;
+        setWeakNetTraffic(null);
+      }
+    } catch {
+      setWeakNetTraffic(null);
     }
   };
 
@@ -1708,11 +1751,27 @@ function SimpleApp() {
     runWeakNetAction(() => window.electronAPI!.installWeakNetHelper(selectedDevice!.id), '安装弱网助手失败')
       .then(() => loadWeakNetPackages());
 
-  const handleStartWeakNet = (profile: WeakNetworkProfile) =>
-    runWeakNetAction(() => window.electronAPI!.startWeakNet(selectedDevice!.id, profile), '启动弱网失败');
+  // 启动 / 热更新参数（运行中再次下发 START，助手会先停旧引擎再起，等价热更新）。
+  const handleStartWeakNet = async (profile: WeakNetworkProfile) => {
+    await runWeakNetAction(() => window.electronAPI!.startWeakNet(selectedDevice!.id, profile), '启动弱网失败');
+    if (!selectedDevice || !hasElectronAPI()) return;
+    // 启动后稍等再查：tun 未建起来多半是没在头显授予 VPN 权限，置 sticky 标志提示授权。
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      const result = await window.electronAPI!.queryWeakNetStatus(selectedDevice.id);
+      if (result.success && result.data) {
+        setWeakNetStatus(result.data);
+        setWeakNetNeedsAuth(result.data !== 'running');
+      }
+    } catch {
+      /* 忽略：保留上一次状态 */
+    }
+  };
 
-  const handleStopWeakNet = () =>
-    runWeakNetAction(() => window.electronAPI!.stopWeakNet(selectedDevice!.id), '停止弱网失败');
+  const handleStopWeakNet = async () => {
+    setWeakNetNeedsAuth(false); // 停止后不应再提示「待授权」
+    await runWeakNetAction(() => window.electronAPI!.stopWeakNet(selectedDevice!.id), '停止弱网失败');
+  };
 
   const handleAuthorizeWeakNet = () =>
     runWeakNetAction(() => window.electronAPI!.launchApp(selectedDevice!.id, 'com.androidtool.piconetworkhelper'), '拉起助手授权页失败');
@@ -3263,7 +3322,8 @@ function SimpleApp() {
                 {activeTab === 'weaknet' && (
                   <WeakNetPanel
                     deviceConnected={Boolean(selectedDevice)}
-                    status={weakNetStatus}
+                    status={weakNetNeedsAuth && weakNetStatus === 'idle' ? 'need-vpn-permission' : weakNetStatus}
+                    traffic={weakNetTraffic}
                     installedPackages={weakNetPackages}
                     loadingPackages={weakNetLoadingPackages}
                     busy={weakNetBusy}

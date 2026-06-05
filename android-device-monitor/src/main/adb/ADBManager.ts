@@ -5,7 +5,7 @@ import * as path from 'path';
 import { statSync as nodeFsStatSync, mkdtempSync as nodeFsMkdtempSync, renameSync as nodeFsRenameSync, copyFileSync as nodeFsCopyFileSync, rmSync as nodeFsRmSync } from 'fs';
 import { tmpdir as nodeOsTmpdir } from 'os';
 import type { ExecFileOptions, ChildProcess } from 'child_process';
-import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo, WeakNetworkHelperStatus, WeakNetworkProfile } from '../../shared/types';
+import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo, WeakNetworkHelperStatus, WeakNetworkProfile, WeakNetworkTraffic } from '../../shared/types';
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
 import { ResolvedAdbBinary, getBundledAdbCandidates, resolveBundledAdbBinaryPath } from './adbBinary';
@@ -1445,6 +1445,33 @@ export class ADBManager extends EventEmitter {
     } catch (error) {
       logger.warn('查询弱网助手状态失败', error);
       return 'error';
+    }
+  }
+
+  // 读弱网隧道(tun)的累计流量计数。读 /proc/net/dev 的 tun 行；弱网未运行(无 tun)返回 null。
+  // 格式：`iface: rxBytes rxPackets errs drop fifo frame compressed multicast txBytes txPackets ...`
+  async queryWeakNetworkTraffic(deviceId: string): Promise<WeakNetworkTraffic | null> {
+    try {
+      const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'cat', '/proc/net/dev'], {
+        timeout: 10 * 1000,
+      });
+      const tunLine = stdout.split(/\r?\n/).find((line) => /^\s*tun\d*\s*:/.test(line));
+      if (!tunLine) {
+        return null;
+      }
+      const fields = tunLine.split(':')[1].trim().split(/\s+/).map((value) => Number(value));
+      if (fields.length < 10 || fields.some((value, index) => index < 10 && !Number.isFinite(value))) {
+        return null;
+      }
+      return {
+        rxBytes: fields[0],
+        rxPackets: fields[1],
+        txBytes: fields[8],
+        txPackets: fields[9],
+      };
+    } catch (error) {
+      logger.warn('查询弱网流量失败', error);
+      return null;
     }
   }
 

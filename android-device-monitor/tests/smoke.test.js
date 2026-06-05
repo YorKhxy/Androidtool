@@ -972,12 +972,12 @@ describe('project smoke checks', () => {
     const channelsSource = fs.readFileSync(path.join(root, 'src/shared/ipc/channels.ts'), 'utf-8');
     const preloadSource = fs.readFileSync(path.join(root, 'src/main/preload.js'), 'utf-8');
     const electronApiSource = fs.readFileSync(path.join(root, 'src/renderer/lib/electronApi.ts'), 'utf-8');
-    const weaknetChannels = ['weaknet:install-helper', 'weaknet:start', 'weaknet:stop', 'weaknet:status'];
+    const weaknetChannels = ['weaknet:install-helper', 'weaknet:start', 'weaknet:stop', 'weaknet:status', 'weaknet:traffic'];
     for (const channel of weaknetChannels) {
       expect(channelsSource).toContain(channel);
       expect(preloadSource).toContain(channel);
     }
-    for (const method of ['installWeakNetHelper', 'startWeakNet', 'stopWeakNet', 'queryWeakNetStatus']) {
+    for (const method of ['installWeakNetHelper', 'startWeakNet', 'stopWeakNet', 'queryWeakNetStatus', 'queryWeakNetTraffic']) {
       expect(preloadSource).toContain(method);
       expect(electronApiSource).toContain(method);
     }
@@ -990,6 +990,7 @@ describe('project smoke checks', () => {
       expect(source).toContain('IPC_CHANNELS.START_WEAKNET');
       expect(source).toContain('IPC_CHANNELS.STOP_WEAKNET');
       expect(source).toContain('IPC_CHANNELS.QUERY_WEAKNET_STATUS');
+      expect(source).toContain('IPC_CHANNELS.QUERY_WEAKNET_TRAFFIC');
     }
 
     // ADBManager 提供弱网能力
@@ -998,6 +999,7 @@ describe('project smoke checks', () => {
     expect(adbManagerSource).toContain('async startWeakNetwork');
     expect(adbManagerSource).toContain('async stopWeakNetwork');
     expect(adbManagerSource).toContain('async queryWeakNetworkStatus');
+    expect(adbManagerSource).toContain('async queryWeakNetworkTraffic');
 
     // SimpleApp 接入弱网标签页
     const simpleAppSource = fs.readFileSync(path.join(root, 'src/renderer/SimpleApp.tsx'), 'utf-8');

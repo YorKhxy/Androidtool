@@ -5,9 +5,12 @@ import { Icon, Badge, type BadgeTone } from './ui';
 
 type WeakNetParams = Omit<WeakNetworkProfile, 'packageName'>;
 
+type WeakNetTraffic = { rxBytes: number; txBytes: number; rxRate: number; txRate: number };
+
 type WeakNetPanelProps = {
   deviceConnected: boolean;
   status: WeakNetworkHelperStatus;
+  traffic: WeakNetTraffic | null;
   installedPackages: string[];
   loadingPackages: boolean;
   busy: boolean;
@@ -61,9 +64,18 @@ const inputStyle: React.CSSProperties = {
   fontFamily: 'var(--font-mono)',
 };
 
+const formatBytes = (n: number): string => {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)} KB`;
+  return `${Math.round(n)} B`;
+};
+const formatRate = (n: number): string => `${formatBytes(n)}/s`;
+
 export function WeakNetPanel({
   deviceConnected,
   status,
+  traffic,
   installedPackages,
   loadingPackages,
   busy,
@@ -92,6 +104,12 @@ export function WeakNetPanel({
 
   const handleStart = () => {
     if (!canStart) return;
+    onStart({ packageName: selectedPackage.trim(), ...params });
+  };
+
+  // 运行中热更新参数：再次下发 START（助手会先停旧引擎再起），不需手动先停。
+  const handleApply = () => {
+    if (busy || selectedPackage.trim().length === 0) return;
     onStart({ packageName: selectedPackage.trim(), ...params });
   };
 
@@ -188,19 +206,44 @@ export function WeakNetPanel({
         ))}
       </div>
 
+      {/* 实时流量（仅运行中显示，读 tun 计数算速率）*/}
+      {isRunning && traffic && (
+        <div className="subpanel" style={{ display: 'flex', gap: '32px', padding: '12px 16px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Icon name="arrow-up" size={16} color="var(--info)" />
+            <div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--fg-primary)' }}>{formatRate(traffic.txRate)}</div>
+              <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>上行 · 累计 {formatBytes(traffic.txBytes)}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Icon name="arrow-down" size={16} color="var(--success)" />
+            <div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--fg-primary)' }}>{formatRate(traffic.rxRate)}</div>
+              <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>下行 · 累计 {formatBytes(traffic.rxBytes)}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 起停 */}
       <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
         {isRunning ? (
-          <button className="btn o-red outline" onClick={onStop} disabled={busy} style={{ height: 40 }}>
-            <Icon name="square" />{busy ? '处理中…' : '停止弱网'}
-          </button>
+          <>
+            <button className="btn o-red outline" onClick={onStop} disabled={busy} style={{ height: 40 }}>
+              <Icon name="square" />{busy ? '处理中…' : '停止弱网'}
+            </button>
+            <button className="btn primary" onClick={handleApply} disabled={busy} style={{ height: 40 }}>
+              <Icon name="refresh-cw" />应用新参数
+            </button>
+          </>
         ) : (
           <button className="btn primary" onClick={handleStart} disabled={!canStart} style={{ height: 40 }}>
             <Icon name="play" />{busy ? '处理中…' : '启动弱网'}
           </button>
         )}
         <span style={{ color: 'var(--fg-tertiary)', fontSize: '12px' }}>
-          {isRunning ? '弱网生效中，修改参数后需先停止再重新启动。' : '弱网仅作用于所选目标应用，不影响整机网络与 ADB。'}
+          {isRunning ? '弱网生效中，改完参数点「应用新参数」即时生效。' : '弱网仅作用于所选目标应用，不影响整机网络与 ADB。'}
         </span>
       </div>
     </div>

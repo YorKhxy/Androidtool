@@ -418,6 +418,15 @@ export type WeakNetworkHelperStatus =
   | 'stopped'              // 已停止
   | 'error';               // 异常（命令失败等）
 
+// 弱网隧道(tun)的累计流量计数，读自设备 /proc/net/dev 的 tun 行。
+// 渲染层按相邻两次采样的差值 + 间隔算实时上下行速率。弱网未运行(无 tun)时为 null。
+export interface WeakNetworkTraffic {
+  rxBytes: number;     // 隧道累计接收字节（设备下行）
+  txBytes: number;     // 隧道累计发送字节（设备上行）
+  rxPackets: number;   // 累计接收包数
+  txPackets: number;   // 累计发送包数
+}
+
 // 内置预设档位（参考值，最终以实测为准）。
 export const WEAK_NETWORK_PRESETS: WeakNetworkPreset[] = [
   { id: 'weak-wifi', label: '弱 WiFi', values: { latencyMs: 150, jitterMs: 40, packetLossPercent: 2, uploadKbps: 2048, downloadKbps: 4096 } },

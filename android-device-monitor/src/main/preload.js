@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startWeakNet: (deviceId, profile) => ipcRenderer.invoke('weaknet:start', deviceId, profile),
   stopWeakNet: (deviceId) => ipcRenderer.invoke('weaknet:stop', deviceId),
   queryWeakNetStatus: (deviceId) => ipcRenderer.invoke('weaknet:status', deviceId),
+  queryWeakNetTraffic: (deviceId) => ipcRenderer.invoke('weaknet:traffic', deviceId),
   listDeviceFiles: (deviceId, dirPath) => ipcRenderer.invoke('adb:list-device-files', deviceId, dirPath),
   pullDeviceFile: (deviceId, remotePath, name, isDir) => ipcRenderer.invoke('adb:pull-device-file', deviceId, remotePath, name, isDir),
   deleteDeviceFile: (deviceId, remotePath, isDir) => ipcRenderer.invoke('adb:delete-device-file', deviceId, remotePath, isDir),

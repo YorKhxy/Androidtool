@@ -404,6 +404,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.QUERY_WEAKNET_TRAFFIC, async (_event, deviceId: string) => {
+    try {
+      const traffic = await adbManager.queryWeakNetworkTraffic(deviceId);
+      return { success: true, data: traffic };
+    } catch (error) {
+      return toIpcErrorResponse(error, '查询弱网流量失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.LIST_DEVICE_FILES, async (_event, deviceId: string, dirPath: string) => {
     try {
       const list = await adbManager.listDeviceFiles(deviceId, dirPath);
