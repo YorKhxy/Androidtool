@@ -6,6 +6,7 @@ import com.androidtool.piconetworkhelper.model.WeakNetworkConfig;
 import com.androidtool.piconetworkhelper.shaper.PacketDirection;
 import com.androidtool.piconetworkhelper.shaper.PacketDecision;
 import com.androidtool.piconetworkhelper.shaper.WeakNetworkShaper;
+import com.androidtool.piconetworkhelper.shaper.WeakNetworkStats;
 
 import java.io.Closeable;
 import java.io.EOFException;
@@ -114,7 +115,9 @@ public final class WeakSocks5Proxy {
     private void handleConnect(Socket client, OutputStream clientOutput, SocksRequest request) throws IOException {
         Socket remote = new Socket();
         try {
+            long connectStartMs = System.currentTimeMillis();
             remote.connect(new InetSocketAddress(request.host, request.port), 10000);
+            WeakNetworkStats.getInstance().recordRtt(System.currentTimeMillis() - connectStartMs);
             remote.setTcpNoDelay(true);
             SocketAddress localAddress = remote.getLocalSocketAddress();
             int localPort = localAddress instanceof InetSocketAddress

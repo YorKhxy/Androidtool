@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { WeakNetworkHelperStatus, WeakNetworkProfile } from '../../shared/types';
+import type { WeakNetworkHelperStatus, WeakNetworkProfile, WeakNetworkShaperStats } from '../../shared/types';
 import { WEAK_NETWORK_PRESETS } from '../../shared/types';
 import { Icon, Badge, LineChart, type BadgeTone } from './ui';
 
@@ -12,6 +12,7 @@ type WeakNetPanelProps = {
   status: WeakNetworkHelperStatus;
   traffic: WeakNetTraffic | null;
   trafficHistory: { rx: number; tx: number }[];
+  shaperStats: WeakNetworkShaperStats | null;
   onExportTraffic: () => void;
   installedPackages: string[];
   loadingPackages: boolean;
@@ -79,6 +80,7 @@ export function WeakNetPanel({
   status,
   traffic,
   trafficHistory,
+  shaperStats,
   onExportTraffic,
   installedPackages,
   loadingPackages,
@@ -236,6 +238,30 @@ export function WeakNetPanel({
               </button>
             </div>
           </div>
+          {shaperStats && (
+            <div style={{ display: 'flex', gap: '28px', alignItems: 'center', paddingTop: '4px', borderTop: '1px solid var(--border-subtle)' }}>
+              <div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: shaperStats.lossPercent > 0 ? 'var(--danger)' : 'var(--fg-primary)' }}>
+                  {shaperStats.lossPercent.toFixed(1)}%
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>实测丢包</div>
+              </div>
+              <div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--fg-primary)' }}>
+                  {shaperStats.avgRttMs > 0 ? `${Math.round(shaperStats.avgRttMs)} ms` : '--'}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>实测往返延迟</div>
+              </div>
+              <div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '15px', color: 'var(--fg-secondary)' }}>
+                  {shaperStats.droppedPackets} / {shaperStats.decidedPackets}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>丢弃 / 决策</div>
+              </div>
+              <span style={{ marginLeft: 'auto', fontSize: '11.5px', color: 'var(--fg-tertiary)' }}>实测值来自助手整形层（非配置值）</span>
+            </div>
+          )}
+
           {trafficHistory.length >= 2 && (() => {
             const max = Math.max(1, ...trafficHistory.map((p) => Math.max(p.rx, p.tx)));
             return (

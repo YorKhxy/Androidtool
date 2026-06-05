@@ -21,6 +21,7 @@ import type {
   WeakNetworkProfile,
   WeakNetworkHelperStatus,
   WeakNetworkTraffic,
+  WeakNetworkShaperStats,
   TransferResumeBatch,
   TransferBatchResult,
   UpdateStatus,
@@ -76,6 +77,7 @@ export interface ElectronAPI {
   queryWeakNetStatus: (deviceId: string) => Promise<ElectronResult<WeakNetworkHelperStatus>>;
   queryWeakNetTraffic: (deviceId: string) => Promise<ElectronResult<WeakNetworkTraffic | null>>;
   exportWeakNetTraffic: (rows: { at: number; rx: number; tx: number }[]) => Promise<ElectronResult<string>>;
+  queryWeakNetShaperStats: (deviceId: string) => Promise<ElectronResult<WeakNetworkShaperStats | null>>;
   listDeviceFiles: (deviceId: string, dirPath: string) => Promise<ElectronResult<DeviceFileList>>;
   pullDeviceFile: (deviceId: string, remotePath: string, name: string, isDir: boolean) => Promise<ElectronResult<string>>;
   deleteDeviceFile: (deviceId: string, remotePath: string, isDir: boolean) => Promise<ElectronResult<undefined>>;

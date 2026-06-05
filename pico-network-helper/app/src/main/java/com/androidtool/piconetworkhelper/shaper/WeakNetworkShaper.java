@@ -15,7 +15,9 @@ public final class WeakNetworkShaper {
     }
 
     public synchronized PacketDecision decide(PacketDirection direction, int bytes) {
+        WeakNetworkStats.getInstance().recordDecision(direction, bytes);
         if (shouldDrop()) {
+            WeakNetworkStats.getInstance().recordDrop();
             return PacketDecision.drop();
         }
 

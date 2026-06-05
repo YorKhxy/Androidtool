@@ -420,6 +420,15 @@ const setupIpcHandlers = () => {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.QUERY_WEAKNET_SHAPER_STATS, async (_event, deviceId: string) => {
+    try {
+      const stats = await adbManager.queryWeakNetworkShaperStats(deviceId);
+      return { success: true, data: stats };
+    } catch (error) {
+      return toIpcErrorResponse(error, '查询弱网整形统计失败');
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.EXPORT_WEAKNET_TRAFFIC, async (_event, rows: { at: number; rx: number; tx: number }[]) => {
     try {
       const result = await dialog.showSaveDialog(mainWindow!, {

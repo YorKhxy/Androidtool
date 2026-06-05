@@ -5,6 +5,7 @@ import android.util.Log;
 
 import com.androidtool.piconetworkhelper.model.WeakNetworkConfig;
 import com.androidtool.piconetworkhelper.proxy.WeakSocks5Proxy;
+import com.androidtool.piconetworkhelper.shaper.WeakNetworkStats;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -23,12 +24,17 @@ import java.nio.charset.StandardCharsets;
  */
 public final class TcpUdpShapingEngine implements TunTransportEngine {
     private static final String TAG = "TcpUdpShapingEngine";
+    private static final String STATS_TAG = "WeakNetStats";
     private static final String CONFIG_FILE_NAME = "hev-tunnel.conf";
     private static final int TASK_STACK_SIZE = 20480;
+    private static final long STATS_INTERVAL_MS = 1000L;
 
     private WeakSocks5Proxy proxy;
     private ParcelFileDescriptor tunInterface;
     private volatile boolean running;
+    // 每秒把统计快照打到 logcat 供桌面端读取；用 volatile 标志 + interrupt 控制生命周期。
+    private volatile boolean statsLogging;
+    private Thread statsLoggerThread;
 
     @Override
     public synchronized void start(
@@ -41,6 +47,7 @@ public final class TcpUdpShapingEngine implements TunTransportEngine {
             return;
         }
 
+        WeakNetworkStats.getInstance().reset();
         WeakSocks5Proxy localProxy = new WeakSocks5Proxy(config);
         try {
             int proxyPort = localProxy.start();
@@ -59,6 +66,32 @@ public final class TcpUdpShapingEngine implements TunTransportEngine {
         this.proxy = localProxy;
         this.tunInterface = tunInterface;
         this.running = true;
+        startStatsLogger();
+    }
+
+    private void startStatsLogger() {
+        statsLogging = true;
+        statsLoggerThread = new Thread(() -> {
+            while (statsLogging) {
+                Log.i(STATS_TAG, WeakNetworkStats.getInstance().snapshotJson());
+                try {
+                    Thread.sleep(STATS_INTERVAL_MS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }, "WeakNetStatsLogger");
+        statsLoggerThread.start();
+    }
+
+    private void stopStatsLogger() {
+        statsLogging = false;
+        Thread thread = statsLoggerThread;
+        statsLoggerThread = null;
+        if (thread != null) {
+            thread.interrupt();
+        }
     }
 
     @Override
@@ -67,6 +100,7 @@ public final class TcpUdpShapingEngine implements TunTransportEngine {
             return;
         }
         running = false;
+        stopStatsLogger();
         try {
             HevSocks5Tunnel.TProxyStopService();
         } catch (Throwable error) {

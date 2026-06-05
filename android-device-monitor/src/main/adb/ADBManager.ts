@@ -5,7 +5,7 @@ import * as path from 'path';
 import { statSync as nodeFsStatSync, mkdtempSync as nodeFsMkdtempSync, renameSync as nodeFsRenameSync, copyFileSync as nodeFsCopyFileSync, rmSync as nodeFsRmSync } from 'fs';
 import { tmpdir as nodeOsTmpdir } from 'os';
 import type { ExecFileOptions, ChildProcess } from 'child_process';
-import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo, WeakNetworkHelperStatus, WeakNetworkProfile, WeakNetworkTraffic } from '../../shared/types';
+import { ActivityStackEntry, AdbStatus, DeviceFileEntry, DeviceFileList, DeviceInfo, LogEntry, NetworkRequest, PairResult, PerformanceMetrics, PerformanceRecording, PerformanceRecordingOptions, ProcessInfo, WeakNetworkHelperStatus, WeakNetworkProfile, WeakNetworkTraffic, WeakNetworkShaperStats } from '../../shared/types';
 import { logger } from '../logger';
 import { AdbCommandError, classifyAdbError } from './adbError';
 import { ResolvedAdbBinary, getBundledAdbCandidates, resolveBundledAdbBinaryPath } from './adbBinary';
@@ -1471,6 +1471,37 @@ export class ADBManager extends EventEmitter {
       };
     } catch (error) {
       logger.warn('查询弱网流量失败', error);
+      return null;
+    }
+  }
+
+  // 读助手整形层实测统计：助手每秒打 `WeakNetStats: {json}` 到 logcat，取最新一行解析。
+  // JSON 契约：{"up","down","fwd"(决策总数),"drop","rttMs"(RTT 累计),"rttN"(样本数)}。
+  async queryWeakNetworkShaperStats(deviceId: string): Promise<WeakNetworkShaperStats | null> {
+    try {
+      const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'logcat', '-d', '-s', 'WeakNetStats:I'], {
+        timeout: 10 * 1000,
+      });
+      const candidate = stdout
+        .split(/\r?\n/)
+        .filter((line) => line.includes('"fwd"') && line.includes('{'))
+        .pop();
+      if (!candidate) {
+        return null;
+      }
+      const parsed = JSON.parse(candidate.slice(candidate.indexOf('{'))) as Record<string, number>;
+      const decided = Number(parsed.fwd) || 0;
+      const dropped = Number(parsed.drop) || 0;
+      const rttSum = Number(parsed.rttMs) || 0;
+      const rttN = Number(parsed.rttN) || 0;
+      return {
+        decidedPackets: decided,
+        droppedPackets: dropped,
+        lossPercent: decided > 0 ? (dropped / decided) * 100 : 0,
+        avgRttMs: rttN > 0 ? rttSum / rttN : 0,
+      };
+    } catch (error) {
+      logger.warn('查询弱网整形统计失败', error);
       return null;
     }
   }

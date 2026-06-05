@@ -427,6 +427,15 @@ export interface WeakNetworkTraffic {
   txPackets: number;   // 累计发送包数
 }
 
+// 助手整形层实测统计（读自助手每秒打的 WeakNetStats logcat）。
+// 真实丢包率 = 丢弃决策 / 决策总数；实测 RTT = 代理连接真实目标的平均往返耗时。
+export interface WeakNetworkShaperStats {
+  lossPercent: number;     // 真实丢包率 %（实测，区别于配置值）
+  avgRttMs: number;        // 实测到目标的平均往返延迟（ms），无样本为 0
+  decidedPackets: number;  // 整形决策总数
+  droppedPackets: number;  // 实际丢弃数
+}
+
 // 内置预设档位（参考值，最终以实测为准）。
 export const WEAK_NETWORK_PRESETS: WeakNetworkPreset[] = [
   { id: 'weak-wifi', label: '弱 WiFi', values: { latencyMs: 150, jitterMs: 40, packetLossPercent: 2, uploadKbps: 2048, downloadKbps: 4096 } },

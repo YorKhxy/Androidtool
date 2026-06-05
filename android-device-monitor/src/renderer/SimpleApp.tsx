@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest, WeakNetworkHelperStatus, WeakNetworkProfile, UpdateStatus } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceRecording, PerformanceSample, PerformanceSnapshot, LogEntry, NetworkRequest, WeakNetworkHelperStatus, WeakNetworkProfile, WeakNetworkShaperStats, UpdateStatus } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
@@ -205,6 +205,8 @@ function SimpleApp() {
   // 流量速率历史（最近若干采样，含时间戳），供面板画曲线图 + CSV 导出。
   const [weakNetTrafficHistory, setWeakNetTrafficHistory] = useState<{ rx: number; tx: number; at: number }[]>([]);
   const weakNetTrafficPrevRef = useRef<{ rxBytes: number; txBytes: number; at: number } | null>(null);
+  // 助手整形层实测统计（真实丢包率/RTT）。
+  const [weakNetShaperStats, setWeakNetShaperStats] = useState<WeakNetworkShaperStats | null>(null);
   // 启动后 tun 未建起来，推断为「未在头显授予 VPN 权限」的 sticky 标志；运行成功即清除。
   const [weakNetNeedsAuth, setWeakNetNeedsAuth] = useState(false);
   const [logVersion, setLogVersion] = useState(0);
@@ -748,12 +750,15 @@ function SimpleApp() {
     weakNetTrafficPrevRef.current = null;
     setWeakNetTraffic(null);
     setWeakNetTrafficHistory([]);
+    setWeakNetShaperStats(null);
     void loadWeakNetStatus();
     void loadWeakNetPackages();
     void loadWeakNetTraffic();
+    void loadWeakNetShaperStats();
     const timer = setInterval(() => {
       void loadWeakNetStatus();
       void loadWeakNetTraffic();
+      void loadWeakNetShaperStats();
     }, 2500);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1723,6 +1728,16 @@ function SimpleApp() {
       }
     } catch {
       setWeakNetTraffic(null);
+    }
+  };
+
+  const loadWeakNetShaperStats = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    try {
+      const result = await window.electronAPI!.queryWeakNetShaperStats(selectedDevice.id);
+      setWeakNetShaperStats(result.success ? result.data ?? null : null);
+    } catch {
+      setWeakNetShaperStats(null);
     }
   };
 
@@ -3339,6 +3354,7 @@ function SimpleApp() {
                     status={weakNetNeedsAuth && weakNetStatus === 'idle' ? 'need-vpn-permission' : weakNetStatus}
                     traffic={weakNetTraffic}
                     trafficHistory={weakNetTrafficHistory}
+                    shaperStats={weakNetShaperStats}
                     onExportTraffic={handleExportWeakNetTraffic}
                     installedPackages={weakNetPackages}
                     loadingPackages={weakNetLoadingPackages}
