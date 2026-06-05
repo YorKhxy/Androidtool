@@ -23,6 +23,7 @@ const SOFT_LIMIT_SIZE_BYTES = 2 * 1024 * 1024 * 1024;
 type ActiveSession = {
   sessionId: string;
   deviceId: string;
+  session: PerformanceCaptureSession;
   startedAtMs: number;
   timer: NodeJS.Timeout | null;
   sampleSeq: number;
@@ -36,11 +37,23 @@ export class PerformanceCaptureController {
   constructor(
     private readonly adb: ADBManager,
     private readonly store: PerformanceCaptureStore,
-    private readonly emit: (channel: string, payload: unknown) => void
+    private readonly emit: (channel: string, payload: unknown) => void,
+    // 可选：查询某设备是否正在投屏（scrcpy）。录屏启动失败且正在投屏时，把报错改成「编码器被投屏占用」的精准指引。
+    private readonly isDeviceMirroring?: (deviceId: string) => boolean
   ) {}
 
   isActive(deviceId: string): boolean {
     return this.active.has(deviceId);
+  }
+
+  /** 进行中的采集（供渲染层重载/崩溃后对齐采集状态）。 */
+  getActiveSessions(): Array<{ deviceId: string; session: PerformanceCaptureSession; elapsedMs: number }> {
+    const now = Date.now();
+    return Array.from(this.active.values()).map((state) => ({
+      deviceId: state.deviceId,
+      session: state.session,
+      elapsedMs: now - state.startedAtMs,
+    }));
   }
 
   async start(deviceId: string): Promise<PerformanceCaptureSession> {
@@ -70,6 +83,7 @@ export class PerformanceCaptureController {
     const state: ActiveSession = {
       sessionId: session.id,
       deviceId,
+      session,
       startedAtMs: Date.now(),
       timer: null,
       sampleSeq: 0,
@@ -96,15 +110,21 @@ export class PerformanceCaptureController {
       });
     } catch (error) {
       // 录制启动失败：把会话标记为 failed 并抛出，让上层提示用户。
+      const baseMessage = error instanceof Error ? error.message : String(error);
+      // 若该设备正在投屏，录屏起不来最可能是 scrcpy 占用了硬件编码器（部分机型不支持同时编码）——
+      // 给出精准可操作指引，而不是 captureRecorder 默认的「锁屏/熄屏」误导文案。
+      const message = this.isDeviceMirroring?.(deviceId)
+        ? `设备正在投屏，scrcpy 可能占用了硬件编码器，导致本次录屏无法启动。请先停止该设备的投屏再开始采集；若机型不支持同时编码，二者只能二选一。\n（原始错误：${baseMessage}）`
+        : baseMessage;
       await this.store
         .finalizeSession(session.id, {
           endedAt: new Date(),
           durationMs: 0,
           status: 'failed',
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
         })
         .catch(() => undefined);
-      throw error;
+      throw new Error(message);
     }
 
     state.timer = setInterval(() => {

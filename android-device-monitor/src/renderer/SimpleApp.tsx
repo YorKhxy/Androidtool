@@ -773,6 +773,29 @@ function SimpleApp() {
     if (activeTab === 'performance') void refreshCaptureSessions();
   }, [activeTab, refreshCaptureSessions]);
 
+  // 挂载时与主进程对齐进行中的采集：渲染层重载 / 崩溃 / 手动刷新窗口后，主进程的采集会话仍在跑，
+  // 而渲染态被重置成「未采集」——会导致点开始撞「已在采集中」死锁。这里恢复采集中状态、起始时间、
+  // 已用时长，并回填已累积样本（复用 loadCaptureSession，samples.jsonl 逐行容错可中途读取），
+  // 之后实时 CAPTURE_SAMPLE 继续累加。
+  useEffect(() => {
+    if (!hasElectronAPI()) return;
+    void (async () => {
+      const result = await window.electronAPI!.getActiveCaptureSessions();
+      if (!result.success || !result.data) return;
+      for (const { deviceId, session, elapsedMs } of result.data) {
+        setActiveCaptureByDeviceId((prev) => (prev[deviceId] ? prev : { ...prev, [deviceId]: session }));
+        setPerformanceSessionStartedAtByDeviceId((prev) => ({ ...prev, [deviceId]: new Date(session.startedAt) }));
+        setCaptureElapsedByDeviceId((prev) => ({ ...prev, [deviceId]: elapsedMs }));
+        const detail = await window.electronAPI!.loadCaptureSession(session.id);
+        if (detail.success && detail.data) {
+          const restored = detail.data.samples;
+          // 仅当磁盘历史比当前内存更全时回填，避免覆盖掉对齐期间已到达的实时样本。
+          setPerformanceSamplesByDeviceId((prev) => (restored.length > (prev[deviceId]?.length ?? 0) ? { ...prev, [deviceId]: restored } : prev));
+        }
+      }
+    })();
+  }, []);
+
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
   useEffect(() => {
@@ -3303,6 +3326,7 @@ function SimpleApp() {
                     captureSamples={shownCaptureSamples}
                     isCapturing={isSelectedCapturing}
                     isCaptureBusy={isSelectedCaptureBusy}
+                    isDeviceMirroring={Boolean(selectedDeviceId && mirrorSessionsByDeviceId[selectedDeviceId]?.status === 'running')}
                     elapsedMs={selectedCaptureElapsed}
                     softLimitNotice={selectedSoftLimitNotice}
                     captureMarkers={shownCaptureMarkers}
@@ -3316,6 +3340,7 @@ function SimpleApp() {
                     onRenameCaptureSession={renameCaptureSession}
                     onDeleteCaptureSession={deleteCaptureSession}
                     onExportCaptureSession={exportCaptureSession}
+                    onRefreshCaptureSessions={() => void refreshCaptureSessions()}
                     onImportCaptureSessions={importCaptureViaDialog}
                     onImportCapturePaths={importCapturePaths}
                     onExportSession={exportPerformanceSession}

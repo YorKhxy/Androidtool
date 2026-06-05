@@ -264,7 +264,17 @@ export class PerformanceCaptureStore {
   }
 
   private async readManifest(sessionId: string): Promise<PerformanceCaptureSession> {
-    const raw = await fs.readFile(path.join(this.sessionDir(sessionId), MANIFEST_FILE), 'utf8');
+    let raw: string;
+    try {
+      raw = await fs.readFile(path.join(this.sessionDir(sessionId), MANIFEST_FILE), 'utf8');
+    } catch (error) {
+      // 会话目录/清单不存在（如已被删除的幽灵会话）→ 给干净的中文提示，
+      // 而不是把宿主绝对路径的 ENOENT 直接抛到 UI 红条上。
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        throw new Error('采集会话不存在或已被删除。');
+      }
+      throw error;
+    }
     return reviveSession(JSON.parse(raw) as PerformanceCaptureSession);
   }
 
