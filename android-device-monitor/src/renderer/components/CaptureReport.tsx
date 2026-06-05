@@ -47,15 +47,18 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
   markersPropRef.current = markers;
 
   const sessionId = session?.id ?? null;
-  // 切换会话 / 重新采集时复位播放态与过滤态，避免沿用上一会话的播放头、单眼比例与标记。
+  // 切换会话 / 重新采集时复位播放态，并从该会话已存的标记还原过滤态——
+  // 既显示曲线标记，也把过滤条件行重建出来（marker 含 metricKey/op/threshold），
+  // 这样过滤内容一直保留、随时可调，不会执行完就消失。
   useEffect(() => {
     setPlayheadMs(0);
     setActiveSegmentIndex(0);
     setIsPlaying(false);
     setVideoSize(null);
     pendingSeekOffsetRef.current = null;
-    setFilterConditions([]);
-    setAppliedMarkers(markersPropRef.current ?? []);
+    const loadedMarkers = markersPropRef.current ?? [];
+    setAppliedMarkers(loadedMarkers);
+    setFilterConditions(loadedMarkers.map((m) => ({ id: `${m.metricKey}-${m.op}-${m.threshold}`, metricKey: m.metricKey, op: m.op, threshold: m.threshold })));
   }, [sessionId, live]);
 
   if (!session) {

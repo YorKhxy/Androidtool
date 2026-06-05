@@ -611,7 +611,7 @@ describe('project smoke checks', () => {
     expect(simpleAppSource).toContain('onCaptureSample');
     expect(simpleAppSource).toContain('onCaptureSizeLimit');
     expect(simpleAppSource).toContain('activeCaptureByDeviceId');
-    expect(simpleAppSource).toContain('loadedReport'); // 停止后/回看加载的报告会话（14.7 统一取代 per-device 报告态）
+    expect(simpleAppSource).toContain('loadedReportByDeviceId'); // 报告区按设备隔离，切设备不串台
     // 关闭采集走统一确认弹窗二次确认（开始采集不拦）
     expect(simpleAppSource).toContain('runCaptureToggle');
     expect(simpleAppSource).toContain('确定关闭采集吗');
@@ -664,6 +664,8 @@ describe('project smoke checks', () => {
     expect(reportSource).toContain('<CaptureFilterPanel');
     expect(reportSource).toContain('.pause()'); // 命中跳转时暂停视频
     expect(reportSource).toContain('markers={appliedMarkers}');
+    // 过滤内容保留可调：从已存标记重建过滤条件行（不执行完就消失）
+    expect(reportSource).toContain('loadedMarkers.map');
     expect(reportSource).not.toContain('andHitTimes');
     // 防回归（hooks 顺序）：early return 之后不得再有任何 hook 调用，
     // 否则 session 由 null↔非 null 切换时 hook 数量变化 → "Rendered more hooks than previous"。
