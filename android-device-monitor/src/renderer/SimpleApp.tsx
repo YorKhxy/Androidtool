@@ -283,6 +283,8 @@ function SimpleApp() {
   const [filterLevel, setFilterLevel] = useState<LogLevelFilter>('all');
   const [logTagFilter, setLogTagFilter] = useState('');
   const [logPackageFilter, setLogPackageFilter] = useState('');
+  // 包名过滤下拉（可主动输入 + 选当前设备已装应用）的显隐。
+  const [showLogPackageDropdown, setShowLogPackageDropdown] = useState(false);
   const [logPidFilter, setLogPidFilter] = useState('');
   const [useRegexSearch, setUseRegexSearch] = useState(false);
   const [pausedLogDeviceIds, setPausedLogDeviceIds] = useState<Set<string>>(() => new Set());
@@ -2484,7 +2486,46 @@ function SimpleApp() {
           <option value="E">Error+</option>
           <option value="F">Fatal</option>
         </select>
-        <input value={logPackageFilter} onChange={(e) => setLogPackageFilter(e.target.value)} placeholder={'\u5e94\u7528/\u5305\u540d'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
+        {(() => {
+          // \u53ef\u4e3b\u52a8\u8f93\u5165 + \u4e0b\u62c9\u9009\u5f53\u524d\u8bbe\u5907\u5df2\u88c5\u5e94\u7528\uff1a\u8f93\u5165\u5373\u6309\u5b50\u4e32\u8054\u60f3\u8fc7\u6ee4\uff0c\u5217\u8868\u4e0a\u9650 80 \u6761\u9632\u8fc7\u957f\u3002
+          const kw = logPackageFilter.trim().toLowerCase();
+          const matched = (kw ? installedPackages.filter((p) => p.toLowerCase().includes(kw)) : installedPackages).slice(0, 80);
+          return (
+            <div style={{ position: 'relative' }}>
+              <input
+                value={logPackageFilter}
+                onChange={(e) => { setLogPackageFilter(e.target.value); setShowLogPackageDropdown(true); }}
+                onFocus={() => setShowLogPackageDropdown(true)}
+                onKeyDown={(e) => { if (e.key === 'Escape') setShowLogPackageDropdown(false); }}
+                onBlur={() => window.setTimeout(() => setShowLogPackageDropdown(false), 150)}
+                placeholder={'\u5e94\u7528/\u5305\u540d'}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }}
+              />
+              {showLogPackageDropdown && (
+                <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, maxHeight: '260px', overflowY: 'auto', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.45)', minWidth: '260px' }}>
+                  {installedPackagesLoading && installedPackages.length === 0 ? (
+                    <div style={{ padding: '8px 10px', color: '#9ca3af', fontSize: '12px' }}>\u52a0\u8f7d\u5df2\u88c5\u5e94\u7528\u4e2d\u2026</div>
+                  ) : matched.length === 0 ? (
+                    <div style={{ padding: '8px 10px', color: '#9ca3af', fontSize: '12px' }}>
+                      {installedPackages.length === 0 ? '\u672a\u83b7\u53d6\u5230\u5df2\u88c5\u5e94\u7528\uff08\u53ef\u76f4\u63a5\u8f93\u5165\u5305\u540d\uff09' : '\u65e0\u5339\u914d\u7684\u5df2\u88c5\u5e94\u7528'}
+                    </div>
+                  ) : (
+                    matched.map((pkg) => (
+                      <div
+                        key={pkg}
+                        onMouseDown={(e) => { e.preventDefault(); setLogPackageFilter(pkg); setShowLogPackageDropdown(false); }}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#33335a'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                        title={pkg}
+                        style={{ padding: '7px 10px', cursor: 'pointer', color: '#e5e7eb', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >{pkg}</div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         <input value={logTagFilter} onChange={(e) => setLogTagFilter(e.target.value)} placeholder={'\u6807\u7b7e'} style={{ padding: '8px 10px', backgroundColor: '#252540', border: '1px solid #454560', borderRadius: '6px', color: 'white', fontSize: '13px', outline: 'none' }} />
         <div style={{ position: 'relative' }}>
           <input
@@ -2619,6 +2660,15 @@ function SimpleApp() {
         ::-webkit-scrollbar-thumb { background: #3a3a55; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
         ::-webkit-scrollbar-thumb:hover { background: #50506e; background-clip: content-box; }
         ::-webkit-scrollbar-corner { background: transparent; }
+        /* 全局按钮点击反馈：所有按钮按下时轻微缩放+压暗（禁用态不响应）。新按钮自动继承。 */
+        button { transition: transform 0.08s ease, filter 0.12s ease; }
+        button:active:not(:disabled) { transform: scale(0.96); filter: brightness(0.85); }
+        /* 瞬时动作按钮"假冷却"期内的图标转圈（配合 useCooldown）。 */
+        @keyframes adm-spin { to { transform: rotate(360deg); } }
+        .adm-spin { display: inline-block; animation: adm-spin 0.5s linear infinite; }
+        /* 数字输入隐藏原生上下箭头，改用应用内自绘 ▲▼ 步进控件。 */
+        .adm-number::-webkit-outer-spin-button, .adm-number::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .adm-number { -moz-appearance: textfield; appearance: textfield; }
       `}</style>
       {!appReady && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 3000, backgroundColor: '#1a1a2e', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

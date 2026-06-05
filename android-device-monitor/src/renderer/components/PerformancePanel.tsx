@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { DeviceInfo, PerformanceCaptureMarker, PerformanceCaptureSession, PerformanceMetrics, PerformanceSample, PicoMetricsState } from '../../shared/types';
+import { useCooldown } from '../lib/useCooldown';
 import { CaptureReport } from './CaptureReport';
 import { CaptureHistoryList } from './CaptureHistoryList';
 import { formatClock, formatMemoryMb, METRIC_COLORS } from './perfFormat';
@@ -130,6 +131,8 @@ export function PerformancePanel({
   onRevealExportedCapture,
 }: PerformancePanelProps) {
   const [importDragOver, setImportDragOver] = useState(false);
+  // 刷新是瞬时动作（本地重拉列表），用假冷却给可见反馈。
+  const refreshCooldown = useCooldown();
   // 采集回看类型筛选：全部 / 仅安卓 / 仅 Pico（手动筛，不再跟随当前设备）。
   const [captureTypeFilter, setCaptureTypeFilter] = useState<'all' | 'android' | 'pico'>('all');
   // 回放时播放头处的样本（由 CaptureReport 上抛）：让「前台应用 + 参数」块跟随回放数据而非实时设备。
@@ -260,10 +263,11 @@ export function PerformancePanel({
                 >📂 打开位置</button>
               )}
               <button
-                onClick={onRefreshCaptureSessions}
+                onClick={() => refreshCooldown.run(onRefreshCaptureSessions)}
+                disabled={refreshCooldown.cooling}
                 title="刷新采集回看列表"
-                style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#cbd5e1', cursor: 'pointer', padding: '5px 12px', fontSize: '12px' }}
-              >🔄 刷新</button>
+                style={{ border: '1px solid #475569', borderRadius: '6px', backgroundColor: 'transparent', color: '#cbd5e1', cursor: refreshCooldown.cooling ? 'default' : 'pointer', padding: '5px 12px', fontSize: '12px', opacity: refreshCooldown.cooling ? 0.7 : 1 }}
+              ><span className={refreshCooldown.cooling ? 'adm-spin' : undefined}>🔄</span> 刷新</button>
               <button
                 onClick={onImportCaptureSessions}
                 title="导入采集会话（.zip）；也可把 zip 或会话文件夹拖到此区域"
