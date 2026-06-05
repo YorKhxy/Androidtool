@@ -427,7 +427,9 @@ describe('project smoke checks', () => {
     expect(managerSource).toContain('packageName: foregroundApp.packageName');
     expect(managerSource).toContain('androidMetrics');
     expect(managerSource).toContain("source: 'android'");
-    expect(managerSource).toContain('adb shell dumpsys meminfo');
+    expect(managerSource).toContain('cat'); // 内存改用 /proc/meminfo（瞬时、不会被 dumpsys 超时截断成 0）
+    expect(managerSource).toContain('/proc/meminfo');
+    expect(managerSource).toContain('MemAvailable');
     expect(picoSource).toContain("provider: 'pico'");
     expect(picoSource).toContain("'shell', 'logcat'");
     expect(picoSource).toContain("'-s', 'PxrMetric'");

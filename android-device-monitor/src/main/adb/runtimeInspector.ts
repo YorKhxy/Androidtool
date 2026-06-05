@@ -89,7 +89,10 @@ export class AdbRuntimeInspector {
         : ['-s', deviceId, 'shell', 'dumpsys', 'gfxinfo', 'framestats'];
 
       const [memInfo, cpuInfo, gfxInfo] = await Promise.all([
-        this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'meminfo']),
+        // 用 /proc/meminfo（瞬时、格式固定、永不超时）取内存。早先用的 `dumpsys meminfo` 很重，
+        // 高负载（如运行游戏）时设备端 dumpsys 会触发服务超时、返回缺少「Used RAM」摘要的部分输出，
+        // 导致内存被解析成 0（命令本身成功，故 CPU/FPS 正常、唯独内存掉 0）。
+        this.execAdb(['-s', deviceId, 'shell', 'cat', '/proc/meminfo'], { timeout: 4000 }),
         this.execAdb(['-s', deviceId, 'shell', 'top', '-n', '1']),
         this.execAdb(gfxInfoArgs).catch(() => ({ stdout: '', stderr: '' })),
       ]);
@@ -107,7 +110,7 @@ export class AdbRuntimeInspector {
         androidMetrics: {
           source: 'android',
           cpuSource: 'adb shell top -n 1',
-          memorySource: 'adb shell dumpsys meminfo',
+          memorySource: 'adb shell cat /proc/meminfo',
           fpsSource: foregroundApp.packageName
             ? `adb shell dumpsys gfxinfo ${foregroundApp.packageName} framestats`
             : 'adb shell dumpsys gfxinfo framestats',
@@ -176,26 +179,21 @@ export class AdbRuntimeInspector {
     return Math.max(0, Math.min(Number.parseFloat(legacyMatch?.[1] || '0'), 100));
   }
 
+  // 已用内存（KB）。优先 /proc/meminfo：Used = MemTotal - MemAvailable（无 MemAvailable 时退回 MemFree）。
+  // 兼容旧 dumpsys meminfo 输出，以防个别设备 /proc 不可读。
   private parseMemoryUsage(output: string): number {
-    const usedMatch = output.match(/Used RAM:\s+([\d,]+)K/i);
-    if (usedMatch) {
-      return Number.parseInt(usedMatch[1].replace(/,/g, ''), 10);
-    }
+    const readKb = (re: RegExp) => {
+      const match = output.match(re);
+      return match ? Number.parseInt(match[1].replace(/,/g, ''), 10) : NaN;
+    };
+    const total = readKb(/MemTotal:\s+(\d+)\s*kB/i);
+    const available = readKb(/MemAvailable:\s+(\d+)\s*kB/i);
+    const free = readKb(/MemFree:\s+(\d+)\s*kB/i);
+    if (Number.isFinite(total) && Number.isFinite(available)) return Math.max(0, total - available);
+    if (Number.isFinite(total) && Number.isFinite(free)) return Math.max(0, total - free);
 
-    const topMemMatch = output.match(/Mem:\s+([\d,]+)([KMG])\s+total,\s+([\d,]+)([KMG])\s+used/i);
-    if (topMemMatch) {
-      return this.toKilobytes(topMemMatch[3], topMemMatch[4]);
-    }
-
-    const totalMatch = output.match(/Total RAM:\s+([\d,]+)K/i);
-    return Number.parseInt(totalMatch?.[1]?.replace(/,/g, '') || '0', 10);
-  }
-
-  private toKilobytes(value: string, unit: string): number {
-    const parsed = Number.parseInt(value.replace(/,/g, ''), 10);
-    if (unit.toUpperCase() === 'G') return parsed * 1024 * 1024;
-    if (unit.toUpperCase() === 'M') return parsed * 1024;
-    return parsed;
+    const usedRam = readKb(/Used RAM:\s+([\d,]+)K/i);
+    return Number.isFinite(usedRam) ? usedRam : 0;
   }
 
   async getProcesses(deviceId: string): Promise<ProcessInfo[]> {
