@@ -1,7 +1,7 @@
 import type { ExecFileOptions } from 'child_process';
 import type { ActivityStackEntry, PerformanceMetrics, ProcessInfo } from '../../shared/types';
 import { logger } from '../logger';
-import { PicoAppSupportResult, PicoMetricsReader } from './picoMetrics';
+import { PicoAppSupportResult, PicoMetricsReader, type PicoStreamDeps } from './picoMetrics';
 
 type ExecAdbText = (args: string[], options?: ExecFileOptions) => Promise<{ stdout: string; stderr: string }>;
 
@@ -22,36 +22,51 @@ type PerformanceOptions = {
   currentMetrics?: PerformanceMetrics;
 };
 
+// 前台应用在一次采集里几乎不变，但解析它要跑 dumpsys window/activity（重、慢、耗电）。
+// 按设备缓存，TTL 内复用，避免每秒一次的重型 dumpsys——既稳（少超时）又省电。
+const FOREGROUND_APP_TTL_MS = 5000;
+
 export class AdbRuntimeInspector {
   private readonly picoMetricsReader: PicoMetricsReader;
+  private readonly foregroundAppCache = new Map<string, { context: ForegroundAppContext; at: number }>();
 
-  constructor(private readonly execAdb: ExecAdbText) {
-    this.picoMetricsReader = new PicoMetricsReader(this.execAdb);
+  constructor(private readonly execAdb: ExecAdbText, picoStreamDeps?: PicoStreamDeps) {
+    this.picoMetricsReader = new PicoMetricsReader(this.execAdb, picoStreamDeps);
+  }
+
+  /** 停止某设备的常驻 PxrMetric 流（断开设备时调用）。 */
+  stopPicoStream(deviceId: string): void {
+    this.picoMetricsReader.stopStream(deviceId);
+  }
+
+  /** 停止所有常驻 PxrMetric 流（应用退出清理时调用）。 */
+  stopPicoStreams(): void {
+    this.picoMetricsReader.stopAllStreams();
   }
 
   async getPerformanceMetrics(deviceId: string, options: PerformanceOptions = {}): Promise<PerformanceMetrics> {
     try {
-      const foregroundApp = await this.getForegroundAppContext(deviceId);
+      const foregroundApp = await this.getForegroundAppContextCached(deviceId);
       const isPicoDevice = options.preferPico || (await this.picoMetricsReader.isPicoDevice(deviceId).catch(() => false));
       if (isPicoDevice) {
         const appSupport = await this.picoMetricsReader.detectForegroundAppSupport(deviceId, foregroundApp);
         try {
           const picoMetrics = await this.picoMetricsReader.getPerformanceMetrics(deviceId, foregroundApp);
           if (picoMetrics?.picoMetrics && this.hasNativePicoMetrics(picoMetrics.picoMetrics)) {
-            const androidMetrics = await this.getAndroidPerformanceMetrics(deviceId, foregroundApp).catch((error) => {
-              logger.warn('AdbRuntimeInspector: getPerformanceMetrics(android sidecar) failed:', error);
-              return undefined;
-            });
-            const nativePicoFps = picoMetrics.picoMetrics.fps?.value ?? androidMetrics?.fps ?? picoMetrics.fps;
+            // CPU/内存仍走 Android 采样旁路。旁路命令失败时不再 `?? 0` 兜底（那会让真实的 Pico FPS
+            // 旁边配上假的 CPU 0 / 内存 0），而是让它抛出 → 经下方 catch 落到 Pico 回退；若回退也失败则
+            // 整拍跳过。宁可这一拍没有数据（曲线断点），也不混入假 0。
+            const androidMetrics = await this.getAndroidPerformanceMetrics(deviceId, foregroundApp);
+            const nativePicoFps = picoMetrics.picoMetrics.fps?.value ?? androidMetrics.fps ?? picoMetrics.fps;
             return {
               ...picoMetrics,
-              cpuUsage: androidMetrics?.cpuUsage ?? 0,
-              memoryUsage: androidMetrics?.memoryUsage ?? 0,
+              cpuUsage: androidMetrics.cpuUsage,
+              memoryUsage: androidMetrics.memoryUsage,
               fps: nativePicoFps,
               picoMetricsState: 'native',
               picoAppSupport: appSupport.status,
               picoSupportMessage: appSupport.message,
-              androidMetrics: androidMetrics?.androidMetrics,
+              androidMetrics: androidMetrics.androidMetrics,
             };
           }
 
@@ -69,13 +84,10 @@ export class AdbRuntimeInspector {
 
       return this.getAndroidPerformanceMetrics(deviceId, foregroundApp);
     } catch (error) {
-      logger.error('AdbRuntimeInspector: getPerformanceMetrics failed:', error);
-      return {
-        provider: 'android',
-        cpuUsage: 0,
-        memoryUsage: 0,
-        fps: 0,
-      };
+      // 整条取数失败如实上抛：采集层会跳过本拍（CAPTURE_SAMPLE 不推送 → 曲线断点、顶部指标保留上次值），
+      // 实时性能 IPC 句柄会包成结构化错误。两处都不会出现假 0。
+      logger.warn('AdbRuntimeInspector: getPerformanceMetrics failed（本拍跳过，不编造 0）:', error);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -88,23 +100,37 @@ export class AdbRuntimeInspector {
         ? ['-s', deviceId, 'shell', 'dumpsys', 'gfxinfo', foregroundApp.packageName, 'framestats']
         : ['-s', deviceId, 'shell', 'dumpsys', 'gfxinfo', 'framestats'];
 
-      const [memInfo, cpuInfo, gfxInfo] = await Promise.all([
+      // 三项指标并发采集，每条命令都带 timeout（top / gfxinfo 原先无 timeout，挂起会拖死整次采样）。
+      // 诚实优先：任一命令「失败/超时」（命令级故障）即判定本拍「未采到」，抛出让上层跳过整拍——
+      // 绝不把失败编造成 0。把失败画成 0 会和「真实空载 / 真实卡死到 0」混淆，污染曲线分析（用户明确反对）。
+      // 跳过本拍后曲线在相邻点间自然连线（断点/缺数），而不是冒出一根假的 0 尖刺。
+      // 注意：命令「成功但输出为空」导致解析为 0（如应用未用 HWUI 渲染时 FPS 0）是真实读数，照常记录。
+      const [memResult, cpuResult, gfxResult] = await Promise.allSettled([
         // 用 /proc/meminfo（瞬时、格式固定、永不超时）取内存。早先用的 `dumpsys meminfo` 很重，
-        // 高负载（如运行游戏）时设备端 dumpsys 会触发服务超时、返回缺少「Used RAM」摘要的部分输出，
-        // 导致内存被解析成 0（命令本身成功，故 CPU/FPS 正常、唯独内存掉 0）。
-        this.execAdb(['-s', deviceId, 'shell', 'cat', '/proc/meminfo'], { timeout: 4000 }),
-        this.execAdb(['-s', deviceId, 'shell', 'top', '-n', '1']),
-        this.execAdb(gfxInfoArgs).catch(() => ({ stdout: '', stderr: '' })),
+        // 高负载（如运行游戏）时设备端 dumpsys 会触发服务超时、返回缺少「Used RAM」摘要的部分输出。
+        this.execAdb(['-s', deviceId, 'shell', 'cat', '/proc/meminfo'], { timeout: 4000, maxBuffer: 1024 * 64 }),
+        this.execAdb(['-s', deviceId, 'shell', 'top', '-n', '1'], { timeout: 5000, maxBuffer: 1024 * 1024 }),
+        this.execAdb(gfxInfoArgs, { timeout: 4000, maxBuffer: 1024 * 1024 * 4 }),
       ]);
 
-      const memoryUsage = this.parseMemoryUsage(memInfo.stdout);
-      const cpuUsage = this.parseCpuUsage(cpuInfo.stdout);
+      const failed = [memResult, cpuResult, gfxResult].find((r) => r.status === 'rejected');
+      if (failed && failed.status === 'rejected') {
+        const reason = failed.reason instanceof Error ? failed.reason.message : String(failed.reason);
+        throw new Error(`Android 采样命令失败，跳过本拍（不编造 0）：${reason}`);
+      }
+
+      const memInfo = memResult.status === 'fulfilled' ? memResult.value.stdout : '';
+      const cpuInfo = cpuResult.status === 'fulfilled' ? cpuResult.value.stdout : '';
+      const gfxInfo = gfxResult.status === 'fulfilled' ? gfxResult.value.stdout : '';
+
+      const memoryUsage = this.parseMemoryUsage(memInfo);
+      const cpuUsage = this.parseCpuUsage(cpuInfo);
 
       return {
         provider: 'android',
         cpuUsage,
         memoryUsage,
-        fps: this.parseGfxInfo(gfxInfo.stdout),
+        fps: this.parseGfxInfo(gfxInfo),
         packageName: foregroundApp.packageName,
         activityName: foregroundApp.activityName,
         androidMetrics: {
@@ -117,13 +143,9 @@ export class AdbRuntimeInspector {
         },
       };
     } catch (error) {
-      logger.error('AdbRuntimeInspector: getAndroidPerformanceMetrics failed:', error);
-      return {
-        provider: 'android',
-        cpuUsage: 0,
-        memoryUsage: 0,
-        fps: 0,
-      };
+      // 不再编造 0 兜底：失败如实上抛，让采集层跳过本拍（曲线断点），避免假 0 误导分析。
+      logger.warn('AdbRuntimeInspector: getAndroidPerformanceMetrics failed（本拍跳过，不编造 0）:', error);
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -376,9 +398,31 @@ export class AdbRuntimeInspector {
     return Number.parseFloat(match?.[1] || '0');
   }
 
+  // 带 TTL 缓存的前台应用解析：采集每秒一拍，但前台应用几乎不变，TTL 内直接复用上次结果，
+  // 把重型 dumpsys 从「每拍一次」降到「每 5 秒一次」——显著降耗电、少超时。
+  private async getForegroundAppContextCached(deviceId: string): Promise<ForegroundAppContext> {
+    const cached = this.foregroundAppCache.get(deviceId);
+    if (cached && Date.now() - cached.at < FOREGROUND_APP_TTL_MS) {
+      return cached.context;
+    }
+    try {
+      const context = await this.getForegroundAppContext(deviceId);
+      // 只缓存解析出包名的有效结果；解析失败时若有旧值则沿用旧值，避免 gfxinfo 丢前台目标。
+      if (context.packageName) {
+        this.foregroundAppCache.set(deviceId, { context, at: Date.now() });
+        return context;
+      }
+      return cached?.context ?? context;
+    } catch (error) {
+      logger.warn('AdbRuntimeInspector: getForegroundAppContextCached failed, reuse last known:', error);
+      return cached?.context ?? {};
+    }
+  }
+
   private async getForegroundAppContext(deviceId: string): Promise<ForegroundAppContext> {
     try {
       const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'window', 'windows'], {
+        timeout: 4000,
         maxBuffer: 1024 * 1024 * 4,
       });
       const fromWindows = this.parseForegroundAppFromWindow(stdout);
@@ -391,6 +435,7 @@ export class AdbRuntimeInspector {
 
     try {
       const { stdout } = await this.execAdb(['-s', deviceId, 'shell', 'dumpsys', 'activity', 'activities'], {
+        timeout: 4000,
         maxBuffer: 1024 * 1024 * 8,
       });
       const activities = this.parseActivityStack(stdout);

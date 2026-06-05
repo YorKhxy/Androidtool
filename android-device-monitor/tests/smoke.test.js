@@ -434,8 +434,9 @@ describe('project smoke checks', () => {
     expect(managerSource).toContain('/proc/meminfo');
     expect(managerSource).toContain('MemAvailable');
     expect(picoSource).toContain("provider: 'pico'");
-    expect(picoSource).toContain("'shell', 'logcat'");
-    expect(picoSource).toContain("'-s', 'PxrMetric'");
+    // PxrMetric 必须「设备端先过滤再 tail 截断」，绝不全量 dump（游戏每帧一条，长会话缓冲达数十 MB，
+    // 全量回传会超 maxBuffer/timeout，导致每拍读取失败、永远退回 Android 采样）。
+    expect(picoSource).toContain('logcat -d -v time -s PxrMetric | tail -n');
     expect(picoSource).not.toContain("'*:S'");
     expect(picoSource).toContain("this.getDeviceProp(deviceId, 'ro.product.manufacturer')");
     expect(picoSource).toContain("'shell', 'getprop', propertyName");
@@ -482,6 +483,34 @@ describe('project smoke checks', () => {
     expect(rendererSource).toContain('muted: true'); // 回退时未就绪指标置灰
     expect(rendererSource).toContain('FrmGpu');
     expect(rendererSource).toContain('ATWGPU');
+  });
+
+  test('pico metrics read via a persistent logcat stream, and failed samples become gaps not zeros', () => {
+    const streamSource = fs.readFileSync(path.join(root, 'src/main/adb/picoMetricsStream.ts'), 'utf-8');
+    const picoSource = fs.readFileSync(path.join(root, 'src/main/adb/picoMetrics.ts'), 'utf-8');
+    const inspectorSource = fs.readFileSync(path.join(root, 'src/main/adb/runtimeInspector.ts'), 'utf-8');
+    const adbManagerSource = fs.readFileSync(path.join(root, 'src/main/adb/ADBManager.ts'), 'utf-8');
+
+    // 常驻流：连续 logcat（-T 1 限制回看）+ 新鲜度窗口 + 空闲看门狗回收，绝不每拍 spawn。
+    expect(streamSource).toContain("'logcat', '-T', '1', '-v', 'time', '-s', 'PxrMetric'");
+    expect(streamSource).toContain('getFreshLine');
+    expect(streamSource).toContain('isWarmingUp');
+    expect(streamSource).toContain('IDLE_TIMEOUT_MS'); // 空闲回收，解耦生命周期
+    expect(streamSource).toContain('stopAll');
+
+    // 读取路径：优先流缓存，预热期一次性兜底，过期/无数据则抛出（交由上层回退/跳过），不返回旧值。
+    expect(picoSource).toContain('this.picoStream.getFreshLine(deviceId, PICO_METRICS_FRESH_MS)');
+    expect(picoSource).toContain('isWarmingUp(deviceId, PICO_METRICS_WARMUP_MS)');
+    expect(picoSource).toContain('readLatestLineOnce');
+
+    // 采集层失败 = 断点：核心取数失败如实上抛，绝不编造 0（误导曲线分析）。
+    expect(inspectorSource).toContain('跳过本拍');
+    expect(inspectorSource).not.toContain('cpuUsage: androidMetrics?.cpuUsage ?? 0');
+
+    // ADBManager 注入 spawn 依赖并在退出时清理常驻流。
+    expect(adbManagerSource).toContain('spawnAdb: async (args) => spawn((await this.resolveAdbBinary()).path, args)');
+    expect(adbManagerSource).toContain('stopChild: (child) => this.stopChildProcess(child)');
+    expect(adbManagerSource).toContain('this.runtimeInspector.stopPicoStreams()');
   });
 
   test('network capture parses request details and renderer shows a request detail panel', () => {
