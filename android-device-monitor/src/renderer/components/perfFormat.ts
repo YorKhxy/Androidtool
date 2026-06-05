@@ -58,9 +58,13 @@ export const buildCaptureMediaUrl = (relativePath: string | undefined) => {
 export const buildSegmentMediaUrl = (sessionId: string, segment: PerformanceCaptureSegment) =>
   buildCaptureMediaUrl(`performance-captures/${sessionId}/video/${segment.fileName}`);
 
-/** Pico 原始双眼 MP4 需在播放时裁单眼；已是单眼（singleEyeVideo）或非 Pico 不裁。 */
+/**
+ * Pico（pico-screenrecord）录的是双眼原图 MP4，回看时一律裁单眼。
+ * 录制端从不产出单眼文件，故判定只认 provider——旧会话即便 meta 里把
+ * singleEyeVideo 误存成 true 也照样裁切。非 Pico 不裁。
+ */
 export const shouldCropCaptureVideo = (session: PerformanceCaptureSession) =>
-  session.provider.startsWith('pico') && !session.singleEyeVideo;
+  session.provider.startsWith('pico');
 
 /** 样本相对会话起点的毫秒数（实时与回看口径一致：capturedAt - startedAt）。 */
 export const sampleElapsedMs = (sample: PerformanceSample, sessionStartedAt: Date) =>

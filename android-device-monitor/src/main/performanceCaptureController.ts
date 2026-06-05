@@ -60,7 +60,9 @@ export class PerformanceCaptureController {
       deviceId,
       deviceSn: this.adb.getDeviceSerial(deviceId),
       provider: this.adb.getCaptureProvider(deviceId),
-      singleEyeVideo: this.adb.isPicoDevice(deviceId),
+      // Pico 的 screenrecord 录的是双眼原图，单眼靠播放时裁切（shouldCropCaptureVideo）。
+      // 录制端从不产出单眼文件，故恒为 false（视频不是单眼）。
+      singleEyeVideo: false,
       packageName: initialMetrics?.packageName,
       activityName: initialMetrics?.activityName,
     });
