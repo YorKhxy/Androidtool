@@ -761,8 +761,11 @@ function SimpleApp() {
       void loadWeakNetShaperStats();
     }, 2500);
     return () => clearInterval(timer);
+    // 依赖用 selectedDevice?.id 而非 selectedDevice 对象：设备监控每次轮询都会生成新的
+    // DeviceInfo 对象（同一台设备、新引用），若依赖对象本身，effect 会被反复重建并清空
+    // weakNetTrafficHistory，导致流量折线图频繁消失重建（闪烁）。只在真正切换设备时重置。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDevice, activeTab]);
+  }, [selectedDevice?.id, activeTab]);
 
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
@@ -1720,11 +1723,9 @@ function SimpleApp() {
         if (hadPrev) {
           setWeakNetTrafficHistory((history) => [...history, { rx: rxRate, tx: txRate, at: now }].slice(-40));
         }
-      } else {
-        weakNetTrafficPrevRef.current = null;
-        setWeakNetTraffic(null);
-        setWeakNetTrafficHistory([]);
       }
+      // 查询失败/无数据：保留上次流量与历史，避免单次瞬时失败把折线图清空重建（闪烁）。
+      // 真正停止/切设备/切 tab 的重置统一由 effect 处理。
     } catch {
       /* 瞬时失败保留上次流量，避免闪烁；真正停止由状态切换/effect 清零 */
     }
