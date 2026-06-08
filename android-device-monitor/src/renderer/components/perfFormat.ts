@@ -96,6 +96,20 @@ export const metricValueOf = (sample: PerformanceSample, key: CaptureMetricKey):
   }
 };
 
+/** 单次采集里某指标的 均值/最高/最低。基于 metricValueOf 口径（mem=MB），
+ *  对 Android 与 Pico 统一用 sample.metrics 字段，不做 provider 分流（fps 已在采样时统一）。
+ *  无有效样本返回 null。 */
+export type MetricStat = { avg: number; max: number; min: number };
+
+export const computeMetricStat = (samples: PerformanceSample[], key: CaptureMetricKey): MetricStat | null => {
+  const values = samples
+    .map((sample) => metricValueOf(sample, key))
+    .filter((value): value is number => value !== undefined && Number.isFinite(value));
+  if (values.length === 0) return null;
+  const sum = values.reduce((acc, value) => acc + value, 0);
+  return { avg: sum / values.length, max: Math.max(...values), min: Math.min(...values) };
+};
+
 /** 单条件求值。'=' 用 0.5 容差（指标多为浮点/整数，严格相等几乎不命中）。 */
 export const evalCondition = (value: number | undefined, op: CaptureFilterOp, threshold: number): boolean => {
   if (value === undefined || !Number.isFinite(value)) return false;

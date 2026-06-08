@@ -3,7 +3,7 @@ import type { DeviceInfo, PerformanceCaptureMarker, PerformanceCaptureSession, P
 import { useCooldown } from '../lib/useCooldown';
 import { CaptureReport } from './CaptureReport';
 import { CaptureHistoryList } from './CaptureHistoryList';
-import { formatClock, formatMemoryMb, METRIC_COLORS } from './perfFormat';
+import { computeMetricStat, formatClock, formatMemoryMb, METRIC_COLORS } from './perfFormat';
 import { Badge, Icon } from './ui';
 
 type PerformancePanelProps = {
@@ -317,6 +317,35 @@ export function PerformancePanel({
           <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--fg-primary)' }}>{isCapturing ? '实时采集' : '采集报告'}</div>
           <div style={{ fontSize: '12px', color: 'var(--fg-tertiary)' }}>{`采样 ${captureSamples.length} 条`}</div>
         </div>
+        {/* 本次采集统计：FPS/CPU/内存 的 均值/最高/最低，始终可见（不随过滤显隐）。Android 与 Pico 统一口径。 */}
+        {captureSamples.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+            {([
+              { key: 'fps', label: 'FPS', color: METRIC_COLORS.fps, unit: '', decimals: 0 },
+              { key: 'cpu', label: 'CPU', color: METRIC_COLORS.cpu, unit: '%', decimals: 1 },
+              { key: 'mem', label: 'MEM', color: METRIC_COLORS.mem, unit: 'MB', decimals: 0 },
+              // GPU 仅 Pico 有值：Android 上 computeMetricStat 返回 null → 该 chip 自动不渲染。
+              { key: 'gpu', label: 'GPU', color: METRIC_COLORS.gpu, unit: '%', decimals: 0 },
+            ] as const).map((item) => {
+              const stat = computeMetricStat(captureSamples, item.key);
+              if (!stat) return null;
+              const fmt = (v: number) => (item.decimals ? v.toFixed(item.decimals) : String(Math.round(v)));
+              return (
+                <div key={item.key} data-tip={`本次采集 ${item.label} 统计（均值 / 最高 / 最低）`} style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-sm)', padding: '6px 11px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '2px', backgroundColor: item.color, flex: 'none' }} />
+                  <span style={{ fontSize: '12px', color: 'var(--fg-secondary)' }}>{item.label}</span>
+                  {([['均', stat.avg], ['高', stat.max], ['低', stat.min]] as const).map(([tag, val]) => (
+                    <span key={tag} style={{ display: 'inline-flex', alignItems: 'baseline', gap: '3px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>{tag}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 600, color: 'var(--fg-primary)', fontVariantNumeric: 'tabular-nums' }}>{fmt(val)}</span>
+                    </span>
+                  ))}
+                  {item.unit && <span style={{ fontSize: '11px', color: 'var(--fg-tertiary)' }}>{item.unit}</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
         <CaptureReport
           session={captureSession}
           samples={captureSamples}

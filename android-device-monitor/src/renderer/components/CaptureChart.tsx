@@ -158,6 +158,17 @@ export function CaptureChart({
     return ordered;
   })();
 
+  // 平均值参考线：每条可见曲线一条同色水平虚线（横线，与过滤圆点/波峰波谷点形态不冲突），右端标「均X」。
+  const averageLines = visibleSeries
+    .map((series) => {
+      const axisMax = series.axis === 'memory' ? memoryAxisMax : leftAxisMax;
+      const vals = samples.map((s) => Number(series.getValue(s))).filter(Number.isFinite);
+      if (vals.length === 0) return null;
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      return { key: series.key, color: series.color, avg, y: yForValue(avg, axisMax) };
+    })
+    .filter((x): x is { key: string; color: string; avg: number; y: number } => x !== null);
+
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
       {samples.length === 0 ? (
@@ -208,6 +219,13 @@ export function CaptureChart({
           ))}
           {visibleSeries.map((series) => (
             <polyline key={series.key} points={buildLine(series)} fill="none" stroke={series.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          ))}
+          {/* 平均值参考线：横向虚线 + 右端「均X」标签，每条可见曲线一条同色。 */}
+          {averageLines.map((a) => (
+            <g key={`${a.key}-avg`}>
+              <line x1={chartPadding.left} y1={a.y} x2={chartPadding.left + plotWidth} y2={a.y} stroke={a.color} strokeWidth="1.5" strokeDasharray="6 4" opacity="0.7" />
+              <text x={chartPadding.left + plotWidth - 4} y={a.y - 4} fill={a.color} fontSize="10" fontWeight="600" textAnchor="end">{`均${Math.round(a.avg)}`}</text>
+            </g>
           ))}
           {/* 波峰 / 波谷：过滤未激活时才显示。已做碰撞避让 + 半透明底片（描边取曲线色），避免数字叠成一团、压在线上难读。 */}
           {peakValleyLabels.map((l) => {
