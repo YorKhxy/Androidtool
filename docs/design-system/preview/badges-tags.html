@@ -1,0 +1,44 @@
+<!-- @dsCard group="Components" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 22px 24px; }
+  .row { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; margin-bottom: 13px; }
+  .row:last-child { margin-bottom: 0; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; height: 22px;
+    padding: 0 9px; border-radius: var(--r-pill); font-size: 12px; font-weight: 500; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .online { background: var(--success-soft); color: var(--success); }
+  .offline { background: var(--danger-soft); color: var(--danger); }
+  .wifi { background: var(--info-soft); color: var(--info); }
+  .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 7px;
+    border-radius: var(--r-xs); font-size: 11px; font-family: var(--font-mono);
+    background: var(--bg-elevated); color: var(--fg-secondary); border: 1px solid var(--border-default); }
+  .pill-num { background: var(--accent); color: var(--fg-on-accent); border-radius: var(--r-pill);
+    font-size: 11px; font-weight: 600; padding: 1px 7px; }
+  [data-lucide] { width: 13px; height: 13px; }
+</style>
+</head>
+<body class="adm">
+  <div class="row">
+    <span class="badge online"><span class="dot" style="background:var(--success)"></span>已连接</span>
+    <span class="badge offline"><span class="dot" style="background:var(--danger)"></span>已断开</span>
+    <span class="badge wifi"><i data-lucide="wifi"></i>WiFi</span>
+    <span class="badge" style="background:var(--bg-elevated);color:var(--fg-secondary)"><i data-lucide="usb"></i>USB</span>
+  </div>
+  <div class="row">
+    <span class="tag">Android 14</span>
+    <span class="tag">Pixel 7</span>
+    <span class="tag">arm64-v8a</span>
+    <span class="tag">api 34</span>
+    <span class="tag">2400×1080</span>
+    <span class="pill-num">3</span>
+  </div>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

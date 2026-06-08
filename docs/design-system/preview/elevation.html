@@ -1,0 +1,22 @@
+<!-- @dsCard group="Spacing" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 26px 24px; display: flex; gap: 20px; align-items: center; }
+  .e { flex: 1; background: var(--bg-panel); border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md); height: 76px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 6px; }
+  .nm { color: var(--fg-primary); font-size: 12px; font-weight: 600; }
+  .d { font-family: var(--font-mono); font-size: 10px; color: var(--fg-tertiary); }
+</style>
+</head>
+<body class="adm">
+  <div class="e" style="box-shadow:none"><div class="nm">card · 无阴影</div><div class="d">border only</div></div>
+  <div class="e" style="box-shadow:var(--sh-md)"><div class="nm">sh-md</div><div class="d">0 6 18 / .40</div></div>
+  <div class="e" style="box-shadow:var(--sh-pop)"><div class="nm">popover</div><div class="d">0 10 28 / .46</div></div>
+  <div class="e" style="box-shadow:var(--sh-modal);background:var(--bg-elevated)"><div class="nm">modal</div><div class="d">0 24 64 / .56</div></div>
+</body>
+</html>

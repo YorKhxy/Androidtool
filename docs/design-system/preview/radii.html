@@ -1,0 +1,23 @@
+<!-- @dsCard group="Spacing" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 24px; display: flex; gap: 18px; align-items: flex-end; }
+  .item { text-align: center; }
+  .box { width: 84px; height: 60px; background: var(--bg-elevated);
+    border: 1px solid var(--border-default); }
+  .nm { font-family: var(--font-mono); font-size: 11px; color: var(--fg-secondary); margin-top: 9px; }
+  .nm b { color: var(--fg-primary); }
+</style>
+</head>
+<body class="adm">
+  <div class="item"><div class="box" style="border-radius:3px"></div><div class="nm"><b>xs</b> 3px · tag</div></div>
+  <div class="item"><div class="box" style="border-radius:5px"></div><div class="nm"><b>sm</b> 5px · button</div></div>
+  <div class="item"><div class="box" style="border-radius:8px"></div><div class="nm"><b>md</b> 8px · card</div></div>
+  <div class="item"><div class="box" style="border-radius:12px"></div><div class="nm"><b>lg</b> 12px · modal</div></div>
+  <div class="item"><div class="box" style="border-radius:999px;width:60px"></div><div class="nm"><b>pill</b> · badge</div></div>
+</body>
+</html>

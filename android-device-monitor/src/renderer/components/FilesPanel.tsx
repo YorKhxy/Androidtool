@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { DeviceInfo, DeviceFileEntry, TransferResumeBatch } from '@/shared/types';
 import { hasElectronAPI } from '@/renderer/lib/electronApi';
 import { getTransferState, subscribeTransfer, startUpload, startPullFiles, startResumeTransfer } from '@/renderer/lib/fileTransferManager';
+import { Icon, Badge } from './ui';
 
 interface FilesPanelProps {
   selectedDevice: DeviceInfo | null;
@@ -365,8 +366,12 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
 
   if (!selectedDevice) {
     return (
-      <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
-        请选择一个设备后再浏览文件
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0, width: '100%' }}>
+        <div className="empty">
+          <Icon name="folder" size={40} color="var(--gold)" />
+          <div className="et">未选择设备</div>
+          <div className="es">请选择一个设备后再浏览文件</div>
+        </div>
       </div>
     );
   }
@@ -380,14 +385,14 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
 
   return (
     <div
-      style={{ padding: '16px', color: '#e2e8f0', position: 'relative', display: 'flex', flexDirection: 'column', maxHeight: '100%', minHeight: 0, boxSizing: 'border-box', width: '100%' }}
+      style={{ padding: '16px', color: 'var(--fg-primary)', position: 'relative', display: 'flex', flexDirection: 'column', maxHeight: '100%', minHeight: 0, boxSizing: 'border-box', width: '100%' }}
       onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
       onDragLeave={(e) => { e.preventDefault(); if (e.currentTarget === e.target) setDragOver(false); }}
       onDrop={handleDrop}
     >
       {dragOver && (
-        <div style={{ position: 'absolute', inset: '8px', border: '2px dashed #4a90d9', borderRadius: '10px', backgroundColor: 'rgba(74,144,217,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, pointerEvents: 'none' }}>
-          <span style={{ fontSize: '16px', color: '#93c5fd', fontWeight: 600 }}>松开即上传到 {currentPath}</span>
+        <div style={{ position: 'absolute', inset: '8px', border: '2px dashed var(--accent)', borderRadius: 'var(--r-md)', backgroundColor: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, pointerEvents: 'none' }}>
+          <span style={{ fontSize: '16px', color: 'var(--accent)', fontWeight: 600 }}>松开即上传到 {currentPath}</span>
         </div>
       )}
       {/* 快捷入口 */}
@@ -396,15 +401,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
           <button
             key={link.path}
             onClick={() => loadDir(link.path)}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: currentPath === link.path ? '#4a90d9' : '#353550',
-              border: 'none',
-              borderRadius: '6px',
-              color: currentPath === link.path ? '#fff' : '#cbd5e1',
-              cursor: 'pointer',
-              fontSize: '13px',
-            }}
+            className={'btn sm ' + (currentPath === link.path ? 'primary' : 'secondary')}
           >
             {link.label}
           </button>
@@ -416,42 +413,28 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         <button
           onClick={() => loadDir(parentPath(currentPath))}
           disabled={!canGoUp || loading}
-          style={{
-            padding: '4px 10px',
-            backgroundColor: '#353550',
-            border: 'none',
-            borderRadius: '6px',
-            color: !canGoUp ? '#64748b' : '#cbd5e1',
-            cursor: !canGoUp || loading ? 'not-allowed' : 'pointer',
-            fontSize: '12px',
-          }}
+          className="btn sm secondary"
         >
-          ↑ 上一级
+          <Icon name="corner-left-up" size={14} />
+          上一级
         </button>
         <button
           onClick={() => loadDir(currentPath)}
           disabled={loading}
-          title="重新加载当前目录"
-          style={{
-            padding: '4px 10px',
-            backgroundColor: '#353550',
-            border: 'none',
-            borderRadius: '6px',
-            color: '#cbd5e1',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            fontSize: '12px',
-            opacity: loading ? 0.6 : 1,
-          }}
+          data-tip="重新加载当前目录"
+          className="btn sm secondary"
         >
-          {loading ? '刷新中…' : '🔄 刷新'}
+          <Icon name="refresh-cw" size={14} />
+          {loading ? '刷新中…' : '刷新'}
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexWrap: 'wrap', fontSize: '13px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', fontSize: '12.5px', fontFamily: 'var(--font-mono)', marginLeft: '2px' }}>
+          <Icon name="smartphone" size={14} color="var(--fg-tertiary)" />
           {crumbs.map((crumb, idx) => (
             <React.Fragment key={crumb.path}>
-              {idx > 0 && <span style={{ color: '#475569' }}>/</span>}
+              {idx > 0 && <Icon name="chevron-right" size={13} color="var(--fg-disabled)" />}
               <button
                 onClick={() => loadDir(crumb.path)}
-                style={{ background: 'none', border: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: '13px', padding: '2px 4px' }}
+                style={{ background: 'none', border: 'none', color: idx === crumbs.length - 1 ? 'var(--fg-primary)' : 'var(--fg-tertiary)', cursor: 'pointer', fontSize: '12.5px', fontFamily: 'var(--font-mono)', padding: '2px 2px' }}
               >
                 {crumb.label}
               </button>
@@ -460,41 +443,48 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         </div>
         <button
           onClick={() => { setCreatingFolder((v) => !v); setNewFolderName(''); }}
-          style={{ marginLeft: 'auto', padding: '4px 12px', backgroundColor: creatingFolder ? '#4a90d9' : '#353550', border: 'none', borderRadius: '6px', color: creatingFolder ? '#fff' : '#cbd5e1', cursor: 'pointer', fontSize: '12px' }}
+          className={'btn sm ' + (creatingFolder ? 'primary' : 'secondary')}
+          style={{ marginLeft: 'auto' }}
         >
-          📁+ 新建文件夹
+          <Icon name="folder-plus" size={14} color={creatingFolder ? undefined : 'var(--gold)'} />
+          新建文件夹
         </button>
         <button
           onClick={handleUploadClick}
           disabled={Boolean(upload)}
-          style={{ padding: '4px 12px', backgroundColor: '#4a90d9', border: 'none', borderRadius: '6px', color: '#fff', cursor: upload ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: upload ? 0.6 : 1 }}
+          className="btn sm primary"
         >
-          ⬆ 上传文件
+          <Icon name="upload" size={14} />
+          上传文件
         </button>
       </div>
 
       {/* 新建文件夹输入行 */}
       {creatingFolder && (
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
-          <input
-            autoFocus
-            value={newFolderName}
-            onChange={(e) => setNewFolderName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleCreateFolder();
-              else if (e.key === 'Escape') { setCreatingFolder(false); setNewFolderName(''); }
-            }}
-            placeholder={`在 ${currentPath} 下新建文件夹的名称`}
-            style={{ flex: 1, minWidth: 0, padding: '6px 10px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', color: '#e5e7eb', fontSize: '13px', outline: 'none' }}
-          />
+          <label className="field" style={{ flex: 1, minWidth: 0 }}>
+            <Icon name="folder-plus" size={15} color="var(--gold)" />
+            <input
+              autoFocus
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreateFolder();
+                else if (e.key === 'Escape') { setCreatingFolder(false); setNewFolderName(''); }
+              }}
+              placeholder={`在 ${currentPath} 下新建文件夹的名称`}
+            />
+          </label>
           <button
             onClick={handleCreateFolder}
             disabled={creatingFolderBusy}
-            style={{ flexShrink: 0, padding: '6px 14px', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: creatingFolderBusy ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: creatingFolderBusy ? 0.6 : 1 }}
+            className="btn sm outline o-green"
+            style={{ flexShrink: 0 }}
           >{creatingFolderBusy ? '创建中…' : '创建'}</button>
           <button
             onClick={() => { setCreatingFolder(false); setNewFolderName(''); }}
-            style={{ flexShrink: 0, padding: '6px 12px', backgroundColor: '#475569', border: 'none', borderRadius: '6px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+            className="btn sm secondary"
+            style={{ flexShrink: 0 }}
           >取消</button>
         </div>
       )}
@@ -504,33 +494,34 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       {resumeBatches.map((batch) => {
         const busy = resumeBusyBatchId === batch.batchId;
         const isUpload = batch.direction === 'upload';
-        const accent = isUpload ? '#3b82f6' : '#14b8a6'; // 上传蓝 / 下载青
-        const badgeText = isUpload ? '↑ 上传到设备' : '↓ 从设备下载';
+        const accent = isUpload ? 'var(--accent)' : 'var(--info)'; // 上传蓝 / 下载青
         return (
-          <div key={batch.batchId} style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#3a2e12', border: '1px solid #92710a', borderLeft: `4px solid ${accent}`, borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div key={batch.batchId} className="subpanel" style={{ marginBottom: '12px', padding: '10px 12px', borderLeft: `4px solid ${accent}`, display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
-                <span style={{ flexShrink: 0, fontSize: '11px', fontWeight: 700, color: '#fff', backgroundColor: accent, padding: '1px 8px', borderRadius: '10px', whiteSpace: 'nowrap' }}>
-                  {badgeText}
-                </span>
-                <span style={{ fontSize: '13px', color: '#fcd34d', fontWeight: 600 }}>
+                <Badge tone={isUpload ? 'info' : 'success'} icon={isUpload ? 'upload' : 'download'}>
+                  {isUpload ? '上传到设备' : '从设备下载'}
+                </Badge>
+                <span style={{ fontSize: '13px', color: 'var(--warning)', fontWeight: 600 }}>
                   上次有 {batch.remaining} 个文件没传完
                 </span>
               </div>
-              <div style={{ fontSize: '11px', color: '#d6b35f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {batch.sampleNames.join('、')}{batch.remaining > batch.sampleNames.length ? ' …' : ''}
               </div>
             </div>
             <button
               onClick={() => handleDiscardBatch(batch)}
               disabled={busy}
-              style={{ flexShrink: 0, padding: '4px 12px', backgroundColor: 'transparent', border: '1px solid #6b7280', borderRadius: '6px', color: '#d1d5db', cursor: busy ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+              className="btn sm secondary"
+              style={{ flexShrink: 0 }}
             >丢弃</button>
             <button
               onClick={() => handleResumeBatch(batch)}
               disabled={busy || transferBusy}
-              title={transferBusy ? '有传输进行中，稍候再继续' : ''}
-              style={{ flexShrink: 0, padding: '4px 12px', backgroundColor: busy || transferBusy ? '#374151' : accent, border: 'none', borderRadius: '6px', color: '#fff', cursor: busy || transferBusy ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+              data-tip={transferBusy ? '有传输进行中，稍候再继续' : ''}
+              className="btn sm primary"
+              style={{ flexShrink: 0 }}
             >继续</button>
           </div>
         );
@@ -540,29 +531,30 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       {upload && (
         <div
           onClick={() => { if (uploadDir) loadDir(uploadDir); }}
-          title={uploadDir ? `点击前往：${uploadDir}` : undefined}
-          style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#1e293b', borderRadius: '8px', cursor: uploadDir ? 'pointer' : 'default' }}
+          data-tip={uploadDir ? `点击前往：${uploadDir}` : undefined}
+          className="subpanel"
+          style={{ marginBottom: '12px', padding: '10px 12px', cursor: uploadDir ? 'pointer' : 'default' }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--fg-secondary)', marginBottom: '6px' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
               {upload.status === 'error' ? '上传失败：' : '上传中：'}{upload.fileName || '准备中…'}
               {upload.total > 1 && ` (${upload.index + 1}/${upload.total})`}
             </span>
-            <span>{upload.percent}%</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{upload.percent}%</span>
           </div>
           {uploadDir && (
-            <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={uploadDir}>
-              上传到：{uploadDir}　<span style={{ color: '#60a5fa' }}>（点击前往）</span>
+            <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }} data-tip={uploadDir}>
+              上传到：{uploadDir}　<span style={{ color: 'var(--accent)' }}>（点击前往）</span>
             </div>
           )}
-          <div style={{ height: '6px', backgroundColor: '#334155', borderRadius: '3px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${upload.percent}%`, backgroundColor: upload.status === 'error' ? '#ef4444' : '#4a90d9', transition: 'width 240ms ease' }} />
+          <div style={{ height: '6px', backgroundColor: 'var(--bg-active)', borderRadius: '3px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${upload.percent}%`, backgroundColor: upload.status === 'error' ? 'var(--danger)' : 'var(--accent)', transition: 'width 240ms ease' }} />
           </div>
         </div>
       )}
 
       {notice && (
-        <div style={{ marginBottom: '12px', padding: '8px 12px', backgroundColor: noticeKind === 'warn' ? '#422006' : '#14532d', color: noticeKind === 'warn' ? '#fcd34d' : '#86efac', borderRadius: '6px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+        <div style={{ marginBottom: '12px', padding: '8px 12px', backgroundColor: noticeKind === 'warn' ? 'var(--warning-soft)' : 'var(--success-soft)', color: noticeKind === 'warn' ? 'var(--warning)' : 'var(--success)', borderRadius: 'var(--r-sm)', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
           <span style={{ wordBreak: 'break-all' }}>{notice}</span>
           {lastDownloadPath && (
             <button
@@ -576,65 +568,77 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
                   : await api.showItemInFolder(lastDownloadPath);
                 if (!result.success && result.error) onError(result.error);
               }}
-              style={{ flexShrink: 0, whiteSpace: 'nowrap', padding: '4px 12px', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontSize: '12px' }}
-            >📂 打开下载目录</button>
+              className="btn sm outline o-green"
+              style={{ flexShrink: 0 }}
+            >
+              <Icon name="folder-open" size={14} />
+              打开下载目录</button>
           )}
         </div>
       )}
 
       {/* 文件名搜索 */}
-      <div style={{ marginBottom: '12px', position: 'relative' }}>
+      <label className="field" style={{ marginBottom: '12px' }}>
+        <Icon name="search" size={15} />
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={'搜索当前目录文件名…'}
-          style={{ width: '100%', boxSizing: 'border-box', padding: '8px 32px 8px 12px', backgroundColor: '#1f1f33', border: '1px solid #353550', borderRadius: '6px', color: '#e5e7eb', fontSize: '13px', outline: 'none' }}
         />
         {search && (
           <button
             onClick={() => setSearch('')}
-            style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '14px', lineHeight: 1 }}
-          >×</button>
+            style={{ flexShrink: 0, background: 'none', border: 'none', color: 'var(--fg-tertiary)', cursor: 'pointer', fontSize: '14px', lineHeight: 1, display: 'flex', alignItems: 'center' }}
+          >
+            <Icon name="x" size={15} />
+          </button>
         )}
-      </div>
+      </label>
 
       {/* 批量操作栏：选中文件后出现，支持批量下载与批量删除（删除带二次确认） */}
       {selectedPaths.size > 0 && (
-        <div style={{ marginBottom: '12px', padding: '8px 12px', backgroundColor: '#1e293b', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-          <span style={{ fontSize: '13px', color: '#cbd5e1' }}>已选中 {selectedPaths.size} 个文件</span>
+        <div className="subpanel" style={{ marginBottom: '12px', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+          <span style={{ fontSize: '13px', color: 'var(--fg-secondary)' }}>已选中 {selectedPaths.size} 个文件</span>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               onClick={() => { setConfirmBatchDelete(false); setSelectedPaths(new Set()); }}
               disabled={Boolean(pull) || batchDeleting}
-              style={{ padding: '4px 12px', backgroundColor: '#475569', border: 'none', borderRadius: '6px', color: '#e2e8f0', cursor: (pull || batchDeleting) ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: (pull || batchDeleting) ? 0.6 : 1 }}
+              className="btn sm secondary"
             >清空</button>
             <button
               onClick={downloadSelected}
               disabled={Boolean(pull) || batchDeleting}
-              style={{ padding: '4px 12px', backgroundColor: '#16a34a', border: 'none', borderRadius: '6px', color: '#fff', cursor: (pull || batchDeleting) ? 'not-allowed' : 'pointer', fontSize: '12px', whiteSpace: 'nowrap', opacity: (pull || batchDeleting) ? 0.6 : 1 }}
-            >⬇ 下载选中 ({selectedPaths.size})</button>
+              className="btn sm outline o-green"
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              <Icon name="download" size={14} />
+              下载选中 ({selectedPaths.size})</button>
             {confirmBatchDelete ? (
               <>
                 <button
                   onClick={deleteSelected}
                   disabled={transferBusy || batchDeleting}
-                  title={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
-                  style={{ padding: '4px 12px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', color: '#fff', cursor: (transferBusy || batchDeleting) ? 'not-allowed' : 'pointer', fontSize: '12px', whiteSpace: 'nowrap', opacity: (transferBusy || batchDeleting) ? 0.6 : 1 }}
+                  data-tip={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
+                  className="btn sm primary"
+                  style={{ whiteSpace: 'nowrap', backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}
                 >{batchDeleting ? '删除中…' : `确认删除 ${selectedPaths.size} 项`}</button>
                 <button
                   onClick={() => setConfirmBatchDelete(false)}
                   disabled={batchDeleting}
-                  style={{ padding: '4px 12px', backgroundColor: '#475569', border: 'none', borderRadius: '6px', color: '#e2e8f0', cursor: batchDeleting ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+                  className="btn sm secondary"
                 >取消</button>
               </>
             ) : (
               <button
                 onClick={() => setConfirmBatchDelete(true)}
                 disabled={transferBusy || batchDeleting}
-                title={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
-                style={{ padding: '4px 12px', backgroundColor: '#7f1d1d', border: 'none', borderRadius: '6px', color: '#fecaca', cursor: (transferBusy || batchDeleting) ? 'not-allowed' : 'pointer', fontSize: '12px', whiteSpace: 'nowrap', opacity: (transferBusy || batchDeleting) ? 0.6 : 1 }}
-              >🗑 删除选中 ({selectedPaths.size})</button>
+                data-tip={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
+                className="btn sm outline o-red"
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                <Icon name="trash-2" size={14} />
+                删除选中 ({selectedPaths.size})</button>
             )}
           </div>
         </div>
@@ -644,32 +648,33 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
       {pull && (
         <div
           onClick={() => { if (pullDir) loadDir(pullDir); }}
-          title={pullDir ? `点击前往：${pullDir}` : undefined}
-          style={{ marginBottom: '12px', padding: '10px 12px', backgroundColor: '#10241c', border: '1px solid #14532d', borderRadius: '8px', cursor: pullDir ? 'pointer' : 'default' }}
+          data-tip={pullDir ? `点击前往：${pullDir}` : undefined}
+          className="subpanel"
+          style={{ marginBottom: '12px', padding: '10px 12px', cursor: pullDir ? 'pointer' : 'default' }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#bbf7d0', marginBottom: '6px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--fg-secondary)', marginBottom: '6px' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
               {pull.status === 'error' ? '下载失败：' : '下载中：'}{pull.fileName || '准备中…'} ({pull.index + 1}/{pull.total})
             </span>
-            <span>{Math.round(((pull.index + (pull.status === 'done' ? 1 : 0)) / pull.total) * 100)}%</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{Math.round(((pull.index + (pull.status === 'done' ? 1 : 0)) / pull.total) * 100)}%</span>
           </div>
           {pullDir && (
-            <div style={{ fontSize: '11px', color: '#86a795', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={pullDir}>
-              来自：{pullDir}　<span style={{ color: '#4ade80' }}>（点击前往）</span>
+            <div style={{ fontSize: '11px', color: 'var(--fg-tertiary)', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }} data-tip={pullDir}>
+              来自：{pullDir}　<span style={{ color: 'var(--success)' }}>（点击前往）</span>
             </div>
           )}
-          <div style={{ height: '6px', backgroundColor: '#0b3a26', borderRadius: '3px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${Math.round(((pull.index + (pull.status === 'done' ? 1 : 0)) / pull.total) * 100)}%`, backgroundColor: '#22c55e', transition: 'width 240ms ease' }} />
+          <div style={{ height: '6px', backgroundColor: 'var(--bg-active)', borderRadius: '3px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${Math.round(((pull.index + (pull.status === 'done' ? 1 : 0)) / pull.total) * 100)}%`, backgroundColor: 'var(--success)', transition: 'width 240ms ease' }} />
           </div>
         </div>
       )}
 
       {/* 文件列表（内容超高时仅此区域滚动，上方工具区固定；内容少时按内容高度贴合） */}
-      <div style={{ border: '1px solid #1f2937', borderRadius: '8px', overflow: 'auto', flex: '0 1 auto', minHeight: 0 }}>
-        <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'grid', gridTemplateColumns: '32px 1fr 80px 115px 200px', backgroundColor: '#1f2937', color: '#94a3b8', fontSize: '12px', fontWeight: 700, padding: '8px 12px', alignItems: 'center' }}>
+      <div className="scroll" style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-md)', flex: '0 1 auto', minHeight: 0 }}>
+        <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'grid', gridTemplateColumns: '32px 1fr 80px 115px 200px', backgroundColor: 'var(--bg-elevated)', color: 'var(--fg-tertiary)', fontSize: '12px', fontWeight: 700, padding: '8px 12px', alignItems: 'center', borderBottom: '1px solid var(--border-subtle)' }}>
           <input
             type="checkbox"
-            title="全选/取消当前列表中的文件"
+            data-tip="全选/取消当前列表中的文件"
             checked={visibleEntries.filter((e) => !e.isDir).length > 0 && visibleEntries.filter((e) => !e.isDir).every((e) => selectedPaths.has(e.path))}
             onChange={(e) => {
               const fileEntries = visibleEntries.filter((en) => !en.isDir);
@@ -688,11 +693,11 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         </div>
 
         {loading ? (
-          <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>加载中…</div>
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: '13px' }}>加载中…</div>
         ) : entries.length === 0 ? (
-          <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>此目录为空</div>
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: '13px' }}>此目录为空</div>
         ) : visibleEntries.length === 0 ? (
-          <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>没有匹配「{search.trim()}」的文件</div>
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: '13px' }}>没有匹配「{search.trim()}」的文件</div>
         ) : (
           visibleEntries.map((entry) => {
             // 当前正在上传的就是这一项（同目录 + 同文件名）时，禁止下载，避免下到半成品
@@ -702,12 +707,13 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
             return (
             <div
               key={entry.path}
+              className="app-row"
               style={{
                 display: 'grid',
                 gridTemplateColumns: '32px 1fr 80px 115px 200px',
                 alignItems: 'center',
                 padding: '8px 12px',
-                borderTop: '1px solid #1f2937',
+                borderTop: '1px solid var(--border-subtle)',
                 fontSize: '13px',
               }}
             >
@@ -723,34 +729,32 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
               <span
                 onClick={() => handleEntryClick(entry)}
                 style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
                   cursor: entry.isDir || entry.isSymlink ? 'pointer' : 'default',
-                  color: entry.isDir || entry.isSymlink ? '#93c5fd' : '#e2e8f0',
+                  color: entry.isDir || entry.isSymlink ? 'var(--fg-primary)' : 'var(--fg-primary)',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                 }}
-                title={entry.name}
+                data-tip={entry.name}
               >
-                {entry.isDir ? '📁 ' : entry.isSymlink ? '🔗 ' : '📄 '}
-                {entry.name}
+                <Icon
+                  name={entry.isDir ? 'folder' : entry.isSymlink ? 'link' : 'file'}
+                  size={16}
+                  color={entry.isDir ? 'var(--gold)' : entry.isSymlink ? 'var(--info)' : 'var(--fg-secondary)'}
+                />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{entry.name}</span>
               </span>
-              <span style={{ textAlign: 'right', color: '#94a3b8' }}>{entry.isDir ? '--' : formatSize(entry.size)}</span>
-              <span style={{ textAlign: 'right', color: '#94a3b8' }}>{entry.mtime}</span>
+              <span style={{ textAlign: 'right', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{entry.isDir ? '--' : formatSize(entry.size)}</span>
+              <span style={{ textAlign: 'right', color: 'var(--fg-tertiary)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{entry.mtime}</span>
               <span style={{ textAlign: 'right', display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
                 <button
                   onClick={() => downloadOne(entry)}
                   disabled={transferBusy}
-                  title={uploadingThisEntry ? '该文件正在上传，暂不可下载' : transferBusy ? '传输进行中，暂不可下载' : undefined}
-                  style={{
-                    padding: '3px 10px',
-                    backgroundColor: '#353550',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#86efac',
-                    cursor: transferBusy ? 'not-allowed' : 'pointer',
-                    fontSize: '12px',
-                    opacity: transferBusy ? 0.6 : 1,
-                  }}
+                  data-tip={uploadingThisEntry ? '该文件正在上传，暂不可下载' : transferBusy ? '传输进行中，暂不可下载' : undefined}
+                  className="btn sm outline o-green"
                 >
                   {downloadingThisEntry ? '下载中…' : uploadingThisEntry ? '上传中…' : '下载'}
                 </button>
@@ -759,19 +763,20 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
                     <button
                       onClick={() => doDelete(entry)}
                       disabled={transferBusy}
-                      style={{ padding: '3px 8px', backgroundColor: '#ef4444', border: 'none', borderRadius: '4px', color: '#fff', cursor: transferBusy ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: transferBusy ? 0.6 : 1 }}
+                      className="btn sm primary"
+                      style={{ backgroundColor: 'var(--danger)', borderColor: 'var(--danger)' }}
                     >确认删除</button>
                     <button
                       onClick={() => setConfirmDeletePath(null)}
-                      style={{ padding: '3px 8px', backgroundColor: '#475569', border: 'none', borderRadius: '4px', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' }}
+                      className="btn sm secondary"
                     >取消</button>
                   </>
                 ) : (
                   <button
                     onClick={() => setConfirmDeletePath(entry.path)}
                     disabled={deletingPath === entry.path || transferBusy}
-                    title={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
-                    style={{ padding: '3px 10px', backgroundColor: '#353550', border: 'none', borderRadius: '4px', color: '#fca5a5', cursor: (deletingPath === entry.path || transferBusy) ? 'not-allowed' : 'pointer', fontSize: '12px', opacity: (deletingPath === entry.path || transferBusy) ? 0.6 : 1 }}
+                    data-tip={transferBusy ? '文件传输进行中，暂时不能删除' : undefined}
+                    className="btn sm outline o-red"
                   >{deletingPath === entry.path ? '删除中…' : '删除'}</button>
                 )}
               </span>
@@ -781,7 +786,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         )}
       </div>
 
-      <div style={{ marginTop: '10px', fontSize: '11px', color: '#64748b', flexShrink: 0 }}>
+      <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--fg-tertiary)', flexShrink: 0 }}>
         提示：照片/录像/下载等公共存储免 root 可访问；应用私有数据（/data/data）需要 root，访问受限时会提示。
       </div>
     </div>

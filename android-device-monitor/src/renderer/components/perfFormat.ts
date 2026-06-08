@@ -19,12 +19,13 @@ export const METRIC_LABELS: Record<CaptureMetricKey, string> = {
 };
 
 // 每个指标的曲线颜色：曲线、过滤标记、过滤面板色块共用一处，保证「同一参数同一颜色」。
-// 配色与工具深紫靛色系协调：FPS 取主紫调，其余在深底上清晰可辨且不刺眼。
+// 全部走 design token（曲线/卡片/浮层等均为 CSS 颜色上下文，可直接用 var()）：
+// FPS=success 绿、CPU=info 蓝、MEM=purple 紫，GPU 用 gold 以与三者区分。
 export const METRIC_COLORS: Record<CaptureMetricKey, string> = {
-  fps: '#a78bfa',
-  cpu: '#38bdf8',
-  mem: '#34d399',
-  gpu: '#f472b6',
+  fps: 'var(--chart-fps)',
+  cpu: 'var(--chart-cpu)',
+  mem: 'var(--chart-mem)',
+  gpu: 'var(--gold)',
 };
 
 // 性能采集报告与指标卡共用的格式化 / 取值小工具。集中放一处，避免 PerformancePanel

@@ -2,13 +2,13 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { PerformanceCaptureSession, PerformanceSample } from '../../shared/types';
 import { formatMemoryMb, getGpuValue, METRIC_COLORS, sampleElapsedMs, type CaptureMetricKey } from './perfFormat';
 
-// 与工具深紫靛色系协调的图表主题（替代原 slate 配色，统一观感）。
+// 图表主题统一走 design token（SVG 的 fill/stroke/background 均接受 var()）。
 const THEME = {
-  bg: '#1b1b30',
-  grid: '#2c2c46',
-  axis: '#3f3f5e',
-  axisText: '#8b8ba7',
-  playhead: '#c4b5fd',
+  bg: 'var(--bg-mirror)',
+  grid: 'var(--chart-grid)',
+  axis: 'var(--border-default)',
+  axisText: 'var(--fg-tertiary)',
+  playhead: 'var(--accent)',
 };
 
 const chartPadding = { left: 50, right: 70, top: 22, bottom: 36 };
@@ -161,7 +161,7 @@ export function CaptureChart({
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
       {samples.length === 0 ? (
-        <div style={{ width: '100%', height: '100%', background: THEME.bg, borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: '13px' }}>
+        <div style={{ width: '100%', height: '100%', background: THEME.bg, borderRadius: 'var(--r-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--fg-tertiary)', fontSize: '13px' }}>
           开始采集后，这里会实时记录本次采集的指标曲线。
         </div>
       ) : (
@@ -180,7 +180,7 @@ export function CaptureChart({
           }}
           onPointerUp={() => { scrubbingRef.current = false; }}
           onMouseLeave={() => setHoverPoint(null)}
-          style={{ width: '100%', height: '100%', display: 'block', background: THEME.bg, borderRadius: '10px', cursor: onSeekToMs ? 'col-resize' : 'default', touchAction: 'none' }}
+          style={{ width: '100%', height: '100%', display: 'block', background: THEME.bg, borderRadius: 'var(--r-md)', cursor: onSeekToMs ? 'col-resize' : 'default', touchAction: 'none' }}
         >
           {percentTicks.map((tick) => {
             const y = yForValue(tick, leftAxisMax);
@@ -215,7 +215,7 @@ export function CaptureChart({
             return (
               <g key={l.key}>
                 <circle cx={l.pointX} cy={l.pointY} r="2.5" fill={l.color} />
-                <rect x={l.pointX - chipW / 2} y={l.labelY - 10} width={chipW} height={14} rx="3.5" fill="rgba(15,16,32,0.74)" stroke={l.color} strokeOpacity={0.35} strokeWidth={0.75} />
+                <rect x={l.pointX - chipW / 2} y={l.labelY - 10} width={chipW} height={14} rx="3.5" fill="var(--bg-elevated)" stroke={l.color} strokeOpacity={0.35} strokeWidth={0.75} />
                 <text x={l.pointX} y={l.labelY} fill={l.color} fontSize="10" fontWeight="600" textAnchor="middle">{l.text}</text>
               </g>
             );
@@ -253,15 +253,15 @@ export function CaptureChart({
               <g key={series.key} onPointerDown={(e) => { e.stopPropagation(); onToggleSeries(series.key); }} style={{ cursor: 'pointer' }} opacity={visible ? 1 : 0.4}>
                 <rect x={gx - 2} y={height - 21} width="88" height="18" fill="transparent" />
                 <rect x={gx} y={height - 18} width="10" height="10" fill={series.color} rx="2" />
-                <text x={gx + 14} y={height - 9} fill="#cbd5e1" fontSize="11" textDecoration={visible ? 'none' : 'line-through'}>{series.label}</text>
+                <text x={gx + 14} y={height - 9} fill="var(--fg-secondary)" fontSize="11" textDecoration={visible ? 'none' : 'line-through'}>{series.label}</text>
               </g>
             );
           })}
         </svg>
       )}
       {hoverPoint && (
-        <div style={{ position: 'absolute', left: `${hoverPoint.x}px`, top: `${hoverPoint.y}px`, backgroundColor: THEME.bg, border: `1px solid ${THEME.axis}`, borderRadius: '8px', padding: '8px 10px', boxShadow: '0 12px 30px rgba(0,0,0,0.4)', pointerEvents: 'none', zIndex: 1 }}>
-          <div style={{ color: '#fff', fontSize: '12px', marginBottom: '4px' }}>{new Date(hoverPoint.sample.capturedAt).toLocaleString('zh-CN', { hour12: false })}</div>
+        <div style={{ position: 'absolute', left: `${hoverPoint.x}px`, top: `${hoverPoint.y}px`, backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 'var(--r-sm)', padding: '8px 10px', boxShadow: 'var(--sh-pop)', pointerEvents: 'none', zIndex: 1 }}>
+          <div style={{ color: 'var(--fg-primary)', fontSize: '12px', marginBottom: '4px' }}>{new Date(hoverPoint.sample.capturedAt).toLocaleString('zh-CN', { hour12: false })}</div>
           <div style={{ color: METRIC_COLORS.fps, fontSize: '12px' }}>{`FPS ${hoverPoint.sample.metrics.fps}`}</div>
           <div style={{ color: METRIC_COLORS.cpu, fontSize: '12px' }}>{`CPU ${hoverPoint.sample.metrics.cpuUsage.toFixed(1)}%`}</div>
           <div style={{ color: METRIC_COLORS.mem, fontSize: '12px' }}>{`MEM ${formatMemoryMb(hoverPoint.sample.metrics.memoryUsage)}MB`}</div>

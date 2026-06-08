@@ -1,0 +1,48 @@
+<!-- @dsCard group="Brand" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 20px 22px; }
+  .grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 11px 4px; border-radius: var(--r-sm); }
+  .cell:hover { background: var(--bg-panel); }
+  .cell [data-lucide] { width: 20px; height: 20px; color: var(--fg-secondary); stroke-width: 2; }
+  .cell span { font-size: 9.5px; color: var(--fg-tertiary); font-family: var(--font-mono); }
+</style>
+</head>
+<body class="adm">
+  <div class="grid">
+    <div class="cell"><i data-lucide="smartphone"></i><span>device</span></div>
+    <div class="cell"><i data-lucide="usb"></i><span>usb</span></div>
+    <div class="cell"><i data-lucide="wifi"></i><span>wifi</span></div>
+    <div class="cell"><i data-lucide="cast"></i><span>cast</span></div>
+    <div class="cell"><i data-lucide="monitor-smartphone"></i><span>mirror</span></div>
+    <div class="cell"><i data-lucide="activity"></i><span>perf</span></div>
+    <div class="cell"><i data-lucide="cpu"></i><span>cpu</span></div>
+    <div class="cell"><i data-lucide="memory-stick"></i><span>mem</span></div>
+    <div class="cell"><i data-lucide="scroll-text"></i><span>logcat</span></div>
+    <div class="cell"><i data-lucide="package"></i><span>apps</span></div>
+    <div class="cell"><i data-lucide="folder-tree"></i><span>files</span></div>
+    <div class="cell"><i data-lucide="upload"></i><span>push</span></div>
+    <div class="cell"><i data-lucide="download"></i><span>pull</span></div>
+    <div class="cell"><i data-lucide="power"></i><span>power</span></div>
+    <div class="cell"><i data-lucide="lock"></i><span>lock</span></div>
+    <div class="cell"><i data-lucide="moon"></i><span>sleep</span></div>
+    <div class="cell"><i data-lucide="rotate-cw"></i><span>reboot</span></div>
+    <div class="cell"><i data-lucide="camera"></i><span>shot</span></div>
+    <div class="cell"><i data-lucide="refresh-cw"></i><span>refresh</span></div>
+    <div class="cell"><i data-lucide="download-cloud"></i><span>update</span></div>
+    <div class="cell"><i data-lucide="trash-2"></i><span>delete</span></div>
+    <div class="cell"><i data-lucide="search"></i><span>search</span></div>
+    <div class="cell"><i data-lucide="terminal"></i><span>shell</span></div>
+    <div class="cell"><i data-lucide="network"></i><span>net</span></div>
+  </div>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

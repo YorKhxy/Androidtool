@@ -1,0 +1,35 @@
+<!-- @dsCard group="Colors" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; background: var(--bg-base); padding: 20px 24px; }
+  .ramp { display: flex; gap: 8px; margin-bottom: 14px; }
+  .lv { flex: 1; border-radius: var(--r-sm); padding: 10px 8px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-family: var(--font-mono); font-weight: 700; font-size: 15px;
+    border: 1px solid var(--border-subtle); }
+  .lv span { font-size: 10.5px; font-weight: 500; color: var(--fg-tertiary); }
+  .stream { font-family: var(--font-mono); font-size: 12px; line-height: 1.8; }
+  .stream .t { color: var(--fg-tertiary); }
+</style>
+</head>
+<body class="adm">
+  <div class="ramp">
+    <div class="lv" style="color:var(--log-verbose)">V<span>verbose</span></div>
+    <div class="lv" style="color:var(--log-debug)">D<span>debug</span></div>
+    <div class="lv" style="color:var(--log-info)">I<span>info</span></div>
+    <div class="lv" style="color:var(--log-warn)">W<span>warn</span></div>
+    <div class="lv" style="color:var(--log-error)">E<span>error</span></div>
+    <div class="lv" style="color:var(--log-fatal)">F<span>fatal</span></div>
+  </div>
+  <div class="stream">
+    <div><span class="t">14:22:01.337</span> <span style="color:var(--log-info)">I/ActivityManager</span> Displayed com.app/.MainActivity</div>
+    <div><span class="t">14:22:01.902</span> <span style="color:var(--log-warn)">W/Choreographer</span> Skipped 32 frames</div>
+    <div><span class="t">14:22:02.115</span> <span style="color:var(--log-error)">E/AndroidRuntime</span> FATAL EXCEPTION: main</div>
+  </div>
+</body>
+</html>
