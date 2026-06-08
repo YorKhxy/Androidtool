@@ -1,12 +1,12 @@
-v1.0.17  (2026-06-05)
+v1.0.19  (2026-06-08)
 
-- 性能报告按设备隔离 + 过滤条件执行后保留可调
-- 内存采样改用 /proc/meminfo，修复高负载下内存掉 0
-- 曲线图重设计 + 放大曲线/视频主区 + 指标卡压成紧凑条
-- 采集会话导出/导入（zip，导入支持拖拽，跨机查看）
-- 参数过滤改为逐条件独立标记（按指标曲线/颜色/显隐）
-- 过滤阈值留空时给出「不能为空」提示
-- 过滤阈值输入默认留空，可删空可直接输入
-- 关闭采集增加二次确认弹窗
-- 修复 CaptureReport hooks 顺序崩溃
-- 录屏首段失败时给出锁屏指引
+- fix(ui): 统一控件规格与对齐，修复 flex 输入框溢出重叠
+- docs: 纳入 Design System 参考（token/规范/UI Kit/预览）
+- feat(ui): 性能页重皮（master 新版套 Design System）
+- feat(ui): 性能/网络/投屏/文件 四面板重皮（对齐 Design System）
+- feat(ui): 日志页重皮（对齐 Design System，保留虚拟滚动）
+- feat(ui): 设备页「应用安装」面板重皮（对齐 Design System）
+- feat(ui): 左侧栏重皮——ADB状态/WiFi连接/设备卡片/设备信息/历史设备（对齐 Design System）
+- feat(ui): 设备页「已安装应用」列表重皮（对齐 Design System）
+- feat(ui): 外壳重皮——头部/侧栏/标签栏/面板换用 Design System 类与 token
+- feat(ui): 引入 Design System 地基（设计 token + 组件类 CSS + TSX 基元）
