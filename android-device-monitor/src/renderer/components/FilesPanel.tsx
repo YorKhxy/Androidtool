@@ -62,6 +62,9 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
   const [lastDownloadPath, setLastDownloadPath] = useState<string | null>(null);
   // 当前目录内的文件名搜索关键词（仅过滤当前已加载的列表，不重新请求设备）
   const [search, setSearch] = useState('');
+  // 列表排序：点表头列切换；默认按名称升序（与主进程默认一致）。
+  const [sortKey, setSortKey] = useState<'name' | 'size' | 'mtime'>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   // 多选下载：选中的文件路径集合
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
@@ -382,6 +385,24 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
   const visibleEntries = keyword
     ? entries.filter((entry) => entry.name.toLowerCase().includes(keyword))
     : entries;
+  // 目录恒在前（文件管理器惯例），组内按所选列排序。mtime 为 YYYY-MM-DD HH:MM，字典序即时间序。
+  const sortedEntries = [...visibleEntries].sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+    let cmp = 0;
+    if (sortKey === 'size') cmp = a.size - b.size;
+    else if (sortKey === 'mtime') cmp = a.mtime.localeCompare(b.mtime);
+    else cmp = a.name.localeCompare(b.name, 'zh');
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+  const toggleSort = (key: 'name' | 'size' | 'mtime') => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'mtime' ? 'desc' : 'asc'); // 时间默认最新在前
+    }
+  };
+  const sortArrow = (key: 'name' | 'size' | 'mtime') => (sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '');
 
   return (
     <div
@@ -686,10 +707,10 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
               });
             }}
           />
-          <span>名称</span>
-          <span style={{ textAlign: 'right' }}>大小</span>
-          <span style={{ textAlign: 'right' }}>修改时间</span>
-          <span style={{ textAlign: 'right' }}>操作</span>
+          <span onClick={() => toggleSort('name')} data-tip="点击按名称排序（再点切换升/降序）" style={{ cursor: 'pointer', userSelect: 'none', color: sortKey === 'name' ? 'var(--fg-secondary)' : undefined }}>{'名称'}{sortArrow('name')}</span>
+          <span onClick={() => toggleSort('size')} data-tip="点击按大小排序（再点切换升/降序）" style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none', color: sortKey === 'size' ? 'var(--fg-secondary)' : undefined }}>{'大小'}{sortArrow('size')}</span>
+          <span onClick={() => toggleSort('mtime')} data-tip="点击按修改时间排序（再点切换升/降序）" style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none', color: sortKey === 'mtime' ? 'var(--fg-secondary)' : undefined }}>{'修改时间'}{sortArrow('mtime')}</span>
+          <span style={{ textAlign: 'right' }}>{'操作'}</span>
         </div>
 
         {loading ? (
@@ -699,7 +720,7 @@ export const FilesPanel: React.FC<FilesPanelProps> = ({ selectedDevice, onError 
         ) : visibleEntries.length === 0 ? (
           <div style={{ padding: '24px', textAlign: 'center', color: 'var(--fg-tertiary)', fontSize: '13px' }}>没有匹配「{search.trim()}」的文件</div>
         ) : (
-          visibleEntries.map((entry) => {
+          sortedEntries.map((entry) => {
             // 当前正在上传的就是这一项（同目录 + 同文件名）时，禁止下载，避免下到半成品
             const uploadingThisEntry = !!(upload && currentPath === uploadDir && upload.fileName === entry.name);
             // 当前正在下载的就是这一项时，标记「下载中…」
