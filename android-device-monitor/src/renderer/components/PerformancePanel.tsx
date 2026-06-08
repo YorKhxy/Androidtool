@@ -86,9 +86,10 @@ const buildMetricChips = (performance: PerformanceMetrics | null, isPicoView: bo
 };
 
 const renderMetricStrip = (performance: PerformanceMetrics | null, isPicoView: boolean, showPicoFallback: boolean) => (
-  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+  // 固定列 grid（列数只随容器宽变化，与数值位数无关）：避免数值变大撑宽 chip 触发 flex 换行重排、整条高度跳动。
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
     {buildMetricChips(performance, isPicoView, showPicoFallback).map((chip) => (
-      <div key={chip.label} style={{ display: 'flex', alignItems: 'center', gap: '7px', backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-sm)', padding: '7px 11px', opacity: chip.muted ? 0.5 : 1 }}>
+      <div key={chip.label} style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--r-sm)', padding: '7px 11px', opacity: chip.muted ? 0.5 : 1 }}>
         <span style={{ width: '8px', height: '8px', borderRadius: '2px', backgroundColor: chip.color, flexShrink: 0 }} />
         <span style={{ color: 'var(--fg-secondary)', fontSize: '12px' }}>{chip.label}</span>
         <span style={{ color: 'var(--fg-primary)', fontSize: '15px', fontWeight: 600, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>{chip.value}</span>

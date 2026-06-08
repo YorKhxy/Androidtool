@@ -48,6 +48,14 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
   // markers prop 可能每次渲染换新引用；只在切会话时播种，故经 ref 读取避免反复复位过滤态。
   const markersPropRef = useRef(markers);
   markersPropRef.current = markers;
+  // 键盘左右键控制时间轴：用 ref 持有最新 seek 上下文（seekTo/playheadMs/totalMs/live），
+  // 让早返回之前注册的 keydown effect 也能读到最新值、且不因闭包过期失效。
+  const keyboardSeekRef = useRef<{ seekTo: (ms: number) => void; playheadMs: number; totalMs: number; live: boolean }>({
+    seekTo: () => {},
+    playheadMs: 0,
+    totalMs: 0,
+    live: true,
+  });
 
   const sessionId = session?.id ?? null;
   // 切换会话 / 重新采集时复位播放态，并从该会话已存的标记还原过滤态——
@@ -72,6 +80,23 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
     }
     onActiveSampleChange?.(findNearestSample(samples, new Date(session.startedAt), playheadMs));
   }, [live, session, samples, playheadMs, onActiveSampleChange]);
+
+  // PC 键盘 ← / → 控制时间轴：左后退、右前进，按住 Shift 大步(5s)否则 1s。
+  // 焦点在输入框/文本域/下拉/可编辑元素时不抢方向键；采集中(live)或无时长时不响应。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const ctx = keyboardSeekRef.current;
+      if (ctx.live || ctx.totalMs <= 0) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      e.preventDefault();
+      const step = e.shiftKey ? 5000 : 1000;
+      ctx.seekTo(ctx.playheadMs + (e.key === 'ArrowLeft' ? -step : step));
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   if (!session) {
     return <div style={{ color: 'var(--fg-tertiary)', fontSize: '13px' }}>开启采集后，这里会显示本次采集的指标曲线与录屏。</div>;
@@ -113,6 +138,9 @@ export function CaptureReport({ session, samples, live, elapsedMs, markers, onSa
       setActiveSegmentIndex(idx);
     }
   };
+
+  // 每次渲染同步键盘 seek 上下文（此处之上 seekTo / playheadMs / totalMs / live 均已定义）。
+  keyboardSeekRef.current = { seekTo, playheadMs, totalMs, live };
 
   const handleLoadedMetadata = (video: HTMLVideoElement) => {
     if (video.videoWidth > 0 && video.videoHeight > 0) {
