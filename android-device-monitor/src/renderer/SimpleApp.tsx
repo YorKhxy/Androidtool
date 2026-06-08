@@ -1639,7 +1639,12 @@ function SimpleApp() {
     setApkInstallStates((prev) => {
       const next = { ...prev };
       targetIds.forEach((id) => {
-        const existing = next[id]?.queue.filter((it) => it.status !== 'success') || [];
+        // 本次要安装的 apk（按本地路径标识）：移除它们在旧队列里的历史结果（成功/失败都清），
+        // 避免同一 apk 重复推送时旧的失败/成功记录在「安装详情」里堆积；其它 apk 的记录保留。
+        const reinstallingPaths = new Set(perDeviceItems[id].map((it) => it.path));
+        const existing = (next[id]?.queue || []).filter(
+          (it) => it.status !== 'success' && !reinstallingPaths.has(it.path)
+        );
         next[id] = { queue: [...existing, ...perDeviceItems[id]], isInstalling: true };
       });
       return next;
