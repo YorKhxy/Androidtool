@@ -37,6 +37,13 @@ try {
     }
     Write-Host "Bundled scrcpy is ready" -ForegroundColor Green
 
+    Write-Host "[1/5] Preparing bundled weak-network helper apk..." -ForegroundColor Yellow
+    npm run helper:prepare
+    if ($LASTEXITCODE -ne 0) {
+        throw "Bundled weak-network helper preparation failed"
+    }
+    Write-Host "Bundled weak-network helper is ready" -ForegroundColor Green
+
     Write-Host "[2/5] Compiling main process..." -ForegroundColor Yellow
     npm run build:main
     if ($LASTEXITCODE -ne 0) {
@@ -74,6 +81,7 @@ try {
     Copy-Item -Path "$ProjectRoot\dist\renderer" -Destination "$appResources\app\renderer" -Recurse -Force
     Copy-Item -Path "$ProjectRoot\vendor\platform-tools" -Destination "$appResources\platform-tools" -Recurse -Force
     Copy-Item -Path "$ProjectRoot\vendor\scrcpy" -Destination "$appResources\scrcpy" -Recurse -Force
+    Copy-Item -Path "$ProjectRoot\vendor\pico-helper" -Destination "$appResources\pico-helper" -Recurse -Force
 
     $pkgJsonPath = "$appResources\app\package.json"
     Copy-Item -Path "$ProjectRoot\package.json" -Destination $pkgJsonPath -Force

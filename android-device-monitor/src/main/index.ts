@@ -4,7 +4,7 @@ import * as nodeFs from 'fs';
 import * as fs from 'fs/promises';
 import { ADBManager } from './adb/ADBManager';
 import { ScrcpyManager } from './scrcpy/scrcpyManager';
-import { LogEntry, MirrorStartOptions, PerformanceSessionExportPayload } from '../shared/types';
+import { LogEntry, MirrorStartOptions, PerformanceMetrics, PerformanceSessionExportPayload, WeakNetworkProfile } from '../shared/types';
 import { AdbCommandError } from './adb/adbError';
 import { resolveRuntimeAppRoot } from './runtimeAppRoot';
 import { buildPerformanceSessionWorkbook } from './performanceSessionExport';
@@ -475,6 +475,85 @@ const setupIpcHandlers = () => {
       return { success: true, data: packages };
     } catch (error) {
       return toIpcErrorResponse(error, '获取已安装应用失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.INSTALL_WEAKNET_HELPER, async (_event, deviceId: string) => {
+    try {
+      const output = await adbManager.installWeakNetworkHelper(deviceId);
+      return { success: true, data: { output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '安装弱网助手失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.START_WEAKNET, async (_event, deviceId: string, profile: WeakNetworkProfile) => {
+    try {
+      const output = await adbManager.startWeakNetwork(deviceId, profile);
+      return { success: true, data: { output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '启动弱网失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.STOP_WEAKNET, async (_event, deviceId: string) => {
+    try {
+      const output = await adbManager.stopWeakNetwork(deviceId);
+      return { success: true, data: { output } };
+    } catch (error) {
+      return toIpcErrorResponse(error, '停止弱网失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.QUERY_WEAKNET_STATUS, async (_event, deviceId: string) => {
+    try {
+      const status = await adbManager.queryWeakNetworkStatus(deviceId);
+      return { success: true, data: status };
+    } catch (error) {
+      return toIpcErrorResponse(error, '查询弱网状态失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.QUERY_WEAKNET_TRAFFIC, async (_event, deviceId: string) => {
+    try {
+      const traffic = await adbManager.queryWeakNetworkTraffic(deviceId);
+      return { success: true, data: traffic };
+    } catch (error) {
+      return toIpcErrorResponse(error, '查询弱网流量失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.QUERY_WEAKNET_SHAPER_STATS, async (_event, deviceId: string) => {
+    try {
+      const stats = await adbManager.queryWeakNetworkShaperStats(deviceId);
+      return { success: true, data: stats };
+    } catch (error) {
+      return toIpcErrorResponse(error, '查询弱网整形统计失败');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EXPORT_WEAKNET_TRAFFIC, async (_event, rows: { at: number; rx: number; tx: number }[]) => {
+    try {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: '导出弱网流量曲线',
+        defaultPath: `weaknet-traffic-${Date.now()}.csv`,
+        filters: [{ name: 'CSV', extensions: ['csv'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: '取消导出' };
+      }
+      const pad = (n: number, len = 2) => String(n).padStart(len, '0');
+      const header = '时间,上行速率(B/s),下行速率(B/s)';
+      const lines = rows.map((r) => {
+        const d = new Date(r.at);
+        const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        return `${ts},${Math.round(r.tx)},${Math.round(r.rx)}`;
+      });
+      // BOM 让 Excel 正确识别 UTF-8 中文表头
+      await fs.writeFile(result.filePath, '﻿' + [header, ...lines].join('\r\n'), 'utf-8');
+      return { success: true, data: result.filePath };
+    } catch (error) {
+      return toIpcErrorResponse(error, '导出弱网流量失败');
     }
   });
 

@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Pico Network Helper</string>
+    <string name="notification_channel_name">Weak Network Control</string>
+    <string name="notification_title">Pico weak network helper</string>
+    <string name="notification_text_idle">Waiting for weak-network configuration</string>
+    <string name="notification_text_running">Weak-network control is running</string>
+</resources>

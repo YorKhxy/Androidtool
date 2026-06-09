@@ -1,9 +1,10 @@
 ﻿import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
-import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceCaptureSession, PerformanceCaptureSessionDetail, PerformanceCaptureMarker, PerformanceSample, LogEntry, NetworkRequest, UpdateStatus } from '../shared/types';
+import { AdbStatus, DeviceInfo, HistoryDevice, MirrorSession, PerformanceMetrics, PerformanceCaptureSession, PerformanceCaptureSessionDetail, PerformanceCaptureMarker, PerformanceSample, LogEntry, NetworkRequest, WeakNetworkHelperStatus, WeakNetworkProfile, WeakNetworkShaperStats, UpdateStatus } from '../shared/types';
 import { NetworkPanel } from './components/NetworkPanel';
 import { PerformancePanel } from './components/PerformancePanel';
 import { MirrorPanel } from './components/MirrorPanel';
 import { FilesPanel } from './components/FilesPanel';
+import { WeakNetPanel } from './components/WeakNetPanel';
 import { Icon, AppAvatar, Badge } from './components/ui';
 import { GlobalTooltip } from './components/GlobalTooltip';
 import { ElectronResult, hasElectronAPI } from './lib/electronApi';
@@ -61,7 +62,7 @@ const isLikelyPicoDevice = (device: DeviceInfo | null): boolean => {
   return identity.includes('pico') || identity.includes('a9210') || identity.includes('sparrow');
 };
 
-type TabType = 'devices' | 'logs' | 'performance' | 'network' | 'mirror';
+type TabType = 'devices' | 'logs' | 'performance' | 'network' | 'mirror' | 'weaknet';
 type LogLevelFilter = LogEntry['level'] | 'all';
 type ApkInstallStatus = 'queued' | 'installing' | 'success' | 'failed';
 
@@ -197,6 +198,20 @@ function SimpleApp() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mirrorSessionsByDeviceId, setMirrorSessionsByDeviceId] = useState<Record<string, MirrorSession>>({});
   const [mirrorStartingDeviceIds, setMirrorStartingDeviceIds] = useState<Set<string>>(new Set());
+  const [weakNetStatus, setWeakNetStatus] = useState<WeakNetworkHelperStatus>('not-installed');
+  const [weakNetPackages, setWeakNetPackages] = useState<string[]>([]);
+  const [weakNetLoadingPackages, setWeakNetLoadingPackages] = useState(false);
+  const [weakNetBusy, setWeakNetBusy] = useState(false);
+  const [weakNetError, setWeakNetError] = useState<string | null>(null);
+  // 实时流量（上下行速率 + 累计字节，由 tun 计数差值算出）；弱网未运行时为 null。
+  const [weakNetTraffic, setWeakNetTraffic] = useState<{ rxBytes: number; txBytes: number; rxRate: number; txRate: number } | null>(null);
+  // 流量速率历史（最近若干采样，含时间戳），供面板画曲线图 + CSV 导出。
+  const [weakNetTrafficHistory, setWeakNetTrafficHistory] = useState<{ rx: number; tx: number; at: number }[]>([]);
+  const weakNetTrafficPrevRef = useRef<{ rxBytes: number; txBytes: number; at: number } | null>(null);
+  // 助手整形层实测统计（真实丢包率/RTT）。
+  const [weakNetShaperStats, setWeakNetShaperStats] = useState<WeakNetworkShaperStats | null>(null);
+  // 启动后 tun 未建起来，推断为「未在头显授予 VPN 权限」的 sticky 标志；运行成功即清除。
+  const [weakNetNeedsAuth, setWeakNetNeedsAuth] = useState(false);
   const [logVersion, setLogVersion] = useState(0);
   const [logViewport, setLogViewport] = useState({ scrollTop: 0, height: 320 });
   const [performanceByDeviceId, setPerformanceByDeviceId] = useState<Record<string, PerformanceMetrics>>({});
@@ -799,6 +814,33 @@ function SimpleApp() {
       }
     })();
   }, []);
+
+  // 进入「弱网」标签或切换设备时拉取一次，并定时轮询助手状态 + 隧道流量（每 2.5s）。
+  useEffect(() => {
+    if (!(selectedDevice && activeTab === 'weaknet')) {
+      return;
+    }
+    setWeakNetError(null);
+    setWeakNetNeedsAuth(false);
+    weakNetTrafficPrevRef.current = null;
+    setWeakNetTraffic(null);
+    setWeakNetTrafficHistory([]);
+    setWeakNetShaperStats(null);
+    void loadWeakNetStatus();
+    void loadWeakNetPackages();
+    void loadWeakNetTraffic();
+    void loadWeakNetShaperStats();
+    const timer = setInterval(() => {
+      void loadWeakNetStatus();
+      void loadWeakNetTraffic();
+      void loadWeakNetShaperStats();
+    }, 2500);
+    return () => clearInterval(timer);
+    // 依赖用 selectedDevice?.id 而非 selectedDevice 对象：设备监控每次轮询都会生成新的
+    // DeviceInfo 对象（同一台设备、新引用），若依赖对象本身，effect 会被反复重建并清空
+    // weakNetTrafficHistory，导致流量折线图频繁消失重建（闪烁）。只在真正切换设备时重置。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDevice?.id, activeTab]);
 
   // 已安装应用列表只在设备连接（id 变化）时获取一次，避免设备轮询导致的频繁刷新；
   // 卸载 / 安装完成后单独触发刷新，其余情况由用户手动点刷新。
@@ -1805,6 +1847,128 @@ function SimpleApp() {
       setSelectedNetworkRequestId(null);
       setError('\u7f51\u7edc\u6293\u53d6\u5931\u8d25\uff1a' + (err as Error).message);
     }
+  };
+
+  const loadWeakNetStatus = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    try {
+      const result = await window.electronAPI!.queryWeakNetStatus(selectedDevice.id);
+      if (result.success && result.data) {
+        setWeakNetStatus(result.data);
+        if (result.data === 'running') {
+          setWeakNetNeedsAuth(false); // 已起来，说明授权没问题，清掉「待授权」推断
+        }
+      }
+      // 失败：保留上次状态，避免轮询瞬时失败把 isRunning 翻成 false 导致图表闪烁
+    } catch {
+      /* 保留上次状态 */
+    }
+  };
+
+  const loadWeakNetTraffic = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    try {
+      const result = await window.electronAPI!.queryWeakNetTraffic(selectedDevice.id);
+      if (result.success && result.data) {
+        const now = Date.now();
+        const prev = weakNetTrafficPrevRef.current;
+        let rxRate = 0;
+        let txRate = 0;
+        if (prev && now > prev.at) {
+          const dt = (now - prev.at) / 1000;
+          rxRate = Math.max(0, (result.data.rxBytes - prev.rxBytes) / dt);
+          txRate = Math.max(0, (result.data.txBytes - prev.txBytes) / dt);
+        }
+        const hadPrev = prev !== null;
+        weakNetTrafficPrevRef.current = { rxBytes: result.data.rxBytes, txBytes: result.data.txBytes, at: now };
+        setWeakNetTraffic({ rxBytes: result.data.rxBytes, txBytes: result.data.txBytes, rxRate, txRate });
+        // 首个采样无速率（无 prev），跳过不入图，避免一条假 0；之后每次入历史，最多保留 40 点。
+        if (hadPrev) {
+          setWeakNetTrafficHistory((history) => [...history, { rx: rxRate, tx: txRate, at: now }].slice(-40));
+        }
+      }
+      // 查询失败/无数据：保留上次流量与历史，避免单次瞬时失败把折线图清空重建（闪烁）。
+      // 真正停止/切设备/切 tab 的重置统一由 effect 处理。
+    } catch {
+      /* 瞬时失败保留上次流量，避免闪烁；真正停止由状态切换/effect 清零 */
+    }
+  };
+
+  const loadWeakNetShaperStats = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    try {
+      const result = await window.electronAPI!.queryWeakNetShaperStats(selectedDevice.id);
+      if (result.success && result.data) {
+        setWeakNetShaperStats(result.data);
+      }
+      // null/失败：保留上次值，避免轮询闪烁；重置由 effect 处理
+    } catch {
+      /* 保留上次值 */
+    }
+  };
+
+  const loadWeakNetPackages = async () => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    setWeakNetLoadingPackages(true);
+    try {
+      const result = await window.electronAPI!.listInstalledPackages(selectedDevice.id);
+      setWeakNetPackages(result.success && result.data ? result.data : []);
+    } catch {
+      setWeakNetPackages([]);
+    } finally {
+      setWeakNetLoadingPackages(false);
+    }
+  };
+
+  const runWeakNetAction = async (action: () => Promise<ElectronResult<unknown>>, failureMessage: string) => {
+    if (!selectedDevice || !hasElectronAPI()) return;
+    setWeakNetBusy(true);
+    setWeakNetError(null);
+    try {
+      const result = await action();
+      if (!result.success) {
+        setWeakNetError(result.error || failureMessage);
+      }
+    } catch (err) {
+      setWeakNetError(`${failureMessage}：${(err as Error).message}`);
+    } finally {
+      setWeakNetBusy(false);
+      await loadWeakNetStatus();
+    }
+  };
+
+  const handleInstallWeakNetHelper = () =>
+    runWeakNetAction(() => window.electronAPI!.installWeakNetHelper(selectedDevice!.id), '安装弱网助手失败')
+      .then(() => loadWeakNetPackages());
+
+  // 启动 / 热更新参数（运行中再次下发 START，助手会先停旧引擎再起，等价热更新）。
+  const handleStartWeakNet = async (profile: WeakNetworkProfile) => {
+    await runWeakNetAction(() => window.electronAPI!.startWeakNet(selectedDevice!.id, profile), '启动弱网失败');
+    if (!selectedDevice || !hasElectronAPI()) return;
+    // 启动后稍等再查：tun 未建起来多半是没在头显授予 VPN 权限，置 sticky 标志提示授权。
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      const result = await window.electronAPI!.queryWeakNetStatus(selectedDevice.id);
+      if (result.success && result.data) {
+        setWeakNetStatus(result.data);
+        setWeakNetNeedsAuth(result.data !== 'running');
+      }
+    } catch {
+      /* 忽略：保留上一次状态 */
+    }
+  };
+
+  const handleStopWeakNet = async () => {
+    setWeakNetNeedsAuth(false); // 停止后不应再提示「待授权」
+    await runWeakNetAction(() => window.electronAPI!.stopWeakNet(selectedDevice!.id), '停止弱网失败');
+  };
+
+  const handleAuthorizeWeakNet = () =>
+    runWeakNetAction(() => window.electronAPI!.launchApp(selectedDevice!.id, 'com.androidtool.piconetworkhelper'), '拉起助手授权页失败');
+
+  const handleExportWeakNetTraffic = () => {
+    if (!hasElectronAPI() || weakNetTrafficHistory.length === 0) return;
+    void window.electronAPI!.exportWeakNetTraffic(weakNetTrafficHistory);
   };
 
   const handleStartMirror = async (params: { maxSize?: number; bitRate?: string; forwardAudio?: boolean }) => {
@@ -3294,6 +3458,7 @@ function SimpleApp() {
                   { key: 'performance' as TabType, label: '\u6027\u80fd', icon: 'activity' },
                   { key: 'network' as TabType, label: '\u7f51\u7edc', icon: 'network' },
                   { key: 'mirror' as TabType, label: '\u6295\u5c4f', icon: 'cast' },
+                  { key: 'weaknet' as TabType, label: '\u5f31\u7f51', icon: 'wifi-off' },
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -3471,6 +3636,27 @@ function SimpleApp() {
                     onStart={handleStartMirror}
                     onStop={handleStopMirror}
                     onToggleAudio={handleToggleMirrorAudio}
+                  />
+                )}
+
+                {activeTab === 'weaknet' && (
+                  <WeakNetPanel
+                    deviceConnected={Boolean(selectedDevice)}
+                    status={weakNetNeedsAuth && weakNetStatus === 'idle' ? 'need-vpn-permission' : weakNetStatus}
+                    traffic={weakNetTraffic}
+                    trafficHistory={weakNetTrafficHistory}
+                    shaperStats={weakNetShaperStats}
+                    onExportTraffic={handleExportWeakNetTraffic}
+                    installedPackages={weakNetPackages}
+                    loadingPackages={weakNetLoadingPackages}
+                    busy={weakNetBusy}
+                    errorMessage={weakNetError}
+                    onRefreshPackages={loadWeakNetPackages}
+                    onRefreshStatus={loadWeakNetStatus}
+                    onInstallHelper={handleInstallWeakNetHelper}
+                    onStart={handleStartWeakNet}
+                    onStop={handleStopWeakNet}
+                    onAuthorize={handleAuthorizeWeakNet}
                   />
                 )}
                 </>

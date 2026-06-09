@@ -9,12 +9,13 @@
     "dev:renderer": "webpack serve --mode development",
     "adb:prepare": "node ./scripts/prepare-platform-tools.js",
     "scrcpy:prepare": "node ./scripts/prepare-scrcpy.js",
+    "helper:prepare": "node ./scripts/prepare-helper-apk.js",
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json && node ./scripts/copy-preload.js",
     "build:renderer": "webpack --mode production",
     "start": "electron .",
-    "pack": "npm run adb:prepare && npm run scrcpy:prepare && electron-builder --dir",
-    "dist": "npm run adb:prepare && npm run scrcpy:prepare && electron-builder",
+    "pack": "npm run adb:prepare && npm run scrcpy:prepare && npm run helper:prepare && electron-builder --dir",
+    "dist": "npm run adb:prepare && npm run scrcpy:prepare && npm run helper:prepare && electron-builder",
     "serve:updates": "node ./scripts/serve-updates.js",
     "update:pack": "powershell -ExecutionPolicy Bypass -File ./scripts/make-update-package.ps1",
     "release": "powershell -ExecutionPolicy Bypass -File ./scripts/build-and-package.ps1",
@@ -88,6 +89,13 @@
       {
         "from": "vendor/scrcpy",
         "to": "scrcpy",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "vendor/pico-helper",
+        "to": "pico-helper",
         "filter": [
           "**/*"
         ]

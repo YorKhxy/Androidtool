@@ -151,6 +151,24 @@
 
 ---
 
+### 2.7 弱网控制模块
+
+桌面工具作为 **Pico 弱网助手（pico-network-helper APK）** 的控制台，对目标 App 单独施加弱网（丢包/延迟/抖动/上下行限速），用于验证目标 App 在弱网下的表现。助手端用 Android `VpnService` 按包名分流，TUN 传输由 native tun2socks 内核（hev-socks5-tunnel）承载，整形在本地 SOCKS5 层完成；桌面端只负责**安装助手、下发参数、起停、查状态**，不参与网络转发。详见 `docs/adr/0002`（架构）与 `docs/adr/0003`（tun2socks 内核）。
+
+约束（来自 ADR 0002）：只影响目标 App，不影响 Pico 整机网络，不影响桌面工具与设备的 ADB/WiFi 链路；目标 ABI 仅 arm64-v8a（Pico = 高通 XR2）。
+
+| 功能点 | 描述 | 优先级 |
+|--------|------|--------|
+| 安装助手 | 工具内置**预编译助手 APK**（随包 extraResources），复用现有应用安装能力一键 `adb install` 到目标设备；已安装则跳过，支持重装更新 | P0 |
+| 选择目标应用 | 复用已安装应用列表（`LIST_INSTALLED_PACKAGES`）选目标包名，弱网只作用于该 App | P0 |
+| 弱网参数设置 | 设置延迟(ms)/抖动(ms)/丢包(%)/上行限速(kbps)/下行限速(kbps)。提供**预设档位**（如 弱 WiFi / 3G / 高丢包 / 高延迟）一键填入，并允许**手动微调**每个参数 | P0 |
+| 启动/停止弱网 | 下发 `START`/`STOP` 到助手 `WeakNetworkControlService`（`am start-foreground-service`），启动后目标 App 进入弱网，停止即恢复 | P0 |
+| VPN 授权引导 | 首次启动需在头显内授予 VPN 权限；工具检测到未授权/未就绪时，引导用户先在设备上确认（可一键拉起助手 MainActivity 触发授权弹窗） | P0 |
+| 助手运行状态 | 通过 `dumpsys`/VPN 隧道地址（`10.88.0.2`）实查助手是否在跑，显示「未安装 / 已就绪 / 待授权 / 运行中 / 已停止 / 异常」 | P0 |
+| 参数热更新 | 修改参数后重新下发（先 STOP 再 START），无需卸载重装 | P1 |
+
+控制接口（助手端已实现）：exported 的 `WeakNetworkControlService`，action `com.androidtool.piconetworkhelper.START / STOP / STATUS`，extras：`packageName / latencyMs / jitterMs / packetLossPercent / uploadKbps / downloadKbps`。
+
 ## 3. 技术方案
 
 ### 3.1 技术栈
@@ -296,6 +314,19 @@
     -> 4. 鼠标点击/拖拽操控触屏，键盘输入文字
     -> 5. 用快捷键触发返回 / Home / 电源 / 音量等物理键（工具内提供快捷键速查）
     -> 6. 关闭镜像窗口即停止投屏，主进程回收 scrcpy 子进程
+```
+
+### 4.5 弱网控制流程
+
+```text
+1. 进入「弱网」标签 -> 工具对当前设备检测助手状态
+    -> 2. 未安装助手 -> 一键安装内置助手 APK（复用安装能力）
+    -> 3. 选择目标应用包名（来自已安装应用列表）
+    -> 4. 首次使用 -> 引导在头显内授予 VPN 权限（工具检测到「待授权」时提示并可拉起助手授权页）
+    -> 5. 选择预设档位（弱 WiFi / 3G / 高丢包 / 高延迟）或手动微调 5 个参数
+    -> 6. 点击「启动弱网」-> 下发 START -> 状态变为「运行中」，目标 App 进入弱网
+    -> 7. 调整参数 -> 重新下发（先 STOP 再 START）即时生效
+    -> 8. 点击「停止」-> 下发 STOP -> 目标 App 网络恢复
 ```
 
 ## 5. 数据模型
@@ -460,6 +491,38 @@ interface NetworkRequest {
 
 ---
 
+### 5.8 弱网控制配置与状态
+
+```typescript
+// 弱网参数（与助手 WeakNetworkControlService 的 extras 一一对应）
+interface WeakNetworkProfile {
+  packageName: string;        // 目标应用包名
+  latencyMs: number;          // 附加延迟（毫秒）
+  jitterMs: number;           // 抖动（毫秒）
+  packetLossPercent: number;  // 丢包率（0-100）
+  uploadKbps: number;         // 上行限速（kbps，0=不限）
+  downloadKbps: number;       // 下行限速（kbps，0=不限）
+}
+
+// 预设档位（一键填入，可再手动微调）
+interface WeakNetworkPreset {
+  id: string;                 // 'weak-wifi' | '3g' | 'high-loss' | 'high-latency' ...
+  label: string;              // 展示名
+  values: Omit<WeakNetworkProfile, 'packageName'>;
+}
+
+// 助手在目标设备上的状态（桌面端通过 dumpsys 实查推断）
+type WeakNetworkHelperStatus =
+  | 'not-installed'        // 设备未安装助手 APK
+  | 'idle'                 // 已安装、未运行
+  | 'need-vpn-permission'  // 已安装但未授予 VPN 权限
+  | 'running'              // 弱网生效中
+  | 'stopped'              // 已停止
+  | 'error';               // 异常（启动失败等）
+```
+
+预设档位为参考值，最终以实测为准；不引入 AI（用户明确选择「预设档位 + 手动微调」，符合简单优先原则，本模块无 AI 能力需求）。
+
 ## 6. 非功能需求
 
 ### 6.1 性能要求
@@ -509,6 +572,13 @@ interface NetworkRequest {
 - 性能优化
 - 错误处理
 - 单元测试
+
+### Phase: Pico 弱网控制桌面集成
+- 助手 APK 随包分发（extraResources）+ 复用安装能力一键安装
+- 新增「弱网」标签页：目标应用选择、预设档位 + 手动参数、启动/停止
+- 新增弱网控制 IPC（start/stop/status）+ 主进程 handler（`am` 下发 + `dumpsys` 查状态）
+- VPN 授权引导与状态展示
+- 具体 Phase / Task 拆分见 DEV-PLAN.md（由 dev-planner 细化）
 
 ---
 

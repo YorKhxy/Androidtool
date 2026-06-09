@@ -1,0 +1,14 @@
+# Android / Gradle 构建产物与机器相关文件，不入库
+.gradle/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.iml
+.idea/
+
+# 机器相关：本机 SDK/NDK 路径，换机器各自生成（见仓库 CLAUDE.md 路径规范）
+local.properties
+
+# 注意：app/src/main/jniLibs/**/*.so 是预编译入库的 tun2socks 内核，不在此忽略
